@@ -17,12 +17,14 @@ import { observe, tickMarketInfo, tripArrive, tripSail } from './market-info.ts'
 import { closeSteamDay, logSteam } from './steam.ts';
 import { initialMarket, initialTown, tickTown } from './towns.ts';
 import { movingHours, wearFactor, wearRate } from './voyage.ts';
+import { voyageProgress } from './navigation.ts';
 import { tickWaterworks } from './wasserbau.ts';
 import { PROJECT_BY_ID, registerProjects } from '../data/projects.ts';
 
 export * from './state.ts';
 export * from './trade.ts';
 export * from './voyage.ts';
+export * from './navigation.ts';
 export { addShip, buyShip, dismantleRaft, RAFT_TIMBER, shipAllowed, timberPlan } from './fleet.ts';
 export { effectiveSegments } from './works.ts';
 
@@ -264,7 +266,9 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     const v = ship.voyage;
     if (v) {
       const before = v.elapsed;
-      v.elapsed = Math.min(v.hours, v.elapsed + hours);
+      // Fortschritt in Stunden voller Fahrt: nachts ohne Leuchtfeuer langsamer, nach Grundberührung Stillstand
+      const moved = voyageProgress(state, map, ship, hours, events);
+      v.elapsed = Math.min(v.hours, v.elapsed + moved.progress);
       // Verbrauch und Verschleiß nur in Fahrstunden, nicht während des Ladens und Löschens
       const dt = movingHours(v, before, v.elapsed);
       const cls = shipClass(ship);
@@ -273,7 +277,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
       const fuel = (cls.fuel ?? 0) * dt;
       state.money -= fuel;
       state.fuelToday += fuel;
-      tripSail(ship, dt, fuel, v.elapsed - before);
+      tripSail(ship, dt, fuel, moved.real);
       if (ship.route?.active) bookRoute(state, ship.route, -fuel);
       if (cls.coal) {
         const burnt = Math.min(ship.bunker ?? 0, cls.coal * dt);
@@ -285,10 +289,10 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
       if (!cls.fresh) {
         for (const [g, slot] of Object.entries(ship.cargo)) {
           const rate = PERISH[g];
-          if (rate) slot.fresh = Math.max(MIN_FRESH, (slot.fresh ?? 1) - (rate * dt) / 24);
+          if (rate) slot.fresh = Math.max(MIN_FRESH, (slot.fresh ?? 1) - (rate * hours) / 24);
         }
       }
-      if (v.elapsed >= v.hours) {
+      if (v.elapsed >= v.hours - 1e-6) {
         ship.port = v.to;
         ship.voyage = null;
         tripArrive(state, ship);

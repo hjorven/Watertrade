@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CHAPTERS } from '../data/campaign.ts';
 import { VALLEY } from '../data/maps/valley.ts';
-import { advance, buy, buyShip, depart, dismantleRaft, newGame, sell } from './game.ts';
+import { advance, buy, buyShip, depart, dismantleRaft, hoursToArrival, newGame, sell } from './game.ts';
 import { goalDone, goalProgress } from './goals.ts';
 import { deserialize, SAVE_VERSION, serialize } from './save.ts';
 
@@ -28,18 +28,18 @@ describe('Kapitel 1', () => {
     const s = start();
     const raft = buyShip(s, VALLEY, 'oberau', 'floss').ship!;
     expect(goalDone(s, goal('ships', 1))).toBe(true);
-    const v = depart(s, VALLEY, raft.id, 'kesselbrueck')!;
-    advance(s, VALLEY, v.hours);
+    expect(depart(s, VALLEY, raft.id, 'kesselbrueck')).not.toBeNull();
+    advance(s, VALLEY, hoursToArrival(s, raft));
     dismantleRaft(s, raft.id);
     expect(goalDone(s, goal('rafts', 1))).toBe(true);
 
     const kahn = s.ships[0];
-    const v2 = depart(s, VALLEY, kahn.id, 'muehlheim')!;
-    advance(s, VALLEY, v2.hours);
+    expect(depart(s, VALLEY, kahn.id, 'muehlheim')).not.toBeNull();
+    advance(s, VALLEY, hoursToArrival(s, kahn));
     // das Floß hat Lohn und Holz gekostet, für 30 t reicht das Geld nicht mehr ganz
     buy(s, kahn.id, 'getreide', 20);
-    const v3 = depart(s, VALLEY, kahn.id, 'oberau')!;
-    advance(s, VALLEY, v3.hours);
+    expect(depart(s, VALLEY, kahn.id, 'oberau')).not.toBeNull();
+    advance(s, VALLEY, hoursToArrival(s, kahn));
     sell(s, kahn.id, 'getreide', 20);
     expect(goalProgress(s, goal('deliver')).value).toBe(20);
   });

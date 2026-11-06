@@ -120,7 +120,7 @@ export const PROJECTS: ProjectDef[] = [
     days: 10,
     epoch: 1,
     effect: { light: true },
-    text: 'Ein Feuerturm am Ufer zwischen Mühlheim und Altenfurt. Nachts finden Schiffer hier sicher ihren Weg.',
+    text: 'Ein Feuerturm am Ufer zwischen Mühlheim und Altenfurt. Nachts finden Schiffer hier sicher ihren Weg und fahren mit voller statt halber Fahrt.',
   },
   {
     id: 'leuchtfeuer-weiden',
@@ -131,7 +131,7 @@ export const PROJECTS: ProjectDef[] = [
     days: 12,
     epoch: 1,
     effect: { light: true },
-    text: 'Zwischen Altenfurt und Weidenhof zeigt ein Feuer die Fahrrinne im weiten Bogen. Nachtfahrt wird hier sicher.',
+    text: 'Zwischen Altenfurt und Weidenhof zeigt ein Feuer die Fahrrinne im weiten Bogen. Nachts volle statt halber Fahrt, und seltener auf Grund.',
   },
   {
     id: 'leuchtfeuer-muendung',
@@ -142,7 +142,7 @@ export const PROJECTS: ProjectDef[] = [
     days: 14,
     epoch: 1,
     effect: { light: true },
-    text: 'Ein hoher Leuchtturm vor Niedermünd führt die Schiffe nachts durch die Sandbänke.',
+    text: 'Ein hoher Leuchtturm vor Niedermünd führt die Schiffe nachts mit voller Fahrt durch die Sandbänke.',
   },
 ];
 

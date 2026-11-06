@@ -3,7 +3,7 @@ import { CHAPTERS } from '../data/campaign.ts';
 import { VALLEY } from '../data/maps/valley.ts';
 import { PERISH, SHIPS } from '../data/ships.ts';
 import { buyShip } from './fleet.ts';
-import { advance, buy, depart, departProblem, fillBunker, newGame, planVoyage, sell, type NewGameOptions } from './game.ts';
+import { advance, buy, depart, departProblem, fillBunker, hoursToArrival, newGame, planVoyage, sell, type NewGameOptions } from './game.ts';
 import { needsMastDown } from './river.ts';
 import { goalProgress } from './goals.ts';
 import { effectiveSegments, startProject } from './works.ts';
@@ -67,7 +67,8 @@ describe('Epochen', () => {
     const ship = s.ships[0];
     expect(ship.bunker).toBe(SHIPS.raddampfer.bunker);
     const v = depart(s, VALLEY, 1, 'muehlheim')!;
-    advance(s, VALLEY, v.hours);
+    advance(s, VALLEY, hoursToArrival(s, ship));
+    expect(ship.port).toBe('muehlheim');
     expect(ship.bunker).toBeCloseTo(SHIPS.raddampfer.bunker! - v.hours * SHIPS.raddampfer.coal!, 3);
     // in Mühlheim gibt es keine Kohle: mit leerem Bunker kommt der Dampfer nicht weg
     ship.bunker = 0;

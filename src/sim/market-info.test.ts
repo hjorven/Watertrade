@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { VALLEY } from '../data/maps/valley.ts';
-import { advance, buy, day, depart, newGame, sell, store, type GameState } from './game.ts';
+import { advance, buy, day, depart, hoursToArrival, newGame, sell, store, type GameState } from './game.ts';
 import {
   dayHash,
   isLive,
@@ -21,7 +21,8 @@ const start = () => newGame(VALLEY, 'oberau');
 function sailTo(state: GameState, shipId: number, to: string): void {
   const v = depart(state, VALLEY, shipId, to);
   expect(v, `Fahrt nach ${to} möglich`).not.toBeNull();
-  advance(state, VALLEY, v!.hours + 0.01);
+  // nachts fahren Schiffe langsamer: bis zur echten Ankunft fahren
+  advance(state, VALLEY, hoursToArrival(state, state.ships.find((x) => x.id === shipId)!) + 0.01);
 }
 
 describe('Preisbuch', () => {
