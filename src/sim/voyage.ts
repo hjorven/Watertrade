@@ -4,6 +4,7 @@ import { GOOD_BY_ID } from '../data/goods.ts';
 import { available, buyCost } from './economy.ts';
 import { explainBlock, findRoute, segmentDepth, travelTime, type BlockReason, type ShipType } from './river.ts';
 import { effectiveSegments } from './works.ts';
+import { towFee } from './epochs.ts';
 import { tripDepart } from './market-info.ts';
 import { capacityOf, cargoLoad, conditions, effectiveDraft, effectiveType, getShip, hasUpgrade, shipClass, type FeeItem, type GameState, type Leg, type Ship, type Voyage } from './state.ts';
 import { dockTime, feeSum, lighterFee, playerPaidFees, worksFees } from './wasserbau.ts';
@@ -46,7 +47,11 @@ export function planRoute(
     node = next;
   }
   const hours = legs.reduce((s, l) => s + l.hours, 0);
-  return { ok: true, voyage: { from, to, legs, hours, elapsed: 0, toll } };
+  // ab der Motorzeit kostet Treideln bergauf Treidelgeld; planVoyage rechnet es zum Betrag beim Ablegen
+  const fee = towFee(state, type.propulsion, legs.reduce((s, l) => s + (l.downstream ? 0 : l.hours), 0));
+  const voyage: Voyage = { from, to, legs, hours, elapsed: 0, toll };
+  if (fee > 0) voyage.towFee = fee;
+  return { ok: true, voyage };
 }
 
 export function planVoyage(state: GameState, map: MapDef, shipId: number, to: string): VoyagePlan | null {
@@ -82,6 +87,8 @@ export function planVoyage(state: GameState, map: MapDef, shipId: number, to: st
   if (load.hours > 0) v.dock = load.hours;
   if (unload.hours > 0) v.dockEnd = unload.hours;
   v.hours += load.hours + unload.hours;
+  // Treidelgeld (ab der Motorzeit, freies Spiel) zahlt auch der Schmuggler, es ist kein Zoll
+  if (v.towFee) v.toll = (v.toll ?? 0) + v.towFee;
   return plan;
 }
 
@@ -172,9 +179,17 @@ export function departProblem(state: GameState, map: MapDef, shipId: number, to:
   const coal = bunkerPlan(state, ship, sailingHours(plan.voyage), toll);
   if (coal.problem) return `${coal.problem}.`;
   if (toll + coal.cost > state.money) {
-    const what = plan.voyage.fees?.length ? 'Zoll und Gebühren' : 'Zoll';
-    if (coal.cost) return `${what} und Kohle kosten ${toll + coal.cost} Taler.`;
-    return plan.voyage.fees?.length ? `Zoll und Gebühren kosten ${toll} Taler.` : `Der Zoll kostet ${toll} Taler.`;
+    const fee = plan.voyage.towFee ?? 0;
+    const fees = feeSum(plan.voyage.fees);
+    const parts: string[] = [];
+    if (toll - fee - fees > 0) parts.push('Zoll');
+    if (fees > 0) parts.push('Gebühren');
+    if (fee > 0) parts.push('Treidelgeld');
+    if (coal.cost) parts.push('Kohle');
+    const total = toll + coal.cost;
+    if (parts.length > 1) return `${parts.slice(0, -1).join(', ')} und ${parts[parts.length - 1]} kosten ${total} Taler.`;
+    const one = { Zoll: 'Der Zoll', Gebühren: 'Die Gebühren', Treidelgeld: 'Das Treidelgeld', Kohle: 'Die Kohle' }[parts[0] ?? 'Zoll'];
+    return `${one} ${parts[0] === 'Gebühren' ? 'kosten' : 'kostet'} ${total} Taler.`;
   }
   return null;
 }

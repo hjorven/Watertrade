@@ -5,10 +5,11 @@ import { GOOD_BY_ID, GOODS } from '../data/goods.ts';
 import type { MapDef, TownDef } from '../data/maps/valley.ts';
 import { RIVAL_BY_ID } from '../data/rivals.ts';
 import { EPOCHS, SHIPS, UPGRADES } from '../data/ships.ts';
-import { dayInSeason, season, SEASON_NAME, year } from '../sim/calendar.ts';
+import { dayInSeason, season, SEASON_NAME, SEASONS, year } from '../sim/calendar.ts';
 import { MAX_ACCEPTED, PENALTY } from '../sim/contracts.ts';
 import { buyPrice, sellPrice } from '../sim/economy.ts';
 import { describeEvent, describeForecast, EVENT_TITLE, visibleForecasts } from '../sim/events.ts';
+import { epochProgress, epochProgressText } from '../sim/epochs.ts';
 import { hasYard, repairCost, timberPlan, upgradeCost } from '../sim/fleet.ts';
 import {
   bunkerPlan,
@@ -33,7 +34,7 @@ import {
 } from '../sim/game.ts';
 import { projectsOf } from '../data/projects.ts';
 import { daysLeft, projectState } from '../sim/works.ts';
-import { HARBOR_LEVELS } from '../data/harbors.ts';
+import { HARBOR_LEVELS, LIGHTER_FEE } from '../data/harbors.ts';
 import {
   berths,
   dredgeCost,
@@ -57,6 +58,22 @@ import { renderRivalry } from './rivalry.ts';
 import { BLOCK_TEXT, segmentDepth } from '../sim/river.ts';
 import { goodPicker, priceBookPanel, shipBook } from './market-info.ts';
 import { GROWTH_THRESHOLD, LEVELS, levelOf, netFlow, nextLevelNeeds } from '../sim/towns.ts';
+import {
+  activePlan,
+  conditionText,
+  DEFAULT_WINTER_SEASONS,
+  fmtLevel,
+  hasWinterPlan,
+  LOAD_RETRY_HOURS,
+  MAX_LOAD_WAIT_HOURS,
+  PLAN_NAME,
+  ROUTE_BOOK_DAYS,
+  routeProfit,
+  stopSkipped,
+  stopsOf,
+  winterSeasonsOf,
+} from '../sim/routes.ts';
+import type { RoutePlan, TradeRoute } from '../sim/state.ts';
 
 /** Frische verderblicher Ware als kurzer Hinweis, etwa "Frische 82 %" */
 function freshText(slot: { fresh?: number } | undefined): string {
@@ -98,10 +115,24 @@ const fmtHours = (h: number) => {
   return min === 0 ? `${whole} Std` : `${whole} Std ${min} Min`;
 };
 
+const m1 = (x: number) => x.toFixed(1).replace('.', ',');
+
+/** Warnung im Hafen, wenn das Schiff für den Kai zu tief geht: Umschlag dann über Schuten */
+function quayWarning(state: GameState, ship: Ship, town: string): string {
+  const quay = quayDepth(state, town);
+  const now = effectiveDraft(ship);
+  const full = effectiveDraft({ ...ship, cargo: { _: { amount: capacityOf(ship), cost: 0 } } });
+  const how = `Umschlag über Schuten: halb so schnell und ${LIGHTER_FEE.toLocaleString('de-DE')} Taler je Tonne Leichtergeld. Ein ausgebauter Hafen (Wasserbau, Kaimauer) hilft.`;
+  if (now > quay) return `<p class="note warn"><b>Zu tief für den Kai:</b> ${m1(now)} m Tiefgang, nur ${m1(quay)} m Wasser am Kai. ${how}</p>`;
+  if (full > quay) return `<p class="note warn"><b>Voll beladen zu tief für den Kai:</b> ${m1(full)} m Tiefgang, nur ${m1(quay)} m Wasser am Kai. ${how}</p>`;
+  return '';
+}
+
 /** Hinweis, solange ein Schiff zu Beginn oder am Ende einer Fahrt am Anleger umschlägt */
-const dockNote = (v: { elapsed: number; hours: number; dock?: number; dockEnd?: number }) => {
-  if (v.dock && v.elapsed < v.dock) return `<p class="note">Wird noch beladen, legt in ${fmtHours(v.dock - v.elapsed)} ab.</p>`;
-  if (v.dockEnd && v.elapsed > v.hours - v.dockEnd) return `<p class="note">Liegt am Kai und wird gelöscht.</p>`;
+const dockNote = (v: Voyage) => {
+  const lighter = v.fees?.some((f) => f.work === 'leichtern') ? ' über Schuten (zu tief für den Kai)' : '';
+  if (v.dock && v.elapsed < v.dock) return `<p class="note">Wird noch${lighter} beladen, legt in ${fmtHours(v.dock - v.elapsed)} ab.</p>`;
+  if (v.dockEnd && v.elapsed > v.hours - v.dockEnd) return `<p class="note">Liegt am Kai und wird${lighter} gelöscht.</p>`;
   return '';
 };
 
@@ -126,6 +157,38 @@ function setHtml(el: HTMLElement, html: string): void {
   if (lastHtml.get(el) === html) return;
   lastHtml.set(el, html);
   el.innerHTML = html;
+}
+
+/**
+ * Beim Neuzeichnen offene Klappfelder und angefangene Eingaben in Blöcken mit data-keep erhalten
+ * (Routen-Editor), sonst klappt das Bedingungen-Feld während der Fahrt ständig zu.
+ */
+function keepForms(root: HTMLElement, redraw: () => void): void {
+  const kept = new Map<string, { open: boolean; values: Map<string, string> }>();
+  root.querySelectorAll<HTMLElement>('[data-keep]').forEach((el) => {
+    const values = new Map<string, string>();
+    el.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[name][data-dirty]').forEach((f) => values.set(f.name, f.value));
+    kept.set(el.dataset.keep!, { open: !!el.querySelector('details[open]'), values });
+  });
+  const focused = document.activeElement instanceof HTMLElement && root.contains(document.activeElement) ? document.activeElement : null;
+  const focusKey = focused?.closest<HTMLElement>('[data-keep]')?.dataset.keep;
+  const focusName = focused?.getAttribute('name');
+  const before = root.firstElementChild;
+  redraw();
+  if (!kept.size || root.firstElementChild === before) return;
+  root.querySelectorAll<HTMLElement>('[data-keep]').forEach((el) => {
+    const k = kept.get(el.dataset.keep!);
+    if (!k) return;
+    if (k.open) el.querySelector('details')?.setAttribute('open', '');
+    for (const [name, value] of k.values) {
+      const f = el.querySelector<HTMLInputElement | HTMLSelectElement>(`[name="${name}"]`);
+      if (f) {
+        f.value = value;
+        f.dataset.dirty = '1';
+      }
+    }
+    if (el.dataset.keep === focusKey && focusName) el.querySelector<HTMLElement>(`[name="${focusName}"]`)?.focus();
+  });
 }
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
@@ -157,6 +220,8 @@ export class Hud {
   private speedFactor = 1;
   private view: View = 'ship';
   private tab: Tab = 'markt';
+  /** Welcher Plan im Routen-Reiter bearbeitet wird */
+  private routePlan: RoutePlan = 'sommer';
   private newsSeen = '';
   private newsKey = '';
 
@@ -203,6 +268,14 @@ export class Hud {
       contracts: root.querySelector('[data-badge="contracts"]')!,
       news: root.querySelector('[data-badge="news"]')!,
     };
+
+    // angefangene Eingaben im Routen-Editor merken, damit sie das Neuzeichnen überstehen
+    const markDirty = (ev: Event) => {
+      const f = ev.target as HTMLElement;
+      if (f.getAttribute('name') && f.closest('[data-keep]')) f.dataset.dirty = '1';
+    };
+    root.addEventListener('input', markDirty);
+    root.addEventListener('change', markDirty);
 
     root.addEventListener('click', (ev) => {
       const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-act]');
@@ -279,7 +352,14 @@ export class Hud {
           this.bookTown = null;
           this.actions.command('refresh', {});
           break;
+        case 'routePlan':
+          this.routePlan = d.plan === 'winter' ? 'winter' : 'sommer';
+          this.actions.command('refresh', {});
+          break;
         case 'cmd': {
+          // nach dem Löschen verschieben sich die Halte: gemerkte Eingaben verwerfen
+          if (d.cmd === 'routeDelStop' || d.cmd === 'routeClear' || d.cmd === 'routeCopyPlan')
+            root.querySelectorAll<HTMLElement>('[data-dirty]').forEach((f) => delete f.dataset.dirty);
           const data: Record<string, string | number> = {};
           for (const [k, v] of Object.entries(d)) if (k !== 'act' && k !== 'cmd' && v !== undefined) data[k] = v;
           // Formularfelder im selben Block mitschicken (Routen-Editor)
@@ -356,7 +436,7 @@ export class Hud {
       this.top,
       `
       <span><small>Kasse</small><b>${fmt(state.money)} Taler</b></span>
-      <span title="${EPOCHS[state.epoch - 1].name}"><small>${SEASON_NAME[season(day(state))]} · Jahr ${year(day(state))}</small><b>${dayInSeason(day(state))}. Tag, ${clock(state.hour)}</b></span>
+      <span title="${epochProgressText(state)}"><small>${SEASON_NAME[season(day(state))]} · Jahr ${year(day(state))}</small><b>${dayInSeason(day(state))}. Tag, ${clock(state.hour)}</b></span>
       <span class="river-stat" title="Pegel und Wind bestimmen, welche Schiffe wie schnell fahren"><small>Fluss</small><b>${state.waterLevel >= 0 ? '+' : '−'}${Math.abs(state.waterLevel).toFixed(1).replace('.', ',')} m${state.ice ? ', Eis' : ''} · Wind ${windText(w)}</b></span>${events}`,
     );
     this.newsKey = state.news[0] ? `${state.news[0].day}|${state.news[0].text}` : '';
@@ -379,7 +459,7 @@ export class Hud {
       return;
     }
     // Nur neu aufbauen, was sich geändert hat, sonst gehen Klicks während einer Fahrt verloren
-    setHtml(this.body, this.renderShip(state, ship));
+    keepForms(this.body, () => setHtml(this.body, this.renderShip(state, ship)));
   }
 
   private townName(id: string): string {
@@ -423,11 +503,11 @@ export class Hud {
       .join('')}</nav>`;
     let body = '';
     if (this.tab === 'buch') body = this.renderBooks(state, ship);
-    else if (!ship.port) body = this.tab === 'route' ? this.renderRoute(ship) : this.renderVoyage(state, ship);
+    else if (!ship.port) body = this.tab === 'route' ? this.renderRoute(state, ship) : this.renderVoyage(state, ship);
     else if (this.tab === 'kontor') body = this.renderKontor(state, ship);
     else if (this.tab === 'werft') body = this.renderYard(state, ship);
     else if (this.tab === 'kneipe') body = this.renderTavern(state, ship);
-    else if (this.tab === 'route') body = this.renderRoute(ship);
+    else if (this.tab === 'route') body = this.renderRoute(state, ship);
     else body = this.renderPort(state, ship);
     return nav + body;
   }
@@ -492,10 +572,12 @@ export class Hud {
         const v = plan.voyage;
         const dir = v.legs.every((l) => l.downstream) ? 'talwärts' : v.legs.every((l) => !l.downstream) ? 'bergwärts' : 'tal- und bergwärts';
         const fees = feeSum(v.fees);
-        const zoll = (v.toll ?? 0) - fees;
-        const toll = `${zoll ? `, Zoll ${zoll}` : v.evaded ? `, ${v.evaded} Zoll umgangen, Kontrolle möglich` : ''}${fees ? `, Gebühren ${fees}` : ''}`;
+        const tow = v.towFee ?? 0;
+        const zoll = (v.toll ?? 0) - fees - tow;
+        const toll = `${zoll ? `, Zoll ${zoll}` : v.evaded ? `, ${v.evaded} Zoll umgangen, Kontrolle möglich` : ''}${fees ? `, Gebühren ${fees}` : ''}${tow ? `, Treidelgeld ${tow}` : ''}`;
         const dockH = (v.dock ?? 0) + (v.dockEnd ?? 0);
-        const dockText = dockH >= 0.5 ? ` (davon ${fmtHours(dockH)} Laden und Löschen)` : '';
+        const lighter = v.fees?.some((f) => f.work === 'leichtern') ? ', muss leichtern' : '';
+        const dockText = (dockH >= 0.5 ? ` (davon ${fmtHours(dockH)} Laden und Löschen)` : '') + lighter;
         const coal = bunkerPlan(state, ship, sailingHours(v), v.toll ?? 0);
         if (coal.problem) return `<button class="btn dest" disabled title="${coal.problem}"><b>${t.name}</b><small>${coal.buy ? `${coal.buy} t Kohle fehlen` : 'Bunker zu klein'}</small></button>`;
         const coalText = coal.need ? `, Kohle ${String(coal.need).replace('.', ',')} t${coal.buy ? `, bunkert ${coal.buy} t für ${coal.cost} Taler` : ''}` : '';
@@ -537,6 +619,7 @@ export class Hud {
       ${this.renderTownInfo(state, town, industries)}
       ${contracts}
       <p class="note">Laderaum <b>${load}/${cap} t</b> · Tiefgang ${effectiveDraft(ship).toFixed(1).replace('.', ',')} m${kontor ? ' · Kontorbonus' : ''}${bunker}</p>
+      ${quayWarning(state, ship, town.id)}
       ${bunkerBtn}
       <table class="market">
         <thead><tr><th>Ware</th><th title="Preis je Tonne beim Kauf">Kauf</th><th title="Preis je Tonne beim Verkauf">Verkauf</th><th>Bord</th><th></th></tr></thead>
@@ -673,7 +756,7 @@ export class Hud {
       : '';
     return `${this.portHead(town, 'Werft')}${state_}
       ${ship.type === 'floss' ? '' : `<button class="btn wide ${cost > 0 ? 'primary' : ''}" data-act="cmd" data-cmd="repair" ${cost > 0 && state.money >= cost ? '' : 'disabled'}>Überholen<small>${cost > 0 ? `${fmt(cost)} Taler` : 'nicht nötig'}</small></button>`}
-      ${ups}${newShips}`;
+      ${ups}${newShips}${epochNote(state)}`;
   }
 
   /** Kapitän an Bord: Erfahrung, Treue, Lohn mit Knöpfen zum Anpassen */
@@ -721,36 +804,52 @@ export class Hud {
       <h3>Am Tresen</h3><div class="yard">${guests}</div>`;
   }
 
-  private renderRoute(ship: Ship): string {
+  private renderRoute(state: GameState, ship: Ship): string {
     const r = ship.route;
     const town = ship.port ?? ship.voyage?.to;
     const cap = ship.captain;
     const head = `<div class="ledger-head"><div class="stamp-small">Handelsroute</div><h2>${ship.name}</h2>
       <p>${cap ? `${cap.name} fährt die Route allein ab: an jedem Halt werden die Befehle ausgeführt, erst Verkauf und Einlagern, dann Kauf.` : 'Für eine Handelsroute braucht das Schiff einen Kapitän. Heuere in einer Hafenkneipe einen an.'}</p></div>`;
     if (ship.type === 'floss') return head.replace(/<p>.*<\/p>/s, '<p>Ein Floß fährt keine Routen.</p>');
+    const plan = this.routePlan;
+    // gefahren wird nach r.plan; umgeschaltet wird erst beim nächsten Anlegen
+    const running: RoutePlan = r ? (r.active ? (r.plan ?? 'sommer') : activePlan(state, r)) : 'sommer';
+    const planStops = r ? stopsOf(r, plan) : [];
     const goodsOptions = GOODS.map((g) => `<option value="${g.id}">${g.name}</option>`).join('');
     const kindOptions = (Object.keys(ORDER_TEXT) as OrderKind[]).map((k) => `<option value="${k}">${ORDER_TEXT[k]}</option>`).join('');
-    const stops = (r?.stops ?? [])
+    const num = (v: number | undefined, f = 1) => (v === undefined ? '' : String(Math.round(v * f * 10) / 10).replace('.', ','));
+    const stops = planStops
       .map((s, i) => {
         const orders = s.orders
           .map(
             (o, j) =>
               `<li>${ORDER_TEXT[o.kind]} ${swatch(o.good)}${goodName(o.good)} <small>${o.amount ? `${o.amount} t` : o.kind === 'kaufen' || o.kind === 'auslagern' ? 'voll' : 'alles'}${o.limit ? `, ${o.kind === 'kaufen' ? 'höchstens' : 'mindestens'} ${o.limit} Taler` : ''}</small>
-              <button class="link" data-act="cmd" data-cmd="routeDelOrder" data-stop="${i}" data-order="${j}" aria-label="Befehl löschen">entfernen</button></li>`,
+              <button class="link" data-act="cmd" data-cmd="routeDelOrder" data-plan="${plan}" data-stop="${i}" data-order="${j}" aria-label="Befehl löschen">entfernen</button></li>`,
           )
           .join('');
-        const isNext = r && i === r.next;
-        return `<div class="stop ${isNext ? 'next' : ''}" data-form>
-          <div class="stop-head"><b>${i + 1}. ${this.townName(s.town)}</b>${isNext ? '<small>nächster Halt</small>' : ''}
-            <button class="link" data-act="cmd" data-cmd="routeDelStop" data-stop="${i}">Halt entfernen</button></div>
+        const isNext = r?.active && plan === running && i === r.next;
+        const cond = conditionText(s);
+        const skipNow = stopSkipped(state, s);
+        return `<div class="stop ${isNext ? 'next' : ''}" data-form data-keep="${plan}-${i}">
+          <div class="stop-head"><b>${i + 1}. ${this.townName(s.town)}</b>${isNext ? '<small>nächster Halt</small>' : ''}${skipNow ? '<small>wird beim jetzigen Pegel übersprungen</small>' : ''}
+            <button class="link" data-act="cmd" data-cmd="routeDelStop" data-plan="${plan}" data-stop="${i}">Halt entfernen</button></div>
           <ul class="orders">${orders || '<li class="muted">keine Befehle, nur durchfahren</li>'}</ul>
+          ${cond ? `<p class="route-cond">${cond}</p>` : ''}
           <div class="order-form">
             <select name="kind" aria-label="Befehl">${kindOptions}</select>
             <select name="good" aria-label="Ware">${goodsOptions}</select>
             <input name="amount" type="number" min="0" step="5" value="0" aria-label="Menge, 0 = voll oder alles" title="Menge in t, 0 = voll oder alles">
             <input name="limit" type="number" min="0" step="1" value="0" aria-label="Preisgrenze, 0 = egal" title="Preisgrenze je t, 0 = egal">
-            <button class="btn" data-act="cmd" data-cmd="routeAddOrder" data-stop="${i}">+</button>
-          </div></div>`;
+            <button class="btn" data-act="cmd" data-cmd="routeAddOrder" data-plan="${plan}" data-stop="${i}">+</button>
+          </div>
+          <details class="route-cond-form"><summary>Bedingungen</summary>
+            <div class="order-form">
+              <label>Ablegen ab <input name="minLoad" type="text" inputmode="numeric" value="${num(s.minLoad, 100)}" placeholder="–"> % Ladung</label>
+              <label>Überspringen bei Pegel unter <input name="levelMin" type="text" value="${num(s.levelMin)}" placeholder="–"> m</label>
+              <label>oder über <input name="levelMax" type="text" value="${num(s.levelMax)}" placeholder="–"> m</label>
+              <button class="btn" data-act="cmd" data-cmd="routeStopCond" data-plan="${plan}" data-stop="${i}">Speichern</button>
+            </div>
+          </details></div>`;
       })
       .join('');
     const townOptions = this.map.towns
@@ -758,19 +857,57 @@ export class Hud {
       .join('');
     const canRun = !!cap && (r?.stops.length ?? 0) >= 2;
     const status = r
-      ? `<p class="note">${r.active ? `Route läuft${r.note ? `: ${r.note}` : ''}.` : 'Route angehalten.'}</p>
+      ? `<p class="note">${r.active ? `Route läuft nach dem ${PLAN_NAME[running]}${r.note ? `: ${r.note}` : ''}.` : 'Route angehalten.'}</p>
         <div class="row-btns">
           <button class="btn ${r.active ? '' : 'primary'}" data-act="cmd" data-cmd="routeToggle" ${canRun || r.active ? '' : 'disabled'}>${r.active ? 'Anhalten' : 'Route starten'}</button>
           <button class="btn" data-act="cmd" data-cmd="routeClear">Route löschen</button>
-        </div>`
+        </div>${this.renderRouteBook(state, r)}`
       : '';
-    return `${head}${status}
-      <div class="stops">${stops || '<p class="note">Noch keine Halte. Eine Route braucht mindestens zwei.</p>'}</div>
-      <div class="order-form add-stop" data-form>
+    const planNav = `<div class="row-btns route-plans">${(['sommer', 'winter'] as RoutePlan[])
+      .map(
+        (p) =>
+          `<button class="btn ${p === plan ? 'on' : ''}" data-act="routePlan" data-plan="${p}">${PLAN_NAME[p]}${r?.active && p === running ? ' (gilt jetzt)' : ''}</button>`,
+      )
+      .join('')}</div>`;
+    const winterInfo =
+      plan === 'winter'
+        ? `<p class="fine">Der Winterplan gilt in diesen Jahreszeiten, sobald er mindestens zwei Halte hat. Sonst fährt der Kapitän das ganze Jahr den Sommerplan. Umgeschaltet wird beim nächsten Anlegen.</p>
+          <div class="row-btns">${SEASONS.map((x) => {
+            const on = r ? winterSeasonsOf(r).includes(x) : DEFAULT_WINTER_SEASONS.includes(x);
+            return `<button class="btn ${on ? 'on' : ''}" data-act="cmd" data-cmd="routeWinterSeason" data-season="${x}" aria-pressed="${on}">${SEASON_NAME[x]}</button>`;
+          }).join('')}
+          ${r?.stops.length ? '<button class="btn" data-act="cmd" data-cmd="routeCopyPlan" data-plan="winter">Sommerplan übernehmen</button>' : ''}</div>`
+        : '';
+    return `${head}${status}${planNav}${winterInfo}
+      <div class="stops">${stops || `<p class="note">${plan === 'winter' ? 'Noch kein Winterplan. Ohne ihn gilt das ganze Jahr der Sommerplan.' : 'Noch keine Halte. Eine Route braucht mindestens zwei.'}</p>`}</div>
+      <div class="order-form add-stop" data-form data-keep="add-${plan}">
         <select name="town" aria-label="Stadt">${townOptions}</select>
-        <button class="btn" data-act="cmd" data-cmd="routeAddStop">Halt hinzufügen</button>
+        <button class="btn" data-act="cmd" data-cmd="routeAddStop" data-plan="${plan}">Halt hinzufügen</button>
       </div>
-      <p class="fine">Menge 0 heißt: bis der Laderaum voll ist, oder alles verkaufen. Mit einer Preisgrenze kauft der Kapitän nicht zu teuer und verkauft nicht zu billig.</p>`;
+      <p class="fine">Menge 0 heißt: bis der Laderaum voll ist, oder alles verkaufen. Mit einer Preisgrenze kauft der Kapitän nicht zu teuer und verkauft nicht zu billig.
+        Bedingungen: Mit Mindestladung wartet der Kapitän und kauft alle ${LOAD_RETRY_HOURS} Stunden nach, höchstens ${MAX_LOAD_WAIT_HOURS / 24} Tage lang. Mit einer Pegelgrenze fährt er an dem Halt vorbei, solange der Pegel (jetzt ${fmtLevel(state.waterLevel)}) außerhalb liegt.</p>`;
+  }
+
+  /** Routenauswertung: Gewinn pro Tag über die letzten 30 Tage, mit kleinem Balkenbild */
+  private renderRouteBook(state: GameState, r: TradeRoute): string {
+    if (r.bookSince === undefined) return '<p class="fine">Die Auswertung beginnt, sobald die Route fährt.</p>';
+    const p = routeProfit(state, r);
+    const max = Math.max(1, ...p.series.map((x) => Math.abs(x)));
+    const w = 6;
+    const h = 40;
+    const bars = p.series
+      .map((v, i) => {
+        const bh = Math.max(v === 0 ? 0 : 1, (Math.abs(v) / max) * (h / 2 - 1));
+        const y = v >= 0 ? h / 2 - bh : h / 2;
+        return `<rect x="${(ROUTE_BOOK_DAYS - p.days + i) * w}" y="${y.toFixed(1)}" width="${w - 1}" height="${bh.toFixed(1)}" fill="var(${v >= 0 ? '--gain' : '--loss'})"><title>Tag ${day(state) - p.days + 1 + i}: ${fmt(v)} Taler</title></rect>`;
+      })
+      .join('');
+    const cls = p.perDay >= 0 ? 'gain' : 'loss';
+    return `<div class="route-book">
+        <p>Gewinn pro Tag: <b class="${cls}">${fmt(p.perDay)} Taler</b> <small>(${p.days === 1 ? 'heute' : `letzte ${p.days} Tage`}, zusammen ${fmt(p.total)} Taler, nach Löhnen, Zoll und Brennstoff)</small></p>
+        <svg viewBox="0 0 ${ROUTE_BOOK_DAYS * w} ${h}" width="100%" height="${h}" preserveAspectRatio="none" role="img" aria-label="Gewinn je Tag"><line x1="0" x2="${ROUTE_BOOK_DAYS * w}" y1="${h / 2}" y2="${h / 2}" stroke="var(--line)" stroke-width="0.5"/>${bars}</svg>
+        <button class="link" data-act="cmd" data-cmd="routeResetBook">Auswertung neu beginnen</button>
+      </div>`;
   }
 
   private renderTownInfo(state: GameState, town: TownDef, more = ''): string {
@@ -829,7 +966,7 @@ export class Hud {
         <p>${how} ${speed.toFixed(1).replace('.', ',')} km/h über Grund, Strömung ${String(seg.current).replace('.', ',')} km/h.</p>
       </div>
       <div class="progress"><div style="width:${pct}%"></div></div>
-      <p class="note">${fmtHours(v.elapsed)} von ${fmtHours(v.hours)}${v.toll ? ` · ${v.fees?.length ? 'Zoll und Gebühren' : 'Zoll'} bezahlt: ${v.toll} Taler` : ''}${v.evaded ? ` · ${v.evaded} Taler Zoll umgangen, Kontrolle möglich` : ''}</p>
+      <p class="note">${fmtHours(v.elapsed)} von ${fmtHours(v.hours)}${v.toll ? ` · ${paidLabel(v)} bezahlt: ${v.toll} Taler` : ''}${v.evaded ? ` · ${v.evaded} Taler Zoll umgangen, Kontrolle möglich` : ''}</p>
       ${dockNote(v)}
       <ol class="route">${route}</ol>
       <p class="note">Ladung: ${cargo || 'leer'} · Zustand ${Math.round(ship.condition * 100)} %${cls.coal ? ` · Bunker ${Math.floor(ship.bunker ?? 0)} t Kohle` : ''}</p>
@@ -882,7 +1019,27 @@ export class Hud {
         <li>Gestern: Löhne ${fmt(l.wages)}, Unterhalt ${fmt(l.upkeep)}${l.fuel ? `, Brennstoff ${fmt(l.fuel)}` : ''}, eigene Erzeugung im Wert von ${fmt(l.production)} Taler</li>
         ${kontore || '<li>Noch keine Kontore</li>'}
       </ul>
-      ${renderRivalry(state, this.map)}`;
+      ${renderRivalry(state, this.map)}${this.renderRouteSummary(state)}`;
+  }
+
+  /** Alle Handelsrouten im Vergleich, die schwächste zuerst, damit man schlechte Routen erkennt */
+  private renderRouteSummary(state: GameState): string {
+    const rows = state.ships
+      .filter((s) => s.route && s.route.bookSince !== undefined)
+      .map((s) => ({ ship: s, p: routeProfit(state, s.route!) }))
+      .sort((a, b) => a.p.perDay - b.p.perDay)
+      .map(({ ship, p }) => {
+        const r = ship.route!;
+        const towns = r.stops.map((x) => this.townName(x.town)).join(' – ');
+        const winter = hasWinterPlan(r) ? ' <small>(mit Winterplan)</small>' : '';
+        return `<tr><th scope="row"><button class="link" data-act="select" data-ship="${ship.id}">${ship.name}</button>${r.active ? '' : ' <small>angehalten</small>'}<small>${towns}${winter}</small></th>
+          <td class="num ${p.perDay >= 0 ? 'gain' : 'loss'}">${fmt(p.perDay)}</td><td class="num">${p.days}</td></tr>`;
+      })
+      .join('');
+    if (!rows) return '';
+    return `<h3>Handelsrouten</h3>
+      <table class="market register"><thead><tr><th>Schiff und Route</th><th>Gewinn pro Tag</th><th>Tage</th></tr></thead><tbody>${rows}</tbody></table>
+      <p class="fine">Schnitt der letzten höchstens ${ROUTE_BOOK_DAYS} Tage, nach Löhnen, Zoll und Brennstoff. Die schwächste Route steht oben.</p>`;
   }
 
   private renderNews(state: GameState): string {
@@ -1167,4 +1324,25 @@ export class Hud {
     setTimeout(() => el.classList.add('out'), 2600);
     setTimeout(() => el.remove(), 3400);
   }
+}
+
+/** Hinweis in der Werft, was die nächste Epoche bringt (nur freies Spiel) */
+function epochNote(state: GameState): string {
+  if (!state.epochAuto) return '';
+  const p = epochProgress(state);
+  if (!p.next) return '';
+  const parts = p.conditions.map((c) => `${c.label} (${Math.min(c.value, c.target)}/${c.target})`);
+  return `<p class="note">Die Zeit „${p.next.name}“ beginnt, sobald alles erfüllt ist: ${parts.join(', ')}. Spätestens im Jahr ${p.next.latestYear}.</p>`;
+}
+
+/** Was beim Ablegen bezahlt wurde: Zoll, Gebühren, Treidelgeld */
+function paidLabel(v: Voyage): string {
+  const tow = v.towFee ?? 0;
+  const fees = feeSum(v.fees);
+  const parts: string[] = [];
+  if ((v.toll ?? 0) - tow - fees > 0) parts.push('Zoll');
+  if (fees > 0) parts.push('Gebühren');
+  if (tow > 0) parts.push('Treidelgeld');
+  if (parts.length <= 1) return parts[0] ?? 'Zoll';
+  return `${parts.slice(0, -1).join(', ')} und ${parts[parts.length - 1]}`;
 }

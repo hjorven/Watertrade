@@ -1,7 +1,8 @@
 import './style.css';
 import * as THREE from 'three';
 import { CHAPTERS, type Chapter } from './data/campaign.ts';
-import { CHALLENGES, DAILY_DAYS, dailySetup } from './data/challenges.ts';
+import { CHALLENGES, DAILY_DAYS } from './data/challenges.ts';
+import { newDailyGame } from './sim/daily.ts';
 import { newAchievements, ACHIEVEMENTS } from './sim/achievements.ts';
 import { OnlineScreens } from './ui/online-screens.ts';
 import { GOOD_BY_ID, GOODS } from './data/goods.ts';
@@ -12,6 +13,7 @@ import { mapPreviewSvg } from './ui/mappreview.ts';
 import { projectsOf } from './data/projects.ts';
 import { Landscape } from './render/landscape.ts';
 import { Stage } from './render/scene.ts';
+import { BASE_FOG, easeEpoch, moodAt } from './render/epochmood.ts';
 import { ambient, getVolume, isMuted, mute, playSfx, setMusic, setVolume, unlockAudioOnGesture, type SfxName } from './audio/index.ts';
 import { RIVAL_BY_ID } from './data/rivals.ts';
 import { buyShares, endPact, offerPact, placeBid, sellShares } from './sim/rivalry.ts';
@@ -53,6 +55,8 @@ import {
 } from './sim/game.ts';
 import { buildHarbor, dredge, setFee, setUpkeep, startProjectWith } from './sim/wasserbau.ts';
 import type { FeeLevel } from './sim/state.ts';
+import { activePlan, resetBook, stopsOf, winterSeasonsOf } from './sim/routes.ts';
+import type { RoutePlan } from './sim/state.ts';
 import { EPOCHS } from './data/ships.ts';
 import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
 import { goalDone, goalProgress } from './sim/goals.ts';
@@ -169,13 +173,18 @@ interface Progress {
   unlocked: string[];
   /** bestandene Herausforderungen: Id -> wenigste Tage */
   challenges?: Record<string, number>;
-  /** bestes lokales Tagesmarkt-Ergebnis je Kalendertag */
+  /** gewertetes lokales Tagesmarkt-Ergebnis je Kalendertag (erster Versuch) */
   daily?: Record<string, number>;
+  /** Kalendertage, an denen der gewertete Versuch schon begonnen wurde */
+  dailyTried?: string[];
+  /** gewertetes Ergebnis, das noch zum Server muss */
+  dailyPending?: { day: string; worth: number } | null;
 }
 const settings = loadJson<Settings>('settings', { tiltShift: true });
 const progress = loadJson<Progress>('progress', { unlocked: ['k1'] });
 progress.challenges ??= {};
 progress.daily ??= {};
+progress.dailyTried ??= [];
 const achieved = loadJson<Record<string, string>>('achievements', {});
 // Anmeldelink aus der Adresse übernehmen, falls jemand über die E-Mail zurückkommt.
 // Supabase wird nur dann sofort geladen, sonst erst beim ersten Online-Bildschirm.
@@ -198,6 +207,8 @@ interface Session {
   /** Spielstunde beim Start, für Zeitlimits */
   startHour?: number;
   dailyDay?: string;
+  /** Tagesmarkt: gewerteter Versuch (sonst Übungsrunde) */
+  dailyScored?: boolean;
 }
 
 let state: GameState = newGame(MAP, MAP.start ?? MAP.towns[0].id);
@@ -393,6 +404,10 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
     case 'routeDelOrder':
     case 'routeToggle':
     case 'routeClear':
+    case 'routeStopCond':
+    case 'routeWinterSeason':
+    case 'routeCopyPlan':
+    case 'routeResetBook':
       if (ship) r = editRoute(ship, cmd, d);
       break;
   }
@@ -402,21 +417,33 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
 
 function editRoute(ship: Ship, cmd: string, d: Record<string, string | number>): TradeResult | null {
   const okMsg = (message: string): TradeResult => ({ ok: true, message, amount: 0, taler: 0 });
+  const failMsg = (message: string): TradeResult => ({ ok: false, message, amount: 0, taler: 0 });
   const r = (ship.route ??= { stops: [], next: 0, active: false });
+  // Sommerplan ist die Haupt-Liste, der Winterplan die zweite
+  const plan: RoutePlan = d.plan === 'winter' ? 'winter' : 'sommer';
+  const stops = plan === 'winter' ? (r.winterStops ??= []) : r.stops;
+  // Änderungen am Plan, nach dem gerade gefahren wird: beim ersten Halt neu anfangen
+  const touchesActive = () => r.active && plan === (r.plan ?? 'sommer');
+  const restart = () => {
+    r.next = 0;
+    r.retryAt = undefined;
+    r.loadingSince = undefined;
+  };
   switch (cmd) {
     case 'routeAddStop': {
       const town = String(d.town);
-      if (r.stops.length && r.stops[r.stops.length - 1].town === town) return { ok: false, message: 'Diese Stadt ist schon der letzte Halt.', amount: 0, taler: 0 };
-      r.stops.push({ town, orders: [] });
+      if (stops.length && stops[stops.length - 1].town === town) return failMsg('Diese Stadt ist schon der letzte Halt.');
+      stops.push({ town, orders: [] });
       return null;
     }
-    case 'routeDelStop':
-      r.stops.splice(Number(d.stop), 1);
-      r.next = 0;
+    case 'routeDelStop': {
+      stops.splice(Number(d.stop), 1);
+      if (touchesActive()) restart();
       if (r.stops.length < 2) r.active = false;
       return null;
+    }
     case 'routeAddOrder': {
-      const stop = r.stops[Number(d.stop)];
+      const stop = stops[Number(d.stop)];
       if (!stop) return null;
       stop.orders.push({
         kind: String(d.kind) as OrderKind,
@@ -427,17 +454,53 @@ function editRoute(ship: Ship, cmd: string, d: Record<string, string | number>):
       return null;
     }
     case 'routeDelOrder':
-      r.stops[Number(d.stop)]?.orders.splice(Number(d.order), 1);
+      stops[Number(d.stop)]?.orders.splice(Number(d.order), 1);
       return null;
+    case 'routeStopCond': {
+      const stop = stops[Number(d.stop)];
+      if (!stop) return null;
+      // leeres Feld heißt: keine Bedingung
+      const num = (v: string | number | undefined) => (v === undefined || String(v).trim() === '' ? undefined : Number(String(v).replace(',', '.')));
+      const load = num(d.minLoad);
+      const lo = num(d.levelMin);
+      const hi = num(d.levelMax);
+      if ([load, lo, hi].some((x) => x !== undefined && !Number.isFinite(x))) return failMsg('Bitte Zahlen eintragen, z. B. 80 oder -0,5.');
+      if (lo !== undefined && hi !== undefined && lo >= hi) return failMsg('Die untere Pegelgrenze muss unter der oberen liegen.');
+      stop.minLoad = load ? Math.min(1, Math.max(0, load / 100)) : undefined;
+      stop.levelMin = lo === undefined ? undefined : Math.round(lo * 10) / 10;
+      stop.levelMax = hi === undefined ? undefined : Math.round(hi * 10) / 10;
+      if (!stop.minLoad) delete stop.minLoad;
+      if (stop.levelMin === undefined) delete stop.levelMin;
+      if (stop.levelMax === undefined) delete stop.levelMax;
+      return okMsg(`Bedingungen für ${MAP.towns.find((t) => t.id === stop.town)?.name ?? stop.town} gespeichert.`);
+    }
+    case 'routeWinterSeason': {
+      const s = String(d.season) as Season;
+      if (!SEASONS.includes(s)) return null;
+      const list = winterSeasonsOf(r);
+      r.winterSeasons = list.includes(s) ? list.filter((x) => x !== s) : SEASONS.filter((x) => x === s || list.includes(x));
+      return null;
+    }
+    case 'routeCopyPlan': {
+      // Sommerplan als Vorlage für den Winterplan übernehmen
+      r.winterStops = structuredClone(r.stops);
+      if (r.active && (r.plan ?? 'sommer') === 'winter') restart();
+      return okMsg('Sommerplan in den Winterplan übernommen.');
+    }
+    case 'routeResetBook':
+      resetBook(r);
+      return okMsg('Routenbuch geleert.');
     case 'routeToggle':
-      if (!r.active && !ship.captain) return { ok: false, message: 'Erst einen Kapitän anheuern.', amount: 0, taler: 0 };
-      if (!r.active && r.stops.length < 2) return { ok: false, message: 'Eine Route braucht mindestens zwei Halte.', amount: 0, taler: 0 };
+      if (!r.active && !ship.captain) return failMsg('Erst einen Kapitän anheuern.');
+      if (!r.active && r.stops.length < 2) return failMsg('Eine Route braucht mindestens zwei Halte.');
       r.active = !r.active;
       r.retryAt = undefined;
+      r.loadingSince = undefined;
       r.note = undefined;
       // beginnt am Halt, an dem das Schiff gerade liegt, sonst beim ersten
       if (r.active) {
-        const here = r.stops.findIndex((s) => s.town === ship.port);
+        r.plan = activePlan(state, r);
+        const here = stopsOf(r, r.plan).findIndex((s) => s.town === ship.port);
         r.next = here >= 0 ? here : 0;
       }
       return okMsg(r.active ? `${ship.captain!.name} übernimmt die Route.` : 'Route angehalten.');
@@ -563,12 +626,13 @@ const menu = new Menu(
 );
 
 const screens = new OnlineScreens(menu, VALLEY, {
-  startDaily(day, seed) {
-    const setup = dailySetup(seed);
-    startGame(
-      newGame(VALLEY, { startTown: setup.startTown, money: setup.money, startYear: setup.startYear, seed, rivals: true }),
-      { mode: 'tagesmarkt', completed: new Set(), finished: false, dailyDay: day },
-    );
+  startDaily(day, seed, scored) {
+    if (scored && !progress.dailyTried!.includes(day)) {
+      // nur die letzten Tage merken, damit die Liste nicht wächst
+      progress.dailyTried = [...progress.dailyTried!, day].slice(-14);
+      saveJson('progress', progress);
+    }
+    startGame(newDailyGame(VALLEY, day, seed), { mode: 'tagesmarkt', completed: new Set(), finished: false, dailyDay: day, dailyScored: scored });
   },
   currentSave: () => (inGame && canSave() ? makeSave() : null),
   inGame: () => inGame,
@@ -578,7 +642,13 @@ const screens = new OnlineScreens(menu, VALLEY, {
   unlock,
   achievements: () => achieved,
   challenges: () => progress.challenges!,
-  dailyBest: (day) => progress.daily![day] ?? null,
+  dailyLocal: (day) => ({ tried: progress.dailyTried!.includes(day), worth: progress.daily![day] ?? null }),
+  dailyPending: () => progress.dailyPending ?? null,
+  dailyPendingDone(day) {
+    if (progress.dailyPending?.day !== day) return;
+    progress.dailyPending = null;
+    saveJson('progress', progress);
+  },
   toast: (text, kind) => hud.toast(text, kind),
   sfx: (name) => sfx(name),
 });
@@ -594,6 +664,10 @@ function unlock(id: string): void {
   sfx('stempel');
 }
 let inGame = false;
+// Tagesmarkt: beim Verlassen der Seite den aktuellen Stand sichern, damit Neuladen keinen Spieltag zurückdreht
+addEventListener('pagehide', () => {
+  if (inGame && session.mode === 'tagesmarkt' && !session.finished) saveSlot('auto');
+});
 document.body.classList.add('no-game');
 const canSave = () => session.mode !== 'tagesmarkt' && session.mode !== 'herausforderung';
 
@@ -615,6 +689,7 @@ function startGame(s: GameState, sess: Session): void {
   rivalViews.clear();
   setMusic(epochMusic(s.epoch));
   state = s;
+  moodEpoch = s.epoch; // beim Laden sofort die richtige Stimmung, ohne Überblenden
   session = { ...sess, startHour: sess.startHour ?? s.hour };
   selected = state.ships[0]?.id ?? -1;
   follow = true;
@@ -715,7 +790,7 @@ function summary(s: SaveGame): string {
       : s.mode === 'herausforderung'
         ? `Herausforderung ${CHALLENGES.find((c) => c.id === s.chapter)?.title ?? ''}`
         : s.mode === 'tagesmarkt'
-          ? `Tagesmarkt ${s.dailyDay ?? ''}`
+          ? `Tagesmarkt ${s.dailyDay ?? ''}${s.dailyScored ? '' : ' (Übung)'}`
           : 'Freies Spiel';
   return `${what}, ${dateText(day)}, ${s.state.money} Taler`;
 }
@@ -729,6 +804,7 @@ function makeSave(): SaveGame {
     completedGoals: [...session.completed],
     startHour: session.startHour,
     dailyDay: session.dailyDay,
+    dailyScored: session.dailyScored,
     state,
   };
 }
@@ -770,6 +846,7 @@ function startSave(save: SaveGame): boolean {
       (save.mode === 'herausforderung' && !!chapter?.deadlineDays && daysPlayed >= chapter.deadlineDays),
     startHour: save.startHour,
     dailyDay: save.dailyDay,
+    dailyScored: save.dailyScored === true,
   });
   return true;
 }
@@ -858,7 +935,7 @@ function checkDaily(): void {
   const played = daysPlayed();
   const worth = Math.round(playerWorth(state));
   if (played < DAILY_DAYS) {
-    hud.renderGoals(`Tagesmarkt · Tag ${played + 1} von ${DAILY_DAYS}`, [
+    hud.renderGoals(`Tagesmarkt${session.dailyScored ? '' : ' (Übung)'} · Tag ${played + 1} von ${DAILY_DAYS}`, [
       { text: `Vermögen ${fmtNum(worth)} Taler`, done: false, progress: `Kasse, Schiffe, Kontore und Ladung` },
       { text: `Noch ${DAILY_DAYS - played} Tage bis zur Abrechnung`, done: false, progress: '' },
     ]);
@@ -868,11 +945,15 @@ function checkDaily(): void {
   running = false;
   hud.renderGoals(null, []);
   const day = session.dailyDay ?? '';
-  if (!progress.daily![day] || worth > progress.daily![day]) progress.daily![day] = worth;
+  // Gewertet ist nur der erste Versuch des Tages, Übungsrunden ändern das Ergebnis nicht
+  if (session.dailyScored && progress.daily![day] === undefined) {
+    progress.daily![day] = worth;
+    progress.dailyPending = { day, worth };
+  }
   saveJson('progress', progress);
   saveSlot('auto');
   sfx('stempel');
-  void screens.finishDaily(day, worth);
+  void screens.finishDaily(day, worth, !!session.dailyScored);
 }
 
 // --- Ereignisse ---
@@ -1031,6 +1112,9 @@ const SUN: Record<Season, number> = { fruehling: 0xfff0d0, sommer: 0xffe2b0, her
 const WARMTH: Record<Season, number> = { fruehling: 0.2, sommer: 0.5, herbst: 0.9, winter: -0.6 };
 const tmpA = new THREE.Color();
 const tmpB = new THREE.Color();
+// Farbstimmung je Epoche, gleitend überblendet (epochmood.ts)
+let moodEpoch = 1;
+const mood = moodAt(1);
 
 function updateSeasonVisuals(): void {
   const dayFloat = state.hour / 24 + 1;
@@ -1054,14 +1138,29 @@ function updateSeasonVisuals(): void {
   }
   land.setIce(ice, drift);
 
-  const sky = tmpA.setHex(SKY[s]).lerp(tmpB.setHex(SKY[next]), f);
+  moodAt(moodEpoch, mood);
+  const sky = tmpA.setHex(SKY[s]).lerp(tmpB.setHex(SKY[next]), f).lerp(mood.sky, mood.skyMix);
   (stage.scene.background as THREE.Color).copy(sky);
   stage.scene.fog?.color.copy(sky);
-  stage.sun.color.setHex(SUN[s]).lerp(tmpB.setHex(SUN[next]), f);
+  if (stage.scene.fog instanceof THREE.Fog) {
+    stage.scene.fog.near = BASE_FOG.near * mood.fog;
+    stage.scene.fog.far = BASE_FOG.far * mood.fog;
+  }
+  stage.sun.color.setHex(SUN[s]).lerp(tmpB.setHex(SUN[next]), f).lerp(mood.sun, mood.sunMix);
+  stage.hemi.color.copy(mood.hemiSky);
+  stage.hemi.groundColor.copy(mood.hemiGround);
   stage.postfx.setWarmth(WARMTH[s] + (WARMTH[next] - WARMTH[s]) * f);
+  stage.postfx.setMood(mood.saturation, mood.contrast, mood.tint);
 }
 
 const smooth = (x: number) => x * x * (3 - 2 * x);
+
+/** Tagesmarkt: Konkurrenz rückt in ganzen Stunden vor; für die Anzeige den Bruchteil der Stunde dazurechnen */
+function rivalShown(v: Voyage): { voyage: Voyage } {
+  if (state.fairSeed === undefined) return { voyage: v };
+  const frac = state.hour - Math.floor(state.hour);
+  return { voyage: { ...v, elapsed: Math.min(v.hours, v.elapsed + frac) } };
+}
 
 function placeOnVoyage(ship: { voyage: Voyage | null }, view: ShipView): void {
   const v = ship.voyage!;
@@ -1150,7 +1249,7 @@ function frame(): void {
     for (const ship of r.ships) {
       const view = rivalViews.get(ship.id);
       if (!view) continue;
-      if (ship.voyage) placeOnVoyage(ship, view);
+      if (ship.voyage) placeOnVoyage(rivalShown(ship.voyage), view);
       else if (!view.docked) rivalDocked = true;
       view.update(dt);
     }
@@ -1158,6 +1257,7 @@ function frame(): void {
   if (rivalDocked) syncViews();
   estates.update(dt, wind(state));
 
+  moodEpoch = easeEpoch(moodEpoch, state.epoch, dt);
   updateSeasonVisuals();
   land.update(dt, 0.012 * (1 + Math.max(0, state.waterLevel) * 0.35));
 
