@@ -8,7 +8,7 @@ import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { PROJECT_BY_ID } from '../data/projects.ts';
 import { addNews, type GameState, type NewsItem } from './state.ts';
-import { initialMarket, marketTarget, needs, STOCK_CAP, tradedGoods } from './towns.ts';
+import { initialMarket, marketDepth, marketTarget, needs, STOCK_CAP, tradedGoods } from './towns.ts';
 
 export interface EpochGood {
   good: string;
@@ -66,15 +66,15 @@ export function tickSupply(state: GameState, map: MapDef): NewsItem[] {
       const use = places.consumes[def.id] ?? 0;
       if (!make && !use) continue;
       const market = state.markets[def.id];
-      const target = marketTarget(def, state.towns[def.id]);
+      const target = marketTarget(def, state.towns[def.id], state.epoch);
       let m = market[eg.good];
       if (!m) {
         m = market[eg.good] = { good: eg.good, stock: target * (make ? 1.6 : 0.7), target };
         opened = true;
       }
-      if (make) m.stock = Math.min(target * STOCK_CAP, m.stock + make);
+      if (make) m.stock = Math.min(target * STOCK_CAP, m.stock + make * marketDepth(state.epoch));
       // wie bei der Bevölkerung: bei Knappheit wird weniger verbraucht
-      if (use) m.stock = Math.max(0, m.stock - use * Math.min(1.5, m.stock / Math.max(1, m.target)));
+      if (use) m.stock = Math.max(0, m.stock - use * marketDepth(state.epoch) * Math.min(1.5, m.stock / Math.max(1, m.target)));
     }
     if (opened) out.push(addNews(state, 'ereignis', eg.news));
   }
@@ -124,7 +124,7 @@ export function tickBuildSites(state: GameState, map: MapDef): NewsItem[] {
     sites.add(town);
     const def = map.towns.find((t) => t.id === town)!;
     // eine Baustelle schafft Nachfrage, auch wo bisher niemand Ziegel handelt
-    const m = (state.markets[town].ziegel ??= { good: 'ziegel', stock: 0, target: marketTarget(def, state.towns[town]) });
+    const m = (state.markets[town].ziegel ??= { good: 'ziegel', stock: 0, target: marketTarget(def, state.towns[town], state.epoch) });
     const got = Math.min(need, Math.max(0, m.stock));
     m.stock -= got;
     const cap = Math.ceil(p.days * BRICK_DELAY_MAX);
@@ -152,7 +152,7 @@ export function addMissingMarkets(state: GameState, map: MapDef): void {
     const market = state.markets[def.id];
     const town = state.towns[def.id];
     if (!market || !town) continue;
-    const fresh = initialMarket(def, town);
+    const fresh = initialMarket(def, town, state.epoch);
     for (const [g, m] of Object.entries(fresh)) market[g] ??= m;
   }
   // Diesel legt tickSupply am nächsten Tag an, wenn der Spielstand schon in der Motorzeit ist

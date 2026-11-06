@@ -1,6 +1,6 @@
 /**
  * Dampfertage für Kapitel 4: Jeder eigene Kohledampfer, der an einem Tag lange genug unter Dampf
- * gefahren ist, bringt einen Dampfertag. Drei Dampfer, die 30 Tage fahren, sind 90 Dampfertage.
+ * gefahren ist, bringt einen Dampfertag. Drei Dampfer, die 45 Tage fahren, sind 135 Dampfertage.
  * Wer viele Dampfer am Laufen hält, braucht viel Kohle, mehr als die Märkte im Tal hergeben.
  */
 import type { GameState } from './state.ts';

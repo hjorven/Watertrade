@@ -19,7 +19,7 @@ import { observe, tickMarketInfo, tripArrive, tripSail } from './market-info.ts'
 import { closeSteamDay, logSteam } from './steam.ts';
 import { tickCanal } from './canal.ts';
 import { closeFinanceDay, sailFinance, tickFinance } from './finance.ts';
-import { initialMarket, initialTown, tickTown } from './towns.ts';
+import { initialMarket, initialTown, marketDepth, tickTown } from './towns.ts';
 import { movingHours, wearFactor, wearRate } from './voyage.ts';
 import { voyageProgress } from './navigation.ts';
 import { tickWaterworks } from './wasserbau.ts';
@@ -71,7 +71,7 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
   const towns: GameState['towns'] = {};
   for (const def of map.towns) {
     towns[def.id] = initialTown(def);
-    markets[def.id] = initialMarket(def, towns[def.id]);
+    markets[def.id] = initialMarket(def, towns[def.id], opts.epoch ?? epochOfYear(opts.startYear ?? 1));
   }
   const state: GameState = {
     money: opts.money ?? START_MONEY,
@@ -238,7 +238,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
   const after = day(state);
   for (let d = before + 1; d <= after; d++) {
     for (const def of map.towns) {
-      const r = tickTown(def, state.markets[def.id], state.towns[def.id], townOptions(state, def.id, d));
+      const r = tickTown(def, state.markets[def.id], state.towns[def.id], { ...townOptions(state, def.id, d), epoch: state.epoch });
       pushNews(events, townNews(state, def, r), false);
       if (r.levelUp !== undefined || r.levelDown !== undefined) {
         const up = r.levelUp !== undefined;
@@ -261,10 +261,13 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     if (state.epochAuto) {
       const e = dueEpoch(state);
       if (e > state.epoch) {
+        // tiefere Märkte: Lager wachsen mit, damit die Preise beim Epochenwechsel nicht springen
+        const grow = marketDepth(e) / marketDepth(state.epoch);
+        for (const market of Object.values(state.markets)) for (const m of Object.values(market)) m.stock *= grow;
         state.epoch = e;
         state.epochDay = d;
         const name = EPOCHS.find((x) => x.number === e)!.name;
-        pushNews(events, [addNews(state, 'ereignis', `Eine neue Zeit beginnt: ${name}. Die Werften bauen neue Schiffe.`)], true);
+        pushNews(events, [addNews(state, 'ereignis', `Eine neue Zeit beginnt: ${name}. Die Werften bauen neue Schiffe, und auf den Märkten wird mehr umgeschlagen.`)], true);
         if (e >= TOW_FEE_EPOCH) pushNews(events, [addNews(state, 'ereignis', 'Die Treidelpfade verfallen. Wer bergauf treidelt, zahlt jetzt Treidelgeld.')], true);
         events.push({ type: 'epoch', epoch: e });
       }
