@@ -91,7 +91,8 @@ function goalBonus(state: GameState, map: MapDef, goals: Goal[], open: boolean[]
 /** Kosten einer Fahrt ohne Zoll: Diesel, Kohle und die spätere Reparatur des Verschleißes */
 function runningCost(ship: Ship, hours: number): number {
   const cls = SHIPS[ship.type];
-  const fuel = (cls.fuel ?? 0) * hours + (cls.coal ?? 0) * hours * base('kohle') * 1.2;
+  // Kohle ist abseits der Gruben meist knapp: lieber mit dem anderthalbfachen Grundpreis rechnen
+  const fuel = (cls.fuel ?? 0) * hours + (cls.coal ?? 0) * hours * base('kohle') * 1.6;
   return fuel + hours * wearRate(ship) * cls.price * 0.5;
 }
 
@@ -143,11 +144,6 @@ function handleShip(state: GameState, map: MapDef, goals: Goal[], open: boolean[
   }
   if (ship.route?.active) return;
   sellAll(state, ship);
-  // bei Zoll lohnt ein Schmuggler am Ruder
-  if (!ship.captain && state.events.some((e) => e.kind === 'zoll')) {
-    const smuggler = state.tavern[ship.port!]?.find((c) => c.trait === 'schmuggler' && c.hire < state.money - 400);
-    if (smuggler) hireCaptain(state, ship.id, smuggler.id);
-  }
   if (ship.condition < 0.6 && hasYard(map, ship.port!)) repair(state, map, ship.id);
   const t = bestTrade(state, map, goals, open, ship, ship.port!);
   if (t && t.score > 0) {

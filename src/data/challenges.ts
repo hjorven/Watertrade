@@ -103,7 +103,7 @@ export const CHALLENGES: Challenge[] = [
     deadlineDays: 120,
     goals: [
       { type: 'ships', count: 3, text: 'Besitze drei Schiffe' },
-      { type: 'worth', amount: 15000, text: 'Komme auf ein Vermögen von 15 000 Talern' },
+      { type: 'worth', amount: 10000, text: 'Komme auf ein Vermögen von 10 000 Talern' },
     ],
   },
   {
@@ -246,7 +246,7 @@ export const CHALLENGES: Challenge[] = [
     number: 11,
     title: 'Zollkrieg',
     intro: [
-      'Die Uferherren haben sich zerstritten. Auf jedem Abschnitt des Flusses steht jetzt ein Zollhaus, und jedes will 30 Taler.',
+      'Die Uferherren haben sich zerstritten. Auf jedem Abschnitt des Flusses steht jetzt ein Zollhaus, und jedes will 15 Taler.',
       'Kurze Fahrten werden teuer, volle Laderäume lohnen sich. Ein Kapitän, der Schleichwege kennt, ist Gold wert.',
     ],
     outro: 'Die Zollhäuser stehen noch, aber an dir haben sie nicht viel verdient.',
@@ -258,8 +258,8 @@ export const CHALLENGES: Challenge[] = [
     epoch: 1,
     startYear: 2,
     deadlineDays: 180,
-    events: [{ kind: 'zoll', days: 180, seg: 'alle', value: 30 }],
-    goals: [{ type: 'worth', amount: 10000, text: 'Komme auf ein Vermögen von 10 000 Talern' }],
+    events: [{ kind: 'zoll', days: 180, seg: 'alle', value: 15 }],
+    goals: [{ type: 'worth', amount: 6000, text: 'Komme auf ein Vermögen von 6000 Talern' }],
   },
   {
     id: 'h-flut',
@@ -312,20 +312,20 @@ export const CHALLENGES: Challenge[] = [
     title: 'Schwarzes Gold',
     intro: [
       'Die Dampfer fressen Kohle, die Schmieden auch. Wer die Kohle aus den Bergen an den Strom bringt, hält das Tal am Laufen.',
-      'Der Erzbach ist seicht, und dein Raddampfer verbrennt selbst, was er fährt. Rechne gut.',
+      'Der Erzbach ist seicht, dein Raddampfer verbrennt selbst, was er fährt, und sein Schornstein passt nicht unter die alte Brücke von Kesselbrück. Rechne gut.',
     ],
     outro: 'Rauch über Kesselbrück, Rauch über Niedermünd. Und alles läuft mit deiner Kohle.',
     startTown: 'altenfurt',
-    money: 2500,
+    money: 3500,
     startShip: 'raddampfer',
     allowedShips: [],
     rivals: true,
     epoch: 2,
     startYear: 6,
-    deadlineDays: 120,
+    deadlineDays: 60,
     goals: [
-      { type: 'deliver', town: 'niedermuend', good: 'kohle', amount: 200, text: 'Bring 200 t Kohle nach Niedermünd' },
-      { type: 'deliver', town: 'kesselbrueck', good: 'kohle', amount: 150, text: 'Bring 150 t Kohle nach Kesselbrück' },
+      { type: 'deliver', town: 'niedermuend', good: 'kohle', amount: 400, text: 'Bring 400 t Kohle nach Niedermünd' },
+      { type: 'deliver', town: 'kesselbrueck', good: 'kohle', amount: 250, text: 'Bring 250 t Kohle nach Kesselbrück' },
     ],
   },
   {
@@ -333,7 +333,7 @@ export const CHALLENGES: Challenge[] = [
     number: 15,
     title: 'Diesel und Stahl',
     intro: ['Neue Zeiten: Motorschiffe fahren gegen jede Strömung, aber Diesel kostet bei jeder Fahrstunde. Bau eine moderne Flotte auf.'],
-    outro: 'Drei Motorschiffe unter deiner Flagge, und keines von ihnen braucht ein Pferd.',
+    outro: 'Zwei Motorschiffe unter deiner Flagge, und keines von ihnen braucht ein Pferd.',
     startTown: 'niedermuend',
     money: 3000,
     startShip: 'motorschiff',
@@ -343,8 +343,8 @@ export const CHALLENGES: Challenge[] = [
     startYear: 10,
     deadlineDays: 180,
     goals: [
-      { type: 'ships', count: 3, shipType: 'motorschiff', text: 'Besitze drei Motorschiffe' },
-      { type: 'worth', amount: 25000, text: 'Komme auf ein Vermögen von 25 000 Talern' },
+      { type: 'ships', count: 2, shipType: 'motorschiff', text: 'Besitze zwei Motorschiffe' },
+      { type: 'worth', amount: 15000, text: 'Komme auf ein Vermögen von 15 000 Talern' },
     ],
   },
   {
