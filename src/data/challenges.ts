@@ -167,7 +167,7 @@ export const CHALLENGES: Challenge[] = [
     epoch: 1,
     startYear: 2,
     deadlineDays: 120,
-    goals: [{ type: 'share', good: 'holz', percent: 70, min: 1500, text: 'Verkaufe 70 % allen Holzes am Fluss, mindestens 1500 t' }],
+    goals: [{ type: 'share', good: 'holz', percent: 70, min: 1000, text: 'Verkaufe 70 % allen Holzes am Fluss, mindestens 1000 t' }],
   },
   {
     id: 'h-einschiff',
@@ -257,9 +257,9 @@ export const CHALLENGES: Challenge[] = [
     rivals: true,
     epoch: 1,
     startYear: 2,
-    deadlineDays: 180,
-    events: [{ kind: 'zoll', days: 180, seg: 'alle', value: 15 }],
-    goals: [{ type: 'worth', amount: 6000, text: 'Komme auf ein Vermögen von 6000 Talern' }],
+    deadlineDays: 120,
+    events: [{ kind: 'zoll', days: 120, seg: 'alle', value: 15 }],
+    goals: [{ type: 'money', amount: 4000, text: 'Besitze 4000 Taler' }],
   },
   {
     id: 'h-flut',
@@ -322,10 +322,10 @@ export const CHALLENGES: Challenge[] = [
     rivals: true,
     epoch: 2,
     startYear: 6,
-    deadlineDays: 60,
+    deadlineDays: 70,
     goals: [
-      { type: 'deliver', town: 'niedermuend', good: 'kohle', amount: 400, text: 'Bring 400 t Kohle nach Niedermünd' },
-      { type: 'deliver', town: 'kesselbrueck', good: 'kohle', amount: 250, text: 'Bring 250 t Kohle nach Kesselbrück' },
+      { type: 'deliver', town: 'niedermuend', good: 'kohle', amount: 300, text: 'Bring 300 t Kohle nach Niedermünd' },
+      { type: 'deliver', town: 'kesselbrueck', good: 'kohle', amount: 200, text: 'Bring 200 t Kohle nach Kesselbrück' },
     ],
   },
   {
