@@ -3,7 +3,7 @@
  * (Blubbern, Wellen am Ufer, Vogelrufe). Die Dichte folgt den Parametern.
  */
 import { mulberry32, range, type Rng } from './rng.ts';
-import { brownBuffer, noiseBurst, noiseSource, osc, ping } from './voices.ts';
+import { brownBuffer, noiseBurst, osc, ping } from './voices.ts';
 
 export interface AmbientOptions {
   /** Strömung / Wassermenge 0..1 */
@@ -29,8 +29,9 @@ export class RiverAmbience {
   private readonly ctx: BaseAudioContext;
   private readonly out: GainNode;
   private readonly rng: Rng;
+  private readonly pans: StereoPannerNode[];
   private params = { flow: 0, wind: 0, birds: 0 };
-  private layers: { stop(): void; rumble: GainNode; babble: GainNode; wind: GainNode } | null = null;
+  private layers: { stop(): void; rumble: GainNode; wind: GainNode } | null = null;
   private nextBubble = 0;
   private nextBird = 0;
   private nextLap = 0;
@@ -42,6 +43,12 @@ export class RiverAmbience {
     this.out = ctx.createGain();
     this.out.gain.value = 1;
     this.out.connect(dest);
+    this.pans = [-0.6, -0.2, 0.2, 0.6].map((v) => {
+      const p = ctx.createStereoPanner();
+      p.pan.value = v;
+      p.connect(this.out);
+      return p;
+    });
   }
 
   get active(): boolean {
@@ -59,9 +66,8 @@ export class RiverAmbience {
     const l = this.layers;
     if (!l) return;
     const tc = 1.2;
-    l.rumble.gain.setTargetAtTime(p.flow > 0 ? 0.05 + 0.16 * p.flow : 0, at, tc);
-    l.babble.gain.setTargetAtTime(p.flow > 0 ? 0.05 + 0.1 * p.flow : 0, at, tc);
-    l.wind.gain.setTargetAtTime(0.09 * p.wind, at, tc);
+    l.rumble.gain.setTargetAtTime(p.flow > 0 ? 0.02 + 0.04 * p.flow : 0, at, tc);
+    l.wind.gain.setTargetAtTime(0.035 * p.wind, at, tc);
     if (!this.active && typeof setTimeout !== 'undefined') {
       // Quellen nach dem Ausblenden anhalten, spart Rechenzeit
       this.stopTimer = setTimeout(() => {
@@ -79,75 +85,42 @@ export class RiverAmbience {
     const sources: AudioScheduledSourceNode[] = [];
     const add = <N extends AudioNode>(n: N) => (nodes.push(n), n);
     const src = <N extends AudioScheduledSourceNode>(n: N) => (sources.push(n), add(n));
+    const lowpass = (freq: number) => {
+      const f = add(ctx.createBiquadFilter());
+      f.type = 'lowpass';
+      f.frequency.value = freq;
+      f.Q.value = 0.5;
+      return f;
+    };
 
-    // Tiefes Rauschen der Strömung
+    // Ganz leises, tiefes Murmeln der Strömung. Nur braunes Rauschen, stark gefiltert:
+    // es soll man eher spüren als hören, sonst klingt es nach Rauschen statt nach Wasser.
     const brown = src(ctx.createBufferSource());
     brown.buffer = brownBuffer(ctx);
     brown.loop = true;
-    const lpLow = add(ctx.createBiquadFilter());
-    lpLow.type = 'lowpass';
-    lpLow.frequency.value = 380;
     const rumble = add(ctx.createGain());
     rumble.gain.value = 0;
-    brown.connect(lpLow).connect(rumble).connect(this.out);
+    brown.connect(lowpass(220)).connect(rumble).connect(this.out);
 
-    // Plätschern: mehrere schmale Bänder, deren Mitten schnell und unregelmäßig wandern
-    const babble = add(ctx.createGain());
-    babble.gain.value = 0;
-    babble.connect(this.out);
-    const white = src(noiseSource(ctx, true));
-    const base = add(ctx.createBiquadFilter());
-    base.type = 'bandpass';
-    base.frequency.value = 800;
-    base.Q.value = 0.6;
-    const baseGain = add(ctx.createGain());
-    baseGain.gain.value = 0.35;
-    white.connect(base).connect(baseGain).connect(babble);
-    for (const [center, rates] of [
-      [520, [1.7, 3.3]],
-      [940, [2.9, 5.1]],
-      [1550, [0.7, 4.3]],
-    ] as const) {
-      const bp = add(ctx.createBiquadFilter());
-      bp.type = 'bandpass';
-      bp.frequency.value = center;
-      bp.Q.value = 4;
-      for (const r of rates) {
-        const lfo = src(osc(ctx, 'sine', r * range(this.rng, 0.85, 1.15)));
-        const d = add(ctx.createGain());
-        d.gain.value = center * 0.22;
-        lfo.connect(d).connect(bp.frequency);
-      }
-      const g = add(ctx.createGain());
-      g.gain.value = 1.4;
-      white.connect(bp).connect(g).connect(babble);
-    }
-
-    // Wind: breites, langsam schwellendes Rauschen
-    const white2 = src(noiseSource(ctx, true));
-    const wbp = add(ctx.createBiquadFilter());
-    wbp.type = 'bandpass';
-    wbp.frequency.value = 520;
-    wbp.Q.value = 0.5;
-    const wlfo = src(osc(ctx, 'sine', 0.06));
-    const wd = add(ctx.createGain());
-    wd.gain.value = 260;
-    wlfo.connect(wd).connect(wbp.frequency);
-    const swell = add(ctx.createGain());
-    swell.gain.value = 0.7;
-    const slfo = src(osc(ctx, 'sine', 0.09));
-    const sd = add(ctx.createGain());
-    sd.gain.value = 0.3;
-    slfo.connect(sd).connect(swell.gain);
+    // Wind nur als seltene, weiche Böen, ebenfalls aus tiefem Rauschen
+    const brown2 = src(ctx.createBufferSource());
+    brown2.buffer = brownBuffer(ctx);
+    brown2.loop = true;
+    const windLp = lowpass(450);
+    const gust = add(ctx.createGain());
+    gust.gain.value = 0.5;
+    const glfo = src(osc(ctx, 'sine', 0.07));
+    const gd = add(ctx.createGain());
+    gd.gain.value = 0.5;
+    glfo.connect(gd).connect(gust.gain);
     const wind = add(ctx.createGain());
     wind.gain.value = 0;
-    white2.connect(wbp).connect(swell).connect(wind).connect(this.out);
+    brown2.connect(windLp).connect(gust).connect(wind).connect(this.out);
 
-    sources.forEach((s, i) => (s instanceof AudioBufferSourceNode ? s.start(t, i * 0.37) : s.start(t)));
+    sources.forEach((s, i) => (s instanceof AudioBufferSourceNode ? s.start(t, i * 1.7) : s.start(t)));
     this.nextBubble = this.nextBird = this.nextLap = t + 0.5;
     this.layers = {
       rumble,
-      babble,
       wind,
       stop: () => {
         sources.forEach((s) => s.stop());
@@ -165,7 +138,8 @@ export class RiverAmbience {
     if (flow > 0) {
       for (this.nextBubble = skip(this.nextBubble); this.nextBubble < until; ) {
         this.bubble(this.nextBubble);
-        this.nextBubble += range(this.rng, 0.08, 0.7) / (0.3 + flow);
+        // Plätschern entsteht aus vielen winzigen Tropfen statt aus Rauschen
+        this.nextBubble += range(this.rng, 0.03, 0.22) / (0.4 + flow);
       }
       for (this.nextLap = skip(this.nextLap); this.nextLap < until; ) {
         this.lap(this.nextLap, flow);
@@ -181,15 +155,21 @@ export class RiverAmbience {
   }
 
   private bubble(t: number): void {
-    const f = range(this.rng, 350, 1100);
-    ping(this.ctx, this.out, t, f, range(this.rng, 0.015, 0.05), 0.04, { toFreq: f * range(this.rng, 1.8, 2.8), glide: 0.035 });
+    const f = range(this.rng, 450, 1400);
+    const pan = this.pans[Math.floor(this.rng() * this.pans.length)];
+    const big = this.rng() < 0.08;
+    ping(this.ctx, pan, t, big ? f * 0.6 : f, range(this.rng, 0.004, 0.014) * (big ? 2 : 1), big ? 0.06 : 0.03, {
+      toFreq: f * range(this.rng, 1.4, 2.0),
+      glide: 0.025,
+    });
   }
 
   private lap(t: number, flow: number): void {
-    noiseBurst(this.ctx, this.out, t, 'bandpass', range(this.rng, 400, 700), 0.9, 0.05 + 0.04 * flow, 0.45, {
-      attack: 0.25,
-      toFreq: range(this.rng, 250, 350),
-      sweep: 0.6,
+    // Welle am Ufer: weich, tief, ohne Zischen
+    noiseBurst(this.ctx, this.out, t, 'lowpass', range(this.rng, 500, 700), 0.5, 0.012 + 0.012 * flow, 0.5, {
+      attack: 0.35,
+      toFreq: range(this.rng, 200, 280),
+      sweep: 0.8,
     });
   }
 
@@ -234,6 +214,7 @@ export class RiverAmbience {
   dispose(): void {
     this.layers?.stop();
     this.layers = null;
+    this.pans.forEach((p) => p.disconnect());
     this.out.disconnect();
   }
 }

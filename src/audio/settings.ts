@@ -9,7 +9,7 @@ export interface AudioSettings {
 export const STORAGE_KEY = 'flussreich.audio';
 
 export const DEFAULT_SETTINGS: AudioSettings = {
-  volume: { master: 0.9, music: 0.65, sfx: 0.8, ambient: 0.6 },
+  volume: { master: 0.9, music: 0.65, sfx: 0.8, ambient: 0.45 },
   muted: false,
 };
 
