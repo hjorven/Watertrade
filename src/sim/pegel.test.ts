@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { VALLEY } from '../data/maps/valley.ts';
 import { PROJECT_BY_ID } from '../data/projects.ts';
-import { describeForecast, eventWaterOffset, FORECAST_MAX, FORECAST_MIN, visibleForecasts } from './events.ts';
+import { describeForecast, FORECAST_MAX, FORECAST_MIN, visibleForecasts } from './events.ts';
+import { waterLevel } from './calendar.ts';
 import { advance, newGame } from './game.ts';
 import { day, type GameState } from './state.ts';
 import { gaugeCount, litSegments, startProject } from './works.ts';
@@ -19,7 +20,6 @@ function runYear(seed: number, gauges: string[]) {
   const announced = new Map<number, { day: number; from: number }>();
   const started = new Map<number, number>();
   const warnings: { day: number; text: string }[] = [];
-  let offsetWhilePending = 0;
   for (let i = 0; i < 360; i++) {
     const before = new Set(s.news);
     advance(s, VALLEY, 24);
@@ -27,9 +27,8 @@ function runYear(seed: number, gauges: string[]) {
     for (const e of s.forecast ?? []) if (!announced.has(e.id)) announced.set(e.id, { day: d, from: e.from });
     for (const e of s.events) if (isWeather(e.kind) && !started.has(e.id)) started.set(e.id, d);
     for (const n of s.news) if (!before.has(n) && n.text.includes('Pegelstation')) warnings.push({ day: n.day, text: n.text });
-    if ((s.forecast ?? []).length && !s.events.some((e) => isWeather(e.kind))) offsetWhilePending += Math.abs(eventWaterOffset(s));
   }
-  return { s, announced, started, warnings, offsetWhilePending };
+  return { s, announced, started, warnings };
 }
 
 describe('Pegelstationen und Vorwarnung (6.2)', () => {
@@ -57,19 +56,60 @@ describe('Pegelstationen und Vorwarnung (6.2)', () => {
     const { announced, warnings } = runYear(7, ['pegel-oberau']);
     expect(warnings.length).toBe(announced.size);
     for (const a of announced.values()) expect(warnings.some((w) => w.day === a.day)).toBe(true);
-    expect(warnings.every((w) => /in Kürze|in etwa \d+ bis \d+ Tagen/.test(w.text))).toBe(true);
+    expect(warnings.every((w) => w.text.includes(`in ${FORECAST_MIN} bis ${FORECAST_MAX} Tagen`))).toBe(true);
   });
 
   it('Eine angekündigte Lage verändert den Pegel erst, wenn sie beginnt', () => {
-    const { offsetWhilePending } = runYear(11, ['pegel-oberau']);
-    expect(offsetWhilePending).toBe(0);
+    const s = newGame(VALLEY, { startTown: 'oberau', seed: 11 });
+    let checked = 0;
+    for (let i = 0; i < 360; i++) {
+      advance(s, VALLEY, 24);
+      const d = day(s);
+      const base = waterLevel(s.hour / 24 + 1);
+      const pending = (s.forecast ?? []).find((e) => isWeather(e.kind));
+      // am Tag vor dem Beginn ist der Pegel noch normal
+      if (pending && pending.from === d + 1) {
+        expect(s.waterLevel).toBeCloseTo(base, 6);
+        advance(s, VALLEY, 24);
+        expect(s.events.some((e) => e.id === pending.id)).toBe(true);
+        expect(Math.abs(s.waterLevel - waterLevel(s.hour / 24 + 1))).toBeGreaterThan(0.3);
+        checked++;
+        i++;
+      }
+    }
+    expect(checked).toBeGreaterThan(1);
+  });
+
+  it('Mit einer Station nennt die Meldung nur eine Spanne, die den echten Tag nicht verrät', () => {
+    const s = newGame(VALLEY, { startTown: 'oberau', seed: 3 });
+    build(s, ['pegel-oberau']);
+    const d = day(s);
+    for (const lead of [3, 4, 5]) {
+      const e = { id: lead, kind: 'hochwasser' as const, from: d + lead, until: d + lead + 5, value: 1, announced: d };
+      expect(describeForecast(s, e)).toBe('Hochwasser in 3 bis 5 Tagen');
+    }
+    // zwei Tage später: noch 1 bis 3 Tage
+    const later = { id: 9, kind: 'duerre' as const, from: d + 4, until: d + 12, value: -0.5, announced: d - 2 };
+    expect(describeForecast(s, later)).toBe('Dürre in 1 bis 3 Tagen');
+  });
+
+  it('Angekündigte Lagen zählen mit: keine Überlagerung, höchstens zwei Ereignisse', () => {
+    const s = newGame(VALLEY, { startTown: 'oberau', seed: 21 });
+    let maxTotal = 0;
+    for (let i = 0; i < 720; i++) {
+      advance(s, VALLEY, 24);
+      const all = [...s.events, ...(s.forecast ?? [])];
+      maxTotal = Math.max(maxTotal, all.length);
+      expect(all.filter((e) => isWeather(e.kind)).length).toBeLessThanOrEqual(1);
+    }
+    expect(maxTotal).toBeLessThanOrEqual(2);
   });
 
   it('Zwei Stationen nennen genauen Tag und Pegel', () => {
     const s = newGame(VALLEY, { startTown: 'oberau', seed: 3 });
-    const e = { id: 1, kind: 'hochwasser' as const, from: day(s) + 4, until: day(s) + 9, value: 1.23 };
+    const e = { id: 1, kind: 'hochwasser' as const, from: day(s) + 4, until: day(s) + 9, value: 1.23, announced: day(s) };
     build(s, ['pegel-oberau']);
-    expect(describeForecast(s, e)).toBe('Hochwasser in etwa 3 bis 5 Tagen');
+    expect(describeForecast(s, e)).toBe('Hochwasser in 3 bis 5 Tagen');
     build(s, ['pegel-erzbach']);
     expect(describeForecast(s, e)).toBe(`Hochwasser in 4 Tagen (ab Tag ${day(s) + 4}): etwa 1,2 m über normal, rund 6 Tage lang`);
     const dry = { id: 2, kind: 'duerre' as const, from: day(s) + 1, until: day(s) + 10, value: -0.55 };
@@ -91,6 +131,11 @@ describe('Pegelstationen und Vorwarnung (6.2)', () => {
     const s = newGame(VALLEY, { startTown: 'oberau', seed: 9 });
     delete s.forecast;
     build(s, ['pegel-oberau']);
-    expect(() => advance(s, VALLEY, 24 * 120)).not.toThrow();
+    let weather = 0;
+    for (let i = 0; i < 360; i++) {
+      advance(s, VALLEY, 24);
+      if (s.events.some((e) => isWeather(e.kind))) weather++;
+    }
+    expect(weather).toBeGreaterThan(5);
   });
 });

@@ -104,12 +104,14 @@ function gauge(land: Landscape, seg: SegmentDef, f: number): THREE.Group {
     k.add(boxGeo(0.5, 0.3, 0.03), COL.white, { x: 0.9, y: 1.15, z: -0.5 });
   });
   // Steg vom Ufer zur Latte und die Latte selbst, in Abschnitten von 0,3 m
+  // Steg auf Uferhöhe, damit er bei hohem Ufer nicht im Gelände verschwindet
+  const walkY = Math.max(0.3, land.surfaceAt(p.x + n.x * (hw + 1.2), p.z + n.z * (hw + 1.2)));
   k.at({ x: p.x + n.x * (hw + 0.4), y: 0, z: p.z + n.z * (hw + 0.4), ry: heading }, () => {
-    k.add(boxGeo(0.5, 0.08, 2.0), COL.wood, { y: 0.3 });
-    for (const dz of [-0.8, 0.8]) k.add(boxGeo(0.1, 0.9, 0.1), COL.dark, { x: 0.2, y: -0.5, z: dz });
+    k.add(boxGeo(0.5, 0.08, 2.0), COL.wood, { y: walkY });
+    for (const dz of [-0.8, 0.8]) k.add(boxGeo(0.1, walkY + 0.5, 0.1), COL.dark, { x: 0.2, y: -0.5, z: dz });
   });
   k.at({ x: p.x + n.x * (hw - 0.6), y: 0, z: p.z + n.z * (hw - 0.6), ry: heading }, () => {
-    k.add(boxGeo(0.08, 2.6, 0.08), COL.dark, { y: -0.9, z: 0.06 });
+    k.add(boxGeo(0.08, 2.9, 0.08), COL.dark, { y: -0.9, z: 0.06 });
     for (let i = 0; i < 8; i++) k.add(boxGeo(0.18, 0.3, 0.06), i % 2 ? COL.red : COL.white, { y: -0.6 + i * 0.3 });
   });
   g.add(k.mesh());
@@ -134,7 +136,8 @@ function beacon(land: Landscape, seg: SegmentDef, f: number, side: number): THRE
     k.add(boxGeo(0.04, 0.35, 0.04), COL.iron, { x: Math.cos(a) * 0.7, y: 5.0, z: Math.sin(a) * 0.7 });
   }
   k.add(coneGeo(0.6, 0.7, 10), COL.red, { y: 5.75 });
-  k.add(boxGeo(0.4, 0.8, 0.06), COL.dark, { z: 0.82, y: 0.45 });
+  // Tür zur Landseite, weg vom Fluss
+  k.at({ ry: Math.atan2(n.x * side, n.z * side) }, () => k.add(boxGeo(0.4, 0.8, 0.06), COL.dark, { z: 0.82, y: 0.45 }));
   const tower = k.mesh();
   const light = new THREE.Mesh(cylGeo(0.4, 0.4, 0.7, 8), lamp);
   light.position.y = 5.05;

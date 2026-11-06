@@ -19,6 +19,16 @@ export function visibleForecasts(state: GameState): WorldEvent[] {
 
 const meters = (v: number) => Math.abs(v).toFixed(1).replace('.', ',');
 
+/** Mit nur einer Station kennt man den Tag nicht genau: Spanne aus dem Ankündigungstag, ohne den echten Tag zu verraten */
+function roughWhen(d: number, e: WorldEvent): string {
+  const elapsed = d - (e.announced ?? d);
+  const lo = Math.max(1, FORECAST_MIN - elapsed);
+  const hi = Math.max(1, FORECAST_MAX - elapsed);
+  if (e.from <= d) return 'ab heute';
+  if (hi <= 1) return 'ab morgen';
+  return lo === hi ? `in ${lo} Tagen` : `in ${lo} bis ${hi} Tagen`;
+}
+
 /** Text der Pegelmeldung; ab zwei Stationen mit genauem Tag und Pegel */
 export function describeForecast(state: GameState, e: WorldEvent): string {
   const d = day(state);
@@ -30,9 +40,7 @@ export function describeForecast(state: GameState, e: WorldEvent): string {
       : inDays === 1
         ? 'ab morgen'
         : `in ${inDays} Tagen (ab Tag ${e.from})`
-    : inDays <= 1
-      ? 'in Kürze'
-      : `in etwa ${Math.max(1, inDays - 1)} bis ${inDays + 1} Tagen`;
+    : roughWhen(d, e);
   const days = e.until - e.from + 1;
   if (e.kind === 'hochwasser') {
     return exact
@@ -144,6 +152,7 @@ function startEvent(state: GameState, map: MapDef, kind: WorldEventKind): WorldE
   if (isWeather(kind)) {
     // Hochwasser und Dürre kommen nicht über Nacht: sie beginnen erst nach einigen Tagen
     const lead = randInt(state, FORECAST_MIN, FORECAST_MAX);
+    e.announced = d;
     e.from += lead;
     e.until += lead;
     (state.forecast ??= []).push(e);

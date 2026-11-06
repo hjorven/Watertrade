@@ -132,6 +132,8 @@ export interface WorldEvent {
   town?: string;
   seg?: string;
   value?: number; // Pegel, Zollhöhe
+  /** Tag der Ankündigung (nur Hochwasser und Dürre) */
+  announced?: number;
 }
 
 export interface NewsItem {

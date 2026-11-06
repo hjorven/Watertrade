@@ -301,7 +301,11 @@ export class Hud {
 
   render(state: GameState, selected: number): void {
     const w = wind(state);
-    const events = state.events.length ? `<span class="hide-narrow event-chip" title="${state.events.map((e) => describeEvent(this.map, e)).join('\n')}"><small>Lage</small><b>${state.events.map((e) => EVENT_TITLE[e.kind]).join(', ')}</b></span>` : '';
+    // angekündigte Wetterlagen (nur mit Pegelstation sichtbar) stehen mit in der Lage
+    const ahead = visibleForecasts(state);
+    const lage = [...state.events.map((e) => EVENT_TITLE[e.kind]), ...ahead.map((e) => `${EVENT_TITLE[e.kind]} (angekündigt)`)];
+    const lageTitle = [...state.events.map((e) => describeEvent(this.map, e)), ...ahead.map((e) => describeForecast(state, e))].join('\n');
+    const events = lage.length ? `<span class="hide-narrow event-chip" title="${lageTitle}"><small>Lage</small><b>${lage.join(', ')}</b></span>` : '';
     setHtml(
       this.top,
       `
