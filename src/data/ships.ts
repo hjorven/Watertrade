@@ -15,6 +15,8 @@ export interface ShipClass extends ShipType {
   fresh?: number;
   /** Bauholz in Tonnen, das zum Bau nötig ist (Floß). Der Preis ist dann nur der Lohn. */
   timber?: number;
+  /** Verschleiß im Verhältnis zum Holzrumpf (1). Eiserne Rümpfe halten länger, sonst frisst die Werft den Gewinn großer Schiffe. */
+  wear?: number;
 }
 
 /** Verderbliche Ware: Wertverlust je Fahrtag ohne Kühlung. Milch hält kaum, Käse ist die haltbare Form. */
@@ -114,9 +116,10 @@ export const SHIPS: Record<string, ShipClass> = {
     capacity: 70,
     canGoUpstream: true,
     price: 2600,
-    coal: 0.6,
+    coal: 0.4,
     bunker: 25,
-    description: 'Schaufelräder und Kohle: schnell gegen jede Strömung, ohne Pferde und Wind. Verbrennt 0,6 t Kohle je Stunde aus dem Bunker. Der Schornstein ist hoch.',
+    wear: 0.5,
+    description: 'Schaufelräder und Kohle: schnell gegen jede Strömung, ohne Pferde und Wind. Verbrennt 0,4 t Kohle je Stunde aus dem Bunker. Der Schornstein ist hoch.',
   },
   schleppverband: {
     id: 'schleppverband',
@@ -129,9 +132,10 @@ export const SHIPS: Record<string, ShipClass> = {
     capacity: 180,
     canGoUpstream: true,
     price: 4200,
-    coal: 1.0,
+    coal: 0.7,
     bunker: 45,
-    description: 'Ein Schlepper zieht zwei Kähne. Riesige Ladung, aber tief und langsam: nur auf dem Hauptstrom sinnvoll. Verbrennt 1 t Kohle je Stunde.',
+    wear: 0.5,
+    description: 'Ein Schlepper zieht zwei Kähne. Riesige Ladung, aber tief und langsam: nur auf dem Hauptstrom sinnvoll. Verbrennt 0,7 t Kohle je Stunde.',
   },
   // Epoche 3: Motor
   motorschiff: {
@@ -147,6 +151,7 @@ export const SHIPS: Record<string, ShipClass> = {
     price: 6500,
     diesel: 0.25,
     bunker: 12,
+    wear: 0.3,
     description: 'Dieselmotor, Steuerhaus achtern, flacher Aufbau: schnell, groß und passt unter die meisten Brücken. Verbraucht 0,25 t Diesel je Stunde aus dem Tank.',
   },
   kuehlschiff: {
@@ -162,6 +167,7 @@ export const SHIPS: Record<string, ShipClass> = {
     price: 7200,
     diesel: 0.28,
     bunker: 12,
+    wear: 0.3,
     fresh: 0.1,
     description: 'Kühlraum für Fisch, Milch, Käse, Brot und Bier: nichts verdirbt unterwegs, und ganz frische Ware bringt 10 % mehr. Verbraucht 0,28 t Diesel je Stunde.',
   },

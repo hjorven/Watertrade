@@ -289,7 +289,7 @@ export function voyagePosition(v: Voyage): { leg: Leg; progress: number; index: 
   throw new Error('Fahrt ohne Abschnitte');
 }
 
-/** Verschleiß pro Fahrstunde: nach rund 400 Fahrstunden ist ein Schiff ohne Pflege am Ende */
+/** Verschleiß pro Fahrstunde: nach rund 400 Fahrstunden ist ein Holzschiff ohne Pflege am Ende (eiserne Rümpfe: ShipClass.wear) */
 export const WEAR_PER_HOUR = 0.0025;
 
 /** Unter diesem Abstand zwischen Kiel und Grund schleift das Schiff: doppelter Verschleiß */
@@ -299,7 +299,7 @@ export const TIGHT_DEPTH = 0.2;
 export const ICE_WEAR = 1.5;
 
 export function wearRate(ship: Ship, extra = 1): number {
-  let w = WEAR_PER_HOUR * extra;
+  let w = WEAR_PER_HOUR * (shipClass(ship).wear ?? 1) * extra;
   if (hasTrait(ship.captain, 'vorsichtig')) w *= 0.5;
   if (hasUpgrade(ship, 'beschlag')) w *= 0.6;
   if (ship.type === 'floss') w = 0;

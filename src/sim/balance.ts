@@ -7,14 +7,15 @@ import type { Chapter } from '../data/campaign.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { buyCost, price, SELL_FACTOR, sellRevenue } from './economy.ts';
-import { MIN_FRESH, PERISH, SHIPS } from '../data/ships.ts';
+import { fuelOf, MIN_FRESH, PERISH, SHIPS } from '../data/ships.ts';
 import { hasYard, repair, timberPlan } from './fleet.ts';
 import { bestRaftPlan } from './rafting.ts';
 import { goalDone } from './goals.ts';
 import { PROJECT_BY_ID } from '../data/projects.ts';
 import { startProject } from './works.ts';
-import { sailingHours } from './voyage.ts';
+import { FUEL_DEALER_FACTOR, sailingHours, wearRate } from './voyage.ts';
 import { steamDays } from './steam.ts';
+import { capacityOf } from './state.ts';
 import { advance, buy, bunkerPlan, buyShip, cargoLoad, day, depart, dismantleRaft, kontorBuy, kontorSell, newGame, planVoyage, sell, shipClass, type GameState } from './game.ts';
 import { betriebeIn, buildBetrieb, buildingAllowed, buildKontor, dailyUpkeep, playerWorth, sellBetrieb } from './house.ts';
 import { rivalWorth } from './rivals.ts';
@@ -31,23 +32,30 @@ export interface BalanceReport {
 function bestTrade(state: GameState, map: MapDef, shipId: number, allow: (town: string) => boolean = () => true) {
   const ship = state.ships.find((s) => s.id === shipId)!;
   const here = state.markets[ship.port!];
-  const cap = shipClass(ship).capacity;
+  const cls = shipClass(ship);
+  const cap = capacityOf(ship) - cargoLoad(ship);
   let best: { good: string; to: string; amount: number; perHour: number } | null = null;
   for (const town of map.towns) {
     if (town.id === ship.port || !allow(town.id)) continue;
     const plan = planVoyage(state, map, shipId, town.id);
     if (!plan || !plan.ok) continue;
     const there = state.markets[town.id];
-    // Dampfer: Kohle für die Fahrt mitrechnen (Kontorkohle kostet nichts mehr, Marktkohle zum Marktpreis)
-    const coal = bunkerPlan(state, ship, sailingHours(plan.voyage), plan.voyage.toll ?? 0);
+    // Brennstoff für die Fahrt mitrechnen (eigener aus dem Kontor kostet nichts mehr, sonst zum Marktpreis, ohne Markt beim Händler)
+    const hours = sailingHours(plan.voyage);
+    const coal = bunkerPlan(state, ship, hours, plan.voyage.toll ?? 0);
     if (coal.problem) continue;
-    // verbrannte Kohle zum Preis, den Nachkaufen kostet (auch wenn sie schon im Bunker liegt)
-    const coalMarket = state.markets[ship.port!].kohle;
+    // verbrannter Brennstoff zum Preis, den Nachkaufen kostet (auch wenn er schon im Bunker liegt)
+    const fuel = fuelOf(cls);
+    const fuelMarket = fuel ? state.markets[ship.port!][fuel.good] : undefined;
     const paid = Math.max(0, coal.need - coal.fromKontor);
-    const coalCost = paid * (coalMarket ? price(GOOD_BY_ID.get('kohle')!.base, coalMarket.stock, coalMarket.target) : GOOD_BY_ID.get('kohle')!.base);
+    const fuelBase = fuel ? GOOD_BY_ID.get(fuel.good)!.base : 0;
+    const fuelCost = paid * (fuelMarket ? price(fuelBase, fuelMarket.stock, fuelMarket.target) : fuelBase * FUEL_DEALER_FACTOR);
+    // dazu die Werftkosten für den Verschleiß; nur das erste Gut trägt sie, weitere Ladung fährt umsonst mit
+    const runCost = cargoLoad(ship) > 0 ? 0 : fuelCost + wearRate(ship) * hours * cls.price * 0.5;
     for (const [goodId, m] of Object.entries(here)) {
       const dest = there[goodId];
-      if (!dest) continue;
+      // was schon im Laderaum liegt, hat den Zielpreis bereits gedrückt
+      if (!dest || ship.cargo[goodId]) continue;
       const base = GOOD_BY_ID.get(goodId)!.base;
       const max = Math.min(cap, Math.floor(m.stock));
       // verschiedene Mengen probieren, große Mengen drücken den Preis am Ziel
@@ -56,13 +64,32 @@ function bestTrade(state: GameState, map: MapDef, shipId: number, allow: (town: 
         // Kohle und Zoll beim Ablegen müssen nach dem Einkauf noch bezahlbar sein
         if (cost + coal.cost + (plan.voyage.toll ?? 0) > state.money) break;
         // verderbliche Ware kommt ohne Kühlraum mit weniger Wert an
-        const fresh = shipClass(ship).fresh ? 1 : Math.max(MIN_FRESH, 1 - ((PERISH[goodId] ?? 0) * plan.voyage.hours) / 24);
-        const perHour = (sellRevenue(base, dest, amount, SELL_FACTOR * fresh) - cost - coalCost) / plan.voyage.hours;
+        const fresh = cls.fresh ? 1 : Math.max(MIN_FRESH, 1 - ((PERISH[goodId] ?? 0) * plan.voyage.hours) / 24);
+        const perHour = (sellRevenue(base, dest, amount, SELL_FACTOR * fresh) - cost - runCost) / plan.voyage.hours;
         if (!best || perHour > best.perHour) best = { good: goodId, to: town.id, amount, perHour };
       }
     }
   }
   return best;
+}
+
+/** Hafen, von dem aus das leere Schiff das beste Geschäft fände (Leerfahrt dorthin muss möglich sein) */
+function bestStart(state: GameState, map: MapDef, shipId: number): string | null {
+  const ship = state.ships.find((s) => s.id === shipId)!;
+  const home = ship.port!;
+  let best: { to: string; score: number } | null = null;
+  for (const town of map.towns) {
+    if (town.id === home) continue;
+    const plan = planVoyage(state, map, shipId, town.id);
+    if (!plan?.ok || bunkerPlan(state, ship, sailingHours(plan.voyage), plan.voyage.toll ?? 0).problem) continue;
+    ship.port = town.id;
+    const t = bestTrade(state, map, shipId);
+    ship.port = home;
+    // Gewinn der nächsten Fahrt abzüglich der Stunden für die Leerfahrt
+    const score = t ? t.perHour * 10 - plan.voyage.hours * 2 : -Infinity;
+    if (t && t.perHour > 0 && (!best || score > best.score)) best = { to: town.id, score };
+  }
+  return best?.to ?? null;
 }
 
 /* ---------- Zielwerte der Balance (Phase 2) ---------- */
@@ -240,15 +267,34 @@ export function runGrowth(map: MapDef, chapter: Chapter, target: number, maxDays
   const worthByDay: number[] = [];
   let reachedOn: number | null = null;
   let lastDay = startDay;
+  const idle = new Map<number, number>();
   while (day(state) - startDay < maxDays) {
     for (const ship of state.ships) {
       if (!ship.port) continue;
       for (const good of Object.keys(ship.cargo)) sell(state, ship.id, good, Infinity);
       if (ship.condition < 0.6 && hasYard(map, ship.port)) repair(state, map, ship.id);
       const t = bestTrade(state, map, ship.id);
-      if (t && t.perHour > 0) {
+      if (!(t && t.perHour > 0)) {
+        // wer einen Tag nichts findet, fährt leer dorthin, wo es das beste Geschäft gibt
+        idle.set(ship.id, (idle.get(ship.id) ?? 0) + 1);
+        if ((idle.get(ship.id) ?? 0) >= 24) {
+          idle.set(ship.id, 0);
+          const to = bestStart(state, map, ship.id);
+          if (to) depart(state, map, ship.id, to);
+        }
+        continue;
+      }
+      idle.set(ship.id, 0);
+      {
         buy(state, ship.id, t.good, t.amount);
-        while (cargoLoad(ship) > 0 && !depart(state, map, ship.id, t.to)) sell(state, ship.id, t.good, 5);
+        // freien Laderaum mit weiteren Waren für dasselbe Ziel füllen, wie es ein Spieler tut
+        for (let i = 0; i < 3; i++) {
+          const more = bestTrade(state, map, ship.id, (town) => town === t.to);
+          if (!more || more.perHour <= 0) break;
+          buy(state, ship.id, more.good, more.amount);
+        }
+        // zu tief für den Pegel: Ladung verringern, die zuletzt geladene Ware zuerst
+        while (cargoLoad(ship) > 0 && !depart(state, map, ship.id, t.to)) sell(state, ship.id, Object.keys(ship.cargo).at(-1)!, 5);
       }
     }
     // Schiffe ohne Geschäft warten eine Stunde, damit sich die Märkte bewegen
