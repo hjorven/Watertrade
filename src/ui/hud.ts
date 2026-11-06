@@ -33,6 +33,24 @@ import {
 } from '../sim/game.ts';
 import { PROJECTS } from '../data/projects.ts';
 import { daysLeft, projectState } from '../sim/works.ts';
+import { HARBOR_LEVELS } from '../data/harbors.ts';
+import {
+  berths,
+  dredgeCost,
+  FEE_LABEL,
+  feeSum,
+  harborCost,
+  harborDaysLeft,
+  harborOf,
+  harborPartner,
+  nextHarborLevel,
+  ownerName,
+  partnerOffer,
+  passageFee,
+  quayDepth,
+  upkeepCost,
+} from '../sim/wasserbau.ts';
+import { sailingHours } from '../sim/voyage.ts';
 import { betriebeIn, buildingAllowed, kontorUpkeepIn, playerWorth } from '../sim/house.ts';
 import { rivalWorth } from '../sim/rivals.ts';
 import { renderRivalry } from './rivalry.ts';
@@ -78,6 +96,13 @@ const fmtHours = (h: number) => {
   const whole = Math.floor(h);
   const min = Math.round((h - whole) * 60);
   return min === 0 ? `${whole} Std` : `${whole} Std ${min} Min`;
+};
+
+/** Hinweis, solange ein Schiff zu Beginn oder am Ende einer Fahrt am Anleger umschlägt */
+const dockNote = (v: { elapsed: number; hours: number; dock?: number; dockEnd?: number }) => {
+  if (v.dock && v.elapsed < v.dock) return `<p class="note">Wird noch beladen, legt in ${fmtHours(v.dock - v.elapsed)} ab.</p>`;
+  if (v.dockEnd && v.elapsed > v.hours - v.dockEnd) return `<p class="note">Liegt am Kai und wird gelöscht.</p>`;
+  return '';
 };
 
 const clock = (hour: number) => {
@@ -466,12 +491,16 @@ export class Hud {
         }
         const v = plan.voyage;
         const dir = v.legs.every((l) => l.downstream) ? 'talwärts' : v.legs.every((l) => !l.downstream) ? 'bergwärts' : 'tal- und bergwärts';
-        const toll = v.toll ? `, Zoll ${v.toll}` : v.evaded ? `, ${v.evaded} Zoll umgangen, Kontrolle möglich` : '';
-        const coal = bunkerPlan(state, ship, v.hours, v.toll ?? 0);
+        const fees = feeSum(v.fees);
+        const zoll = (v.toll ?? 0) - fees;
+        const toll = `${zoll ? `, Zoll ${zoll}` : v.evaded ? `, ${v.evaded} Zoll umgangen, Kontrolle möglich` : ''}${fees ? `, Gebühren ${fees}` : ''}`;
+        const dockH = (v.dock ?? 0) + (v.dockEnd ?? 0);
+        const dockText = dockH >= 0.5 ? ` (davon ${fmtHours(dockH)} Laden und Löschen)` : '';
+        const coal = bunkerPlan(state, ship, sailingHours(v), v.toll ?? 0);
         if (coal.problem) return `<button class="btn dest" disabled title="${coal.problem}"><b>${t.name}</b><small>${coal.buy ? `${coal.buy} t Kohle fehlen` : 'Bunker zu klein'}</small></button>`;
         const coalText = coal.need ? `, Kohle ${String(coal.need).replace('.', ',')} t${coal.buy ? `, bunkert ${coal.buy} t für ${coal.cost} Taler` : ''}` : '';
         const tooDear = (v.toll ?? 0) + coal.cost > state.money;
-        return `<button class="btn dest" data-act="depart" data-to="${t.id}" ${tooDear ? 'disabled' : ''}><b>${t.name}</b><small>${dir}, ${fmtHours(v.hours)}${toll}${coalText}</small></button>`;
+        return `<button class="btn dest" data-act="depart" data-to="${t.id}" ${tooDear ? 'disabled' : ''}><b>${t.name}</b><small>${dir}, ${fmtHours(v.hours)}${dockText}${toll}${coalText}</small></button>`;
       })
       .join('');
 
@@ -800,7 +829,8 @@ export class Hud {
         <p>${how} ${speed.toFixed(1).replace('.', ',')} km/h über Grund, Strömung ${String(seg.current).replace('.', ',')} km/h.</p>
       </div>
       <div class="progress"><div style="width:${pct}%"></div></div>
-      <p class="note">${fmtHours(v.elapsed)} von ${fmtHours(v.hours)}${v.toll ? ` · Zoll bezahlt: ${v.toll} Taler` : ''}${v.evaded ? ` · ${v.evaded} Taler Zoll umgangen, Kontrolle möglich` : ''}</p>
+      <p class="note">${fmtHours(v.elapsed)} von ${fmtHours(v.hours)}${v.toll ? ` · ${v.fees?.length ? 'Zoll und Gebühren' : 'Zoll'} bezahlt: ${v.toll} Taler` : ''}${v.evaded ? ` · ${v.evaded} Taler Zoll umgangen, Kontrolle möglich` : ''}</p>
+      ${dockNote(v)}
       <ol class="route">${route}</ol>
       <p class="note">Ladung: ${cargo || 'leer'} · Zustand ${Math.round(ship.condition * 100)} %${cls.coal ? ` · Bunker ${Math.floor(ship.bunker ?? 0)} t Kohle` : ''}</p>
       ${captain}`;
@@ -895,25 +925,100 @@ export class Hud {
   }
 
   private renderWorks(state: GameState): string {
+    const feeBtns = (id: string, current: string | undefined) =>
+      `<div class="row-btns" role="group" aria-label="Gebühr"><small>Gebühr:</small>${(['frei', 'normal', 'hoch'] as const)
+        .map(
+          (lv) =>
+            `<button class="btn small ${(current ?? 'normal') === lv ? 'on' : ''}" data-act="cmd" data-cmd="workFee" data-id="${id}" data-level="${lv}" aria-pressed="${(current ?? 'normal') === lv}" title="${FEE_LABEL[lv]}">${lv === 'frei' ? 'frei' : lv === 'normal' ? 'üblich' : 'hoch'}</button>`,
+        )
+        .join('')}</div>`;
     const list = PROJECTS.map((p) => {
       const st = projectState(state, p.id);
+      const w = state.works.find((x) => x.id === p.id);
       const seg = this.map.segments.find((s) => s.id === p.seg)!;
       const where = `${this.townName(seg.from)} – ${this.townName(seg.to)}`;
       const locked = p.epoch > state.epoch;
-      const btn =
-        st === 'fertig'
-          ? '<span class="done-mark">fertig</span>'
-          : st === 'bau'
-            ? `<span class="note">noch ${daysLeft(state, p.id)} Tage</span>`
-            : locked
-              ? `<span class="note nowrap">ab Epoche „${EPOCHS[p.epoch - 1].name}“</span>`
-              : `<button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" ${state.money >= p.cost ? '' : 'disabled'}>${fmt(p.cost)} Taler</button>`;
-      return `<div class="yard-row ${locked ? 'muted' : ''}"><div><b>${p.name}</b> <small>${where} · ${p.days} Tage Bauzeit</small>
-        <small class="desc">${p.text}</small></div>${btn}</div>`;
+      const extra: string[] = [];
+      let btn: string;
+      if (st === 'offen') {
+        if (locked) btn = `<span class="note nowrap">ab Epoche „${EPOCHS[p.epoch - 1].name}“</span>`;
+        else {
+          const half = Math.round(p.cost / 2);
+          const town = partnerOffer(state, this.map, p.id, 'stadt');
+          const house = partnerOffer(state, this.map, p.id, 'haus');
+          btn = `<div class="row-btns">
+            <button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" ${state.money >= p.cost ? '' : 'disabled'} title="allein bauen, alle Gebühren gehören dir">${fmt(p.cost)} Taler</button>
+            ${town ? `<button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" data-partner="stadt" ${state.money >= half ? '' : 'disabled'} title="${town.name} zahlt die Hälfte und bekommt die Hälfte der Gebühren">mit ${town.name}: ${fmt(half)}</button>` : ''}
+            ${house ? `<button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" data-partner="haus" ${state.money >= half ? '' : 'disabled'} title="${house.name} zahlt die Hälfte, bekommt die Hälfte der Gebühren und fährt selbst gebührenfrei">mit ${house.name}: ${fmt(half)}</button>` : ''}
+          </div>`;
+        }
+      } else {
+        btn = st === 'fertig' ? '<span class="done-mark">fertig</span>' : `<span class="note">noch ${daysLeft(state, p.id)} Tage</span>`;
+        if (w?.owner) {
+          const partner = w.partner ? `, gemeinsam mit ${w.partner.kind === 'stadt' ? this.townName(w.partner.id) : (RIVAL_BY_ID.get(w.partner.id)?.name ?? w.partner.id)}` : '';
+          extra.push(`Bauherr: ${ownerName(w)}${partner}`);
+          const fee = passageFee({ ...w, done: true }, 60);
+          if (w.owner === 'spieler') {
+            const part = w.partner ? `, Anteil des Partners: ${fmt(Math.round(w.partnerEarned ?? 0))} Taler` : '';
+            if (fee || w.fee === 'frei') extra.push(`Gebühr je fremder Durchfahrt: ${fee} Taler (mittleres Schiff), eingenommen: ${fmt(Math.round(w.earned ?? 0))} Taler${part}`);
+          } else if (fee) extra.push(`Gebühr für deine Schiffe: rund ${fee} Taler je Durchfahrt (mittleres Schiff).`);
+        }
+        if (w?.owner === 'spieler' && st === 'fertig' && p.kind === 'vertiefung') {
+          const silt = Math.round((w.silt ?? 0) * 100);
+          const cost = dredgeCost(w);
+          extra.push(
+            w.upkeep
+              ? `Baggerschiffe halten die Rinne auf ihrem Stand (${silt} % verlandet): ${upkeepCost(w)} Taler am Tag.`
+              : `Verlandet zu ${silt} %. Ohne Pflege schwemmt der Fluss die Rinne langsam zu.`,
+          );
+          extra.push(`<span class="row-btns">
+            <button class="btn small" data-act="cmd" data-cmd="workUpkeep" data-id="${p.id}" data-on="${w.upkeep ? 0 : 1}">${w.upkeep ? 'Pflege beenden' : `Pflege für ${upkeepCost(w)} Taler am Tag`}</button>
+            ${cost && (w.silt ?? 0) >= 0.05 ? `<button class="btn small" data-act="cmd" data-cmd="dredge" data-id="${p.id}" ${state.money >= cost ? '' : 'disabled'}>Nachbaggern: ${fmt(cost)} Taler</button>` : ''}
+          </span>`);
+        }
+        if (w?.owner === 'spieler' && st === 'fertig' && passageFee({ ...w, fee: 'normal' }, 60)) extra.push(feeBtns(p.id, w.fee));
+      }
+      return `<div class="yard-row ${locked && st === 'offen' ? 'muted' : ''}"><div><b>${p.name}</b> <small>${where} · ${p.days} Tage Bauzeit</small>
+        <small class="desc">${p.text}</small>${extra.map((x) => (x.startsWith('<') ? x : `<small class="desc">${x}</small>`)).join('')}</div>${btn}</div>`;
     }).join('');
+
+    const harbors = this.map.towns
+      .map((t) => {
+        const h = harborOf(state, t.id);
+        const cur = HARBOR_LEVELS[h.level];
+        const next = nextHarborLevel(state, t.id);
+        const depth = quayDepth(state, t.id).toFixed(1).replace('.', ',');
+        const info = `${cur.name} · ${cur.rate} t je Stunde · ${berths(state, t.id)} Liegeplätze · ${depth} m am Kai`;
+        let btn = '';
+        if (h.building) btn = `<span class="note">${HARBOR_LEVELS[h.building.level].name}: noch ${harborDaysLeft(state, t.id)} Tage</span>`;
+        else if (!next) btn = '<span class="done-mark">voll ausgebaut</span>';
+        else if (next.epoch > state.epoch) btn = `<span class="note nowrap">${next.name} ab Epoche „${EPOCHS[next.epoch - 1].name}“</span>`;
+        else {
+          const alone = harborCost(state, this.map, t.id, false);
+          const town = harborPartner(state, this.map, t.id);
+          const withTown = harborCost(state, this.map, t.id, true);
+          btn = `<div class="row-btns">
+            <button class="btn" data-act="cmd" data-cmd="harbor" data-town="${t.id}" ${state.money >= alone ? '' : 'disabled'} title="${next.text}">${next.name}: ${fmt(alone)}</button>
+            ${town ? `<button class="btn" data-act="cmd" data-cmd="harbor" data-town="${t.id}" data-partner="stadt" ${state.money >= withTown ? '' : 'disabled'} title="Die Stadt zahlt die Hälfte und bekommt die Hälfte des Liegegelds">mit der Stadt: ${fmt(withTown)}</button>` : ''}
+          </div>`;
+        }
+        const own =
+          h.level > 0
+            ? `<small class="desc">Liegegeld von fremden Schiffen, eingenommen: ${fmt(Math.round(h.earned ?? 0))} Taler${h.partner ? `, Anteil der Stadt: ${fmt(Math.round(h.partnerEarned ?? 0))} Taler` : ''}</small>${feeBtns(`hafen:${t.id}`, h.fee)}`
+            : '';
+        return `<div class="yard-row"><div><b>${t.name}</b> <small>${info}</small>${own}</div>${btn}</div>`;
+      })
+      .join('');
+
+    const l = state.ledger.works;
+    const ledger = l && (l.income || l.cost) ? `<p class="note">Gestern: Gebühren +${fmt(l.income)} Taler, Unterhalt und fremde Gebühren −${fmt(l.cost)} Taler.</p>` : '';
     return `<div class="ledger-head"><div class="stamp-small">Wasserbauamt</div><h2>Den Fluss verbessern</h2>
-      <p>Brücken, Schleusen, Kanäle und Fahrrinnen verändern den Fluss für immer, für dich und für die Konkurrenz. Wer baut, zahlt, aber jede Fahrt wird leichter.</p></div>
-      <div class="yard">${list}</div>`;
+      <p>Brücken, Schleusen, Kanäle und Fahrrinnen verändern den Fluss für immer. Wer baut, darf von fremden Schiffen eine Durchfahrtsgebühr nehmen. Eine Stadt oder ein Handelshaus trägt auf Wunsch die Hälfte und bekommt dafür die Hälfte der Gebühren. Ausgebaggerte Rinnen verlanden, wenn niemand sie pflegt.</p></div>
+      ${ledger}
+      <div class="yard">${list}</div>
+      <div class="ledger-head"><div class="stamp-small">Häfen</div><h2>Häfen ausbauen</h2>
+      <p>Ein besserer Hafen schlägt schneller um, hat mehr Liegeplätze und tieferes Wasser am Kai. Zu tiefe Schiffe müssen sonst über Schuten geleichtert werden, das dauert doppelt so lange und kostet einen halben Taler je Tonne.</p></div>
+      <div class="yard">${harbors}</div>`;
   }
 
   /** Papierkarte des Tals mit allen Schiffen; Daten der Flussläufe kommen von außen */

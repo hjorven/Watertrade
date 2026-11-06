@@ -230,12 +230,12 @@ function closeTrip(ship: Ship): void {
   ship.trip = undefined;
 }
 
-/** Unterwegs: Brennstoff und Lohn für `hours` Fahrstunden */
-export function tripSail(ship: Ship, hours: number, diesel: number): void {
+/** Unterwegs: Brennstoff für `hours` Fahrstunden, Lohn für `wageHours` (mit Liegezeit zum Laden und Löschen) */
+export function tripSail(ship: Ship, hours: number, diesel: number, wageHours = hours): void {
   const t = ship.trip;
   if (!t || t.arrived !== undefined) return;
   t.fuel += diesel + (shipClass(ship).coal ?? 0) * hours * coalValue();
-  t.wage += ((ship.captain?.wage ?? 0) * hours) / 24;
+  t.wage += ((ship.captain?.wage ?? 0) * wageHours) / 24;
 }
 
 export function tripArrive(state: GameState, ship: Ship): void {

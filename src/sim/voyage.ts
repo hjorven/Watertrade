@@ -5,7 +5,8 @@ import { available, buyCost } from './economy.ts';
 import { explainBlock, findRoute, segmentDepth, travelTime, type BlockReason, type ShipType } from './river.ts';
 import { effectiveSegments } from './works.ts';
 import { tripDepart } from './market-info.ts';
-import { conditions, effectiveDraft, effectiveType, getShip, hasUpgrade, shipClass, type GameState, type Leg, type Ship, type Voyage } from './state.ts';
+import { capacityOf, cargoLoad, conditions, effectiveDraft, effectiveType, getShip, hasUpgrade, shipClass, type FeeItem, type GameState, type Leg, type Ship, type Voyage } from './state.ts';
+import { dockTime, feeSum, lighterFee, playerPaidFees, worksFees } from './wasserbau.ts';
 
 export type VoyagePlan = { ok: true; voyage: Voyage } | { ok: false; reasons: { seg: SegmentDef; reason: BlockReason }[] };
 
@@ -53,12 +54,47 @@ export function planVoyage(state: GameState, map: MapDef, shipId: number, to: st
   if (!ship.port || ship.port === to) return null;
   const boost = hasTrait(ship.captain, 'treidelmeister') && ship.type !== 'segelkahn' ? 1.2 : 1;
   const plan = planRoute(state, map, ship.port, to, effectiveType(state, ship), boost);
+  if (!plan.ok) return plan;
+  const v = plan.voyage;
   // Der Schmuggler fährt am Zoll vorbei; was er spart, merkt sich die Fahrt für eine mögliche Kontrolle
-  if (plan.ok && hasTrait(ship.captain, 'schmuggler') && (plan.voyage.toll ?? 0) > 0) {
-    plan.voyage.evaded = plan.voyage.toll;
-    plan.voyage.toll = 0;
+  if (hasTrait(ship.captain, 'schmuggler') && (v.toll ?? 0) > 0) {
+    v.evaded = v.toll;
+    v.toll = 0;
   }
+  // Gebühren für fremde Bauwerke zahlt auch der Schmuggler, das ist kein Zoll
+  const fees: FeeItem[] = worksFees(
+    state,
+    v.legs.map((l) => l.seg),
+    'spieler',
+    capacityOf(ship),
+  );
+  // Liegezeit: Laden im Abfahrtshafen, Löschen am Ziel; zu tiefe Schiffe werden über Schuten geleichtert
+  const tons = cargoLoad(ship);
+  const draft = effectiveDraft(ship);
+  const load = dockTime(state, ship.port, tons, draft);
+  const unload = dockTime(state, to, tons, draft, 1);
+  if (tons > 0 && load.lighter) fees.push({ work: 'leichtern', amount: lighterFee(tons) });
+  if (tons > 0 && unload.lighter) fees.push({ work: 'leichtern', amount: lighterFee(tons) });
+  if (fees.length) {
+    v.fees = fees;
+    v.toll = (v.toll ?? 0) + feeSum(fees);
+  }
+  if (load.hours > 0) v.dock = load.hours;
+  if (unload.hours > 0) v.dockEnd = unload.hours;
+  v.hours += load.hours + unload.hours;
   return plan;
+}
+
+/** Reine Fahrzeit ohne Liegezeit in den Häfen */
+export function sailingHours(v: Voyage): number {
+  return v.hours - (v.dock ?? 0) - (v.dockEnd ?? 0);
+}
+
+/** Fahrstunden (ohne Liegezeit) im Zeitraum von `before` bis `after` Stunden seit Fahrtbeginn */
+export function movingHours(v: Voyage, before: number, after: number): number {
+  const start = v.dock ?? 0;
+  const end = start + sailingHours(v);
+  return Math.max(0, Math.min(after, end) - Math.max(before, start));
 }
 
 /* ---------- Kohle für Dampfer ---------- */
@@ -133,9 +169,13 @@ export function departProblem(state: GameState, map: MapDef, shipId: number, to:
   if (!plan.ok) return 'Diese Fahrt ist gerade nicht möglich.';
   const ship = getShip(state, shipId);
   const toll = plan.voyage.toll ?? 0;
-  const coal = bunkerPlan(state, ship, plan.voyage.hours, toll);
+  const coal = bunkerPlan(state, ship, sailingHours(plan.voyage), toll);
   if (coal.problem) return `${coal.problem}.`;
-  if (toll + coal.cost > state.money) return coal.cost ? `Zoll und Kohle kosten ${toll + coal.cost} Taler.` : `Der Zoll kostet ${toll} Taler.`;
+  if (toll + coal.cost > state.money) {
+    const what = plan.voyage.fees?.length ? 'Zoll und Gebühren' : 'Zoll';
+    if (coal.cost) return `${what} und Kohle kosten ${toll + coal.cost} Taler.`;
+    return plan.voyage.fees?.length ? `Zoll und Gebühren kosten ${toll} Taler.` : `Der Zoll kostet ${toll} Taler.`;
+  }
   return null;
 }
 
@@ -144,10 +184,11 @@ export function depart(state: GameState, map: MapDef, shipId: number, to: string
   if (!plan || !plan.ok) return null;
   const ship = getShip(state, shipId);
   const toll = plan.voyage.toll ?? 0;
-  const coal = bunkerPlan(state, ship, plan.voyage.hours, toll);
+  const coal = bunkerPlan(state, ship, sailingHours(plan.voyage), toll);
   if (coal.problem || toll + coal.cost > state.money) return null;
   if (coal.buy > 0) bunkerCoal(state, ship, coal.buy);
   state.money -= toll;
+  playerPaidFees(state, plan.voyage);
   tripDepart(state, ship, ship.port!, to, toll);
   ship.voyage = plan.voyage;
   ship.port = null;
@@ -157,7 +198,8 @@ export function depart(state: GameState, map: MapDef, shipId: number, to: string
 
 /** Aktueller Abschnitt einer Fahrt und Fortschritt darin (0..1) */
 export function voyagePosition(v: Voyage): { leg: Leg; progress: number; index: number } {
-  let t = v.elapsed;
+  // während der Liegezeit zum Laden liegt das Schiff noch am Anleger
+  let t = Math.max(0, v.elapsed - (v.dock ?? 0));
   for (let i = 0; i < v.legs.length; i++) {
     const leg = v.legs[i];
     if (t <= leg.hours || i === v.legs.length - 1) return { leg, progress: Math.min(1, t / leg.hours), index: i };
