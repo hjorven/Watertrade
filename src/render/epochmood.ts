@@ -59,7 +59,7 @@ export const EPOCH_MOODS: readonly EpochMood[] = [
   // Rauch und Backstein: rauchiger Dunst, gedämpfte Farben mit Ziegelrot, Nebel rückt näher
   mood({ saturation: 0.74, contrast: 1.05, tint: [0.05, 0.004, -0.03], sky: 0xbfb2a2, skyMix: 0.6, sun: 0xffbe86, sunMix: 0.45, hemiSky: 0xe2d6c6, hemiGround: 0x5a3c2c, fog: 0.55 }),
   // kräftig: klare Luft, satte Farben, mehr Kontrast
-  mood({ saturation: 1.35, contrast: 1.12, tint: [-0.01, 0.004, 0.018], sky: 0xd6e5ee, skyMix: 0.45, sun: 0xfff4e0, sunMix: 0.35, hemiSky: 0xf4f8ff, hemiGround: 0x5c5a3c, fog: 1.3 }),
+  mood({ saturation: 1.28, contrast: 1.1, tint: [-0.01, 0.004, 0.018], sky: 0xd6e5ee, skyMix: 0.45, sun: 0xfff4e0, sunMix: 0.35, hemiSky: 0xf4f8ff, hemiGround: 0x5c5a3c, fog: 1.3 }),
 ];
 
 /** Nebel-Sichtweite ohne Stimmung (wie in Stage angelegt) */
