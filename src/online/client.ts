@@ -58,7 +58,9 @@ export function initOnline(cfg: OnlineConfig = readEnv()): boolean {
   try {
     client = createClient(cfg.url, cfg.key, {
       auth: { persistSession: typeof localStorage !== 'undefined', autoRefreshToken: true, detectSessionInUrl: true },
+      realtime: { reconnectAfterMs: realtimeBackoff },
     });
+    realtimeGaveUp = false;
     setStatus('verbinde');
     return true;
   } catch {
@@ -66,6 +68,45 @@ export function initOnline(cfg: OnlineConfig = readEnv()): boolean {
     setStatus('fehler');
     return false;
   }
+}
+
+/** Nach so vielen gescheiterten Websocket-Verbindungen gibt Realtime auf, statt endlos neu zu verbinden */
+export const REALTIME_MAX_FAILURES = 4;
+const REALTIME_DELAYS = [1000, 3000, 8000];
+
+let realtimeGaveUp = false;
+const giveUpListeners = new Set<() => void>();
+
+/** Wartezeit vor dem nächsten Verbindungsversuch, nach REALTIME_MAX_FAILURES wird abgebrochen */
+export function realtimeBackoff(tries: number): number {
+  if (tries >= REALTIME_MAX_FAILURES) queueMicrotask(giveUpRealtime);
+  return REALTIME_DELAYS[Math.min(tries, REALTIME_DELAYS.length) - 1] ?? REALTIME_DELAYS[0];
+}
+
+/** Realtime abschalten: alle Kanäle schließen, Websocket trennen, Zuhörer informieren */
+export function giveUpRealtime(): void {
+  if (realtimeGaveUp || !client) return;
+  realtimeGaveUp = true;
+  const sb = client;
+  void sb.removeAllChannels().finally(() => sb.realtime.disconnect());
+  setStatus('fehler');
+  for (const fn of giveUpListeners) fn();
+}
+
+/** Meldet, wenn Realtime wegen fehlender Verbindung aufgegeben hat. Gibt eine Abmeldefunktion zurück. */
+export function onRealtimeGiveUp(fn: () => void): () => void {
+  giveUpListeners.add(fn);
+  return () => giveUpListeners.delete(fn);
+}
+
+/** Hat Realtime aufgegeben? Ein neues Abo versucht es dann erneut. */
+export function realtimeGaveUpAlready(): boolean {
+  return realtimeGaveUp;
+}
+
+/** Vor einem neuen Abo aufrufen, damit nach einem Abbruch wieder versucht wird */
+export function resetRealtimeGiveUp(): void {
+  realtimeGaveUp = false;
 }
 
 /** Liefert den Client oder null, wenn offline */
@@ -126,4 +167,6 @@ export function resetOnlineForTests(): void {
   initialised = false;
   status = 'offline';
   listeners.clear();
+  giveUpListeners.clear();
+  realtimeGaveUp = false;
 }

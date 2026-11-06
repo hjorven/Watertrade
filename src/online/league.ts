@@ -1,5 +1,15 @@
 import type { RealtimeChannel } from '@supabase/supabase-js';
-import { fail, getClient, offline, type Result } from './client.ts';
+import {
+  REALTIME_MAX_FAILURES,
+  fail,
+  getClient,
+  giveUpRealtime,
+  offline,
+  onRealtimeGiveUp,
+  resetRealtimeGiveUp,
+  setStatus,
+  type Result,
+} from './client.ts';
 import { ensureSession } from './auth.ts';
 import { displayName } from './daily.ts';
 
@@ -174,19 +184,42 @@ export async function leagueRanking(limit = 10): Promise<Result<LeagueRankEntry[
 
 /**
  * Realtime-Abo auf den Liga-Markt. Ruft onChange bei jeder Bestandsänderung auf.
+ * Ist der Server nicht erreichbar, bricht der Client nach REALTIME_MAX_FAILURES
+ * Verbindungsversuchen ab (statt endlos neu zu verbinden) und ruft onGiveUp auf.
  * Gibt eine Abmeldefunktion zurück, offline eine, die nichts tut.
  */
-export function subscribeLeagueMarket(onChange: (row: LeagueMarketRow) => void): () => void {
+export function subscribeLeagueMarket(
+  onChange: (row: LeagueMarketRow) => void,
+  onGiveUp?: () => void,
+): () => void {
   const sb = getClient();
   if (!sb) return () => {};
+  resetRealtimeGiveUp();
+  let closed = false;
+  let failures = 0;
+  const stopListening = onRealtimeGiveUp(() => {
+    closed = true;
+    stopListening();
+    onGiveUp?.();
+  });
   const channel: RealtimeChannel = sb
     .channel('league_market')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'league_market' }, (payload) => {
       const row = payload.new as MarketRow | undefined;
       if (row && 'town_id' in row) onChange(toMarket(row));
     })
-    .subscribe();
+    .subscribe((state) => {
+      if (state === 'SUBSCRIBED') {
+        failures = 0;
+        setStatus('online');
+      } else if (state === 'CHANNEL_ERROR' || state === 'TIMED_OUT') {
+        if (++failures >= REALTIME_MAX_FAILURES) giveUpRealtime();
+      }
+    });
   return () => {
+    stopListening();
+    if (closed) return;
+    closed = true;
     void sb.removeChannel(channel);
   };
 }
