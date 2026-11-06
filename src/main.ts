@@ -53,6 +53,7 @@ import { buildHarbor, dredge, setFee, setUpkeep, startProjectWith } from './sim/
 import type { FeeLevel } from './sim/state.ts';
 import { activePlan, resetBook, stopsOf, winterSeasonsOf } from './sim/routes.ts';
 import type { RoutePlan } from './sim/state.ts';
+import { deliverToCanal, startCanalStage } from './sim/canal.ts';
 import { EPOCHS } from './data/ships.ts';
 import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
 import { goalDone, goalProgress, restoreCompleted } from './sim/goals.ts';
@@ -370,6 +371,14 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
     case 'harbor':
       r = buildHarbor(state, VALLEY, String(d.town), d.partner === 'stadt');
       ok = 'glocke';
+      break;
+    case 'canalStart':
+      r = startCanalStage(state, VALLEY);
+      ok = 'glocke';
+      break;
+    case 'canalDeliver':
+      r = deliverToCanal(state, VALLEY, d.kontor ? { kontor: String(d.kontor) } : { ship: n('ship') }, String(d.good), n('n'));
+      ok = 'verkauf';
       break;
     case 'accept':
       r = acceptContract(state, n('id'));
