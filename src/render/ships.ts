@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ShipClass } from '../data/ships.ts';
 import { boxGeo, cylGeo, gableGeo, KIT_MATERIAL, Kit, torusGeo } from './kit.ts';
-import { inWorld, Landscape, RIVER_HALF_WIDTH } from './landscape.ts';
+import { Landscape, RIVER_HALF_WIDTH } from './landscape.ts';
 
 const CRATE_SLOTS = 8;
 
@@ -493,7 +493,7 @@ export class ShipView {
     let offset = 0;
     for (let k = 0, found = -1; k < 40 && found < slot; k++) {
       const o = (k % 2 === 1 ? 1 : -1) * Math.ceil(k / 2) * 7;
-      if (!inWorld(mooring.x + tan.x * o, mooring.z + tan.z * o, 4.5)) continue;
+      if (!this.land.inWorld(mooring.x + tan.x * o, mooring.z + tan.z * o, 4.5)) continue;
       found++;
       offset = o;
     }
@@ -516,7 +516,7 @@ export class ShipView {
     // Rechtsverkehr: in Fahrtrichtung rechts halten
     const side = downstream ? 1 : -1;
     const lane = side * Math.min(1.2, hw * 0.35);
-    this.group.position.set(p.x + n.x * lane, 0, p.z + n.z * lane);
+    this.group.position.set(p.x + n.x * lane, this.land.waterLevelAt(river, t), p.z + n.z * lane);
     const heading = Math.atan2(-tan.z, tan.x) + (downstream ? 0 : Math.PI);
     this.group.rotation.set(0, heading, 0);
     this.docked = false;
@@ -534,7 +534,8 @@ export class ShipView {
       const hp = this.land.pointAt(river, ht);
       const hn = this.land.normalAt(river, ht);
       // auf dem Treidelpfad, in engen Kurven weiter vom Wasser weg
-      let off = side * (hw + 2.3);
+      // am Kanal geht der Leinpfad direkt an der Ufermauer entlang
+      let off = side * (hw + (this.land.canals.some((c) => c.river === river) ? 1.2 : 2.3));
       let hx = hp.x + hn.x * off;
       let hz = hp.z + hn.z * off;
       for (let i = 0; i < 8 && this.land.riverDistance(hx, hz).d < RIVER_HALF_WIDTH + 1.9; i++) {
