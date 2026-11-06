@@ -3,6 +3,7 @@ import { PERISH, SHIPS, type ShipClass } from '../data/ships.ts';
 import { windOfDay, withWind, type Conditions, type ShipType } from './river.ts';
 import type { PriceBookPage, PricePoint, TripRecord } from './market-info.ts';
 import type { TownMarket, TownState } from './towns.ts';
+import type { Season } from './calendar.ts';
 
 /** Datentypen des Spielstands und kleine Helfer, die alle Simulationsmodule brauchen */
 
@@ -46,6 +47,8 @@ export interface Voyage {
   groundAt?: number;
   /** letzter Abschnitt, für den auf Grundberührung gewürfelt wurde */
   checked?: number;
+  /** davon Treidelgeld (ab der Motorzeit bergauf für Treidelschiffe) */
+  towFee?: number;
   /** Zoll, den ein Schmuggler auf dieser Fahrt umgeht; bei der Ankunft droht eine Kontrolle */
   evaded?: number;
   /** Liegezeit zum Laden vor dem Ablegen (Stunden, am Anfang der Fahrt) */
@@ -97,6 +100,18 @@ export interface RouteOrder {
 export interface RouteStop {
   town: string;
   orders: RouteOrder[];
+  /** Erst ablegen, wenn der Laderaum zu diesem Anteil voll ist (0..1), sonst warten und nachkaufen */
+  minLoad?: number;
+  /** Halt überspringen, wenn der Pegel unter diesem Wert liegt (m über Normalwasser) */
+  levelMin?: number;
+  /** Halt überspringen, wenn der Pegel über diesem Wert liegt (m über Normalwasser) */
+  levelMax?: number;
+}
+
+/** Ein Tag im Routenbuch: Gewinn der Route an diesem Tag in Talern */
+export interface RouteBookDay {
+  day: number;
+  taler: number;
 }
 
 export interface TradeRoute {
@@ -106,7 +121,21 @@ export interface TradeRoute {
   /** Spielstunde, ab der der Kapitän es erneut versucht */
   retryAt?: number;
   note?: string; // letzter Hinweis, z. B. warum gewartet wird
+  /** Zweite Halte-Liste (Winterplan); `stops` ist dann der Sommerplan */
+  winterStops?: RouteStop[];
+  /** Jahreszeiten, in denen der Winterplan gilt */
+  winterSeasons?: Season[];
+  /** Plan, nach dem gerade gefahren wird */
+  plan?: RoutePlan;
+  /** Spielstunde, seit der der Kapitän auf Ladung wartet (Bedingung Mindestladung) */
+  loadingSince?: number;
+  /** Gewinn der letzten Tage, höchstens ROUTE_BOOK_DAYS Einträge */
+  book?: RouteBookDay[];
+  /** Erster Tag, an dem die Route gebucht hat (für den Tagesschnitt) */
+  bookSince?: number;
 }
+
+export type RoutePlan = 'sommer' | 'winter';
 
 export interface Ship {
   id: number;
@@ -327,11 +356,21 @@ export interface GameState {
   contracts: Contract[];
   nextId: number;
   rng: number;
+  /**
+   * Tagesmarkt: Startwert für getrennte Zufallsströme. Ist er gesetzt, ziehen Ereignisse, Aufträge,
+   * Kapitäne und Konkurrenz jeden Tag (bzw. jede Stunde) aus einem eigenen Strom, der nur vom
+   * Startwert abhängt. So läuft der Tag für alle gleich ab, egal was der Spieler tut.
+   */
+  fairSeed?: number;
+  /** Tagesmarkt: Stand je Zufallsstrom [Zeitpunkt, Zustand], damit mehrere Aufrufe im selben Zeitpunkt weiterziehen */
+  fairStreams?: Record<string, [number, number]>;
   ledger: Ledger;
   /** Technische Epoche: 1 Treidelzeit, 2 Dampf, 3 Motor */
   epoch: number;
-  /** Epoche folgt den Spieljahren (freies Spiel) */
+  /** Epoche folgt dem Fortschritt im Tal, spätestens den Spieljahren (freies Spiel) */
   epochAuto: boolean;
+  /** Tag, an dem die aktuelle Epoche begann (fehlt in älteren Spielständen) */
+  epochDay?: number;
   works: Work[];
   /** Brennstoffkosten seit Mitternacht */
   fuelToday: number;
@@ -421,6 +460,37 @@ export function rand(state: GameState): number {
   t = Math.imul(t ^ (t >>> 15), t | 1);
   t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+/** Startwert eines Zufallsstroms aus Grundwert, Name und Zeitpunkt (Tag oder Stunde) */
+export function streamSeed(seed: number, name: string, tick: number): number {
+  let h = (seed ^ 0x9e3779b9) >>> 0;
+  for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 16777619);
+  h = Math.imul(h ^ (tick | 0), 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return h | 0;
+}
+
+/**
+ * Führt fn mit einem eigenen Zufallsstrom aus, wenn der Spielstand einen fairSeed hat (Tagesmarkt).
+ * Jeder Strom beginnt zu jedem Zeitpunkt (tick) neu aus dem Startwert; wird er im selben Zeitpunkt
+ * mehrmals benutzt (Bildrate teilt eine Stunde in mehrere Schritte), zieht er dort weiter.
+ * Der gemeinsame Strom state.rng bleibt unberührt. Ohne fairSeed ändert sich nichts.
+ */
+export function withStream<T>(state: GameState, name: string, tick: number, fn: () => T): T {
+  if (state.fairSeed === undefined) return fn();
+  const streams = (state.fairStreams ??= {});
+  const saved = state.rng;
+  const last = streams[name];
+  state.rng = last && last[0] === tick ? last[1] : streamSeed(state.fairSeed, name, tick);
+  try {
+    return fn();
+  } finally {
+    streams[name] = [tick, state.rng];
+    state.rng = saved;
+  }
 }
 
 export function pick<T>(state: GameState, list: T[]): T {

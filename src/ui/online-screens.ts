@@ -1,4 +1,6 @@
-import { CHALLENGES, DAILY_DAYS, dailySetup } from '../data/challenges.ts';
+import { CHALLENGES, DAILY_DAYS } from '../data/challenges.ts';
+import { SHIPS } from '../data/ships.ts';
+import { dailyOptions, dailyRule } from '../sim/daily.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { ACHIEVEMENTS } from '../sim/achievements.ts';
@@ -22,7 +24,8 @@ const fmt = (n: number) => Math.floor(n).toLocaleString('de-DE');
 const LEAGUE_CARGO = 40;
 
 export interface OnlineHooks {
-  startDaily(day: string, seed: number): void;
+  /** scored: gewerteter Versuch des Tages, sonst Übungsrunde */
+  startDaily(day: string, seed: number, scored: boolean): void;
   /** Spielstand zum Speichern, null außerhalb eines Spiels oder in Wertungsmodi */
   currentSave(): SaveGame | null;
   inGame(): boolean;
@@ -30,7 +33,11 @@ export interface OnlineHooks {
   unlock(id: string): void;
   achievements(): Record<string, string>;
   challenges(): Record<string, number>;
-  dailyBest(day: string): number | null;
+  /** lokaler Stand des Tages: gewerteter Versuch begonnen, gewertetes Ergebnis */
+  dailyLocal(day: string): { tried: boolean; worth: number | null };
+  /** gewertetes Ergebnis, das noch nicht beim Server angekommen ist */
+  dailyPending(): { day: string; worth: number } | null;
+  dailyPendingDone(day: string): void;
   toast(text: string, kind?: 'info' | 'warn' | 'gain'): void;
   sfx(name: 'klick' | 'kauf' | 'verkauf' | 'muenzen' | 'fehler' | 'ablegen' | 'erfolg' | 'papier'): void;
 }
@@ -48,6 +55,17 @@ function niceError(e: string): string {
   for (const [k, v] of Object.entries(map)) if (e.toLowerCase().includes(k)) return v;
   if (/fetch|network/i.test(e)) return 'Keine Verbindung zum Server.';
   return e;
+}
+
+/** Fehlermeldungen des Tagesmarkts (eigene Liste, niceError gehört der Liga) */
+function dailyError(e: string): string {
+  const map: Record<string, string> = {
+    'kein gewerteter versuch': 'Kein gewerteter Versuch angemeldet.',
+    'versuch abgelaufen': 'Der Versuch ist älter als zwei Tage.',
+    'tagesmarkt nicht von heute': 'Dieser Tagesmarkt ist nicht von heute.',
+  };
+  for (const [k, v] of Object.entries(map)) if (e.toLowerCase().includes(k)) return v;
+  return niceError(e);
 }
 
 /** Tagesmarkt, Handelsliga, Konto mit Cloud-Speicher und Erfolge als Menükarten */
@@ -68,6 +86,9 @@ export class OnlineScreens {
 
   // Tagesmarkt
   private daily: { entries: DailyEntry[] | null; status: string } = { entries: null, status: '' };
+  /** Stand des eigenen gewerteten Versuchs laut Server */
+  private dailyServer: { day: string; started: boolean; wealth: number | null } | null = null;
+  private dailyStarting = false;
 
   // Konto
   private account: { name: string | null; email: string | null; anonymous: boolean; slots: CloudSlot[]; status: string; reachable: boolean } = {
@@ -95,13 +116,9 @@ export class OnlineScreens {
       case 'daily':
         void this.openDaily();
         break;
-      case 'dailyStart': {
-        const day = todayUtc();
-        this.menu.close();
-        this.stopLeague();
-        this.hooks.startDaily(day, dailySeed(day));
+      case 'dailyStart':
+        void this.startDailyRun();
         break;
-      }
       case 'league':
         void this.openLeague();
         break;
@@ -188,52 +205,130 @@ export class OnlineScreens {
   // --- Tagesmarkt ---
 
   private async openDaily(): Promise<void> {
-    this.daily = { entries: null, status: (await online()).isConfigured() ? 'Bestenliste wird geladen ...' : 'Ohne Verbindung gibt es keine Bestenliste.' };
+    const api = await online();
+    this.daily = { entries: null, status: api.isConfigured() ? 'Bestenliste wird geladen ...' : 'Ohne Verbindung gibt es keine Bestenliste.' };
     this.renderDaily();
-    if (!(await online()).isConfigured()) return;
-    const r = await (await online()).topDaily(todayUtc(), 10);
+    if (!api.isConfigured()) return;
+    const day = todayUtc();
+    const [r, mine] = await Promise.all([api.topDaily(day, 10), api.myDaily(day)]);
     this.daily = r.ok ? { entries: r.data, status: r.data.length ? '' : 'Heute hat noch niemand gespielt. Sei der Erste.' } : { entries: null, status: niceError(r.error) };
+    this.dailyServer = mine.ok ? { day, ...mine.data } : null;
+    if (this.menu.screen === 'daily') this.renderDaily();
+    await this.retryDailySubmit();
+  }
+
+  /** Gewertetes Ergebnis, das am Ende nicht beim Server ankam, erneut senden (Server nimmt es bis zu 2 Tage an) */
+  private async retryDailySubmit(): Promise<void> {
+    const pending = this.hooks.dailyPending();
+    if (!pending) return;
+    const api = await online();
+    const sent = await api.submitDaily(pending.worth, pending.day);
+    // Erfolgreich oder endgültig abgelehnt: nicht weiter versuchen. Netzfehler: beim nächsten Öffnen erneut.
+    if (sent.ok || !/fetch|network|verbindung|load failed|timeout/i.test(sent.error)) this.hooks.dailyPendingDone(pending.day);
+    if (!sent.ok || pending.day !== todayUtc()) return;
+    this.dailyServer = { day: pending.day, started: true, wealth: sent.data.wealth };
+    const top = await api.topDaily(pending.day, 10);
+    if (top.ok) this.daily = { entries: top.data, status: '' };
     if (this.menu.screen === 'daily') this.renderDaily();
   }
 
-  private renderDaily(result?: { worth: number; improved: boolean | null }): void {
+  /** Gewerteter Versuch schon verbraucht? Server hat Vorrang vor dem lokalen Stand. */
+  private dailyUsed(day: string): { tried: boolean; worth: number | null } {
+    const local = this.hooks.dailyLocal(day);
+    const srv = this.dailyServer?.day === day ? this.dailyServer : null;
+    return { tried: local.tried || !!srv?.started, worth: srv?.wealth ?? local.worth };
+  }
+
+  /** Versuch beim Server anmelden: nur der erste des Tages wird gewertet */
+  private async startDailyRun(): Promise<void> {
+    if (this.dailyStarting) return;
+    this.dailyStarting = true;
+    try {
+      const day = todayUtc();
+      const api = await online();
+      let scored = !this.dailyUsed(day).tried;
+      if (api.isConfigured()) {
+        const r = await api.beginDaily(day);
+        if (!r.ok) {
+          // Ohne Anmeldung beim Server kein Start, auch keine Übung: sonst ließe sich der Tag
+          // vor dem gewerteten Versuch beliebig oft üben (Netz trennen, spielen, wieder verbinden).
+          this.hooks.toast(`Der Tagesmarkt braucht den Server: ${dailyError(r.error)}`, 'warn');
+          this.hooks.sfx('fehler');
+          return;
+        }
+        scored = r.data.scored;
+        this.dailyServer = { day, started: true, wealth: r.data.wealth };
+      }
+      this.menu.close();
+      this.stopLeague();
+      if (!scored) this.hooks.toast('Übungsrunde: Dieser Tagesmarkt zählt nicht für die Bestenliste.', 'info');
+      this.hooks.startDaily(day, dailySeed(day), scored);
+    } finally {
+      this.dailyStarting = false;
+    }
+  }
+
+  private renderDaily(result?: { worth: number; scored: boolean; accepted: boolean | null; kept?: number | null }): void {
     const day = todayUtc();
-    const setup = dailySetup(dailySeed(day));
-    const best = this.hooks.dailyBest(day);
+    const seed = dailySeed(day);
+    const opts = dailyOptions(day, seed);
+    const rule = dailyRule(day);
+    const used = this.dailyUsed(day);
+    const shipName = SHIPS[opts.startShip ?? 'treidelkahn']?.name ?? 'Treidelkahn';
     const dateText = new Date(day + 'T12:00:00Z').toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
+    let resultText = '';
+    if (result) {
+      resultText = `<p>Dein Vermögen nach ${DAILY_DAYS} Tagen: Kasse, Schiffe, Kontore, Betriebe und Ladung zum Marktwert.`;
+      if (!result.scored) resultText += ' Das war eine Übungsrunde, sie zählt nicht.';
+      else if (result.accepted) resultText += ' Eingetragen in der Bestenliste.';
+      else if (result.accepted === false) resultText += result.kept != null ? ` Für heute steht schon ${fmt(result.kept)} Taler in der Bestenliste.` : ' Das Ergebnis wurde nicht angenommen.';
+      resultText += '</p>';
+    }
     this.menu.show(`
-      ${result ? '<div class="stamp-big">Abgerechnet</div>' : ''}
+      ${result ? `<div class="stamp-big">${result.scored ? 'Abgerechnet' : 'Übung'}</div>` : ''}
       <div class="card-head">Tagesmarkt · ${esc(dateText)}</div>
       <h2>${result ? `${fmt(result.worth)} Taler` : 'Ein Tal für alle'}</h2>
       ${
         result
-          ? `<p>Dein Vermögen nach ${DAILY_DAYS} Tagen: Kasse, Schiffe, Kontore, Betriebe und Ladung zum Marktwert.${
-              result.improved === false ? ' Dein bestes Ergebnis von heute bleibt stehen.' : result.improved ? ' Neuer Eintrag in der Bestenliste.' : ''
-            }</p>`
-          : `<p>Heute starten alle in <b>${esc(this.townName(setup.startTown))}</b> mit einem Treidelkahn und <b>${fmt(setup.money)} Taler</b>, im Jahr ${setup.startYear}. Markt, Wetter, Ereignisse und Konkurrenz sind für alle gleich. Nach ${DAILY_DAYS} Spieltagen zählt das Vermögen.</p>`
+          ? resultText
+          : `<p>Heute starten alle in <b>${esc(this.townName(opts.startTown))}</b> mit einem ${esc(shipName)} und <b>${fmt(opts.money ?? 0)} Taler</b>, im Jahr ${opts.startYear ?? 1}. Markt, Wetter, Ereignisse und Konkurrenz sind für alle gleich. Nach ${DAILY_DAYS} Spieltagen zählt das Vermögen.</p>`
       }
-      ${best !== null ? `<p class="fine">Dein Bestes heute: ${fmt(best)} Taler. Du kannst so oft spielen, wie du willst.</p>` : ''}
+      <p><b>Tagesregel: ${esc(rule.name)}.</b> ${esc(rule.text)}</p>
+      <p class="fine">${
+        used.tried
+          ? `Dein gewerteter Versuch für heute ist verbraucht${used.worth !== null ? ` (${fmt(used.worth)} Taler)` : ''}. Weitere Runden sind Übung und zählen nicht.`
+          : 'Pro Tag zählt nur der erste Versuch. Er wird beim Start auf dem Server angemeldet, Neustarten hilft also nicht.'
+      }</p>
       <h3>Bestenliste heute</h3>
       ${this.daily.entries?.length ? rankTable(this.daily.entries) : `<p class="fine">${esc(this.daily.status)}</p>`}
       <div class="menu-buttons">
-        <button class="btn primary wide" data-menu="dailyStart">${result || best !== null ? 'Noch einmal spielen' : 'Tagesmarkt beginnen'}</button>
+        <button class="btn primary wide" data-menu="dailyStart">${used.tried ? 'Übungsrunde spielen' : 'Gewerteten Versuch beginnen'}</button>
         ${result ? '<button class="btn wide" data-menu="resume">Weiterspielen ohne Wertung</button>' : ''}
       </div>
       <p class="fine"><button class="link" data-menu="leave">Hauptmenü</button>${this.account.name ? '' : ' · <button class="link" data-menu="account">Namen für die Bestenliste festlegen</button>'}</p>`);
     this.menu.screen = 'daily';
   }
 
-  /** Tagesmarkt abgelaufen: eintragen und Bestenliste zeigen */
-  async finishDaily(day: string, worth: number): Promise<void> {
+  /** Tagesmarkt abgelaufen: gewerteten Versuch eintragen und Bestenliste zeigen */
+  async finishDaily(day: string, worth: number, scored: boolean): Promise<void> {
     this.hooks.unlock('tagesmarkt');
-    this.daily = { entries: null, status: (await online()).isConfigured() ? 'Ergebnis wird eingetragen ...' : 'Ohne Verbindung wird nur lokal gezählt.' };
-    this.renderDaily({ worth, improved: null });
-    if (!(await online()).isConfigured()) return;
-    const sent = await (await online()).submitDaily(worth, day);
-    const top = await (await online()).topDaily(day, 10);
+    const api = await online();
+    const configured = api.isConfigured();
+    this.daily = {
+      entries: null,
+      status: !configured ? 'Ohne Verbindung wird nur lokal gezählt.' : scored ? 'Ergebnis wird eingetragen ...' : 'Bestenliste wird geladen ...',
+    };
+    this.renderDaily({ worth, scored, accepted: null });
+    if (!configured) return;
+    const sent = scored ? await api.submitDaily(worth, day) : null;
+    if (sent && (sent.ok || !/fetch|network|verbindung|load failed|timeout/i.test(sent.error))) this.hooks.dailyPendingDone(day);
+    const top = await api.topDaily(day, 10);
     this.daily = top.ok ? { entries: top.data, status: '' } : { entries: null, status: niceError(top.error) };
-    if (!sent.ok) this.daily.status = niceError(sent.error);
-    if (this.menu.screen === 'daily') this.renderDaily({ worth, improved: sent.ok ? sent.data.improved : null });
+    if (sent && !sent.ok) this.daily.status = dailyError(sent.error);
+    if (sent?.ok) this.dailyServer = { day, started: true, wealth: sent.data.wealth };
+    if (this.menu.screen === 'daily') {
+      this.renderDaily({ worth, scored, accepted: sent?.ok ? sent.data.accepted : null, kept: sent?.ok ? sent.data.wealth : null });
+    }
   }
 
   // --- Handelsliga ---

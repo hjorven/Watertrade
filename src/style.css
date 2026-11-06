@@ -1093,6 +1093,64 @@ ul.plain small {
   margin-top: 4px;
 }
 
+/* Handelsrouten: Bedingungen, Saisonpläne, Auswertung */
+.route-cond {
+  margin: 2px 0 4px;
+  font-size: 12px;
+  color: var(--water);
+}
+
+.route-cond-form summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-top: 4px;
+}
+
+.route-cond-form label {
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.route-cond-form input {
+  width: 52px;
+}
+
+.route-plans {
+  margin-top: 10px;
+}
+
+.route-book {
+  margin: 8px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.route-book p {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.route-book small {
+  color: var(--ink-soft);
+}
+
+.route-book .gain {
+  color: var(--gain);
+}
+
+.route-book .loss {
+  color: var(--loss);
+}
+
+.route-book svg {
+  display: block;
+  max-width: 100%;
+}
+
 .register .flag,
 .flag {
   display: inline-block;
@@ -1835,4 +1893,11 @@ body.no-game .toasts {
 
 .tripbook .num {
   font-size: 15px;
+}
+
+/* Wasserbau: Hinweis, wenn ein Schiff für den Kai zu tief geht */
+.note.warn {
+  border-left: 3px solid var(--stamp);
+  padding: 4px 8px;
+  background: rgb(168 50 42 / 0.07);
 }
