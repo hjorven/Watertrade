@@ -4,6 +4,7 @@ import { captainArrived, tickCaptains } from './captains.ts';
 import { tickContracts } from './contracts.ts';
 import { eventWaterOffset, tickEvents } from './events.ts';
 import { addShip, refreshTavern, runRoute } from './fleet.ts';
+import { bookCoal, bookRoute, bookRouteWages } from './routes.ts';
 import { tickHouse } from './house.ts';
 import { initialRivals, moveRivals, tickRivals } from './rivals.ts';
 import { weakenHouse } from './rivalry.ts';
@@ -227,6 +228,8 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
       }
     }
     tickHouse(state);
+    // gleich nach der Lohnzahlung buchen, bevor Kapitäne gehen oder abgeworben werden
+    bookRouteWages(state);
     pushNews(events, tickStanding(state, map), false);
     pushNews(events, tickCaptains(state, map), true);
     pushNews(events, tickWorks(state, map), true);
@@ -268,7 +271,12 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
       state.money -= fuel;
       state.fuelToday += fuel;
       tripSail(ship, dt, fuel, v.elapsed - before);
-      if (cls.coal) ship.bunker = Math.max(0, (ship.bunker ?? 0) - cls.coal * dt);
+      if (ship.route?.active) bookRoute(state, ship.route, -fuel);
+      if (cls.coal) {
+        const burnt = Math.min(ship.bunker ?? 0, cls.coal * dt);
+        ship.bunker = Math.max(0, (ship.bunker ?? 0) - cls.coal * dt);
+        if (ship.route?.active) bookCoal(state, ship.route, burnt);
+      }
       // ohne Kühlraum verdirbt Fisch, Brot und Bier unterwegs
       if (!cls.fresh) {
         for (const [g, slot] of Object.entries(ship.cargo)) {
