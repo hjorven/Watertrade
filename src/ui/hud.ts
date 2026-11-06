@@ -33,7 +33,7 @@ import {
 } from '../sim/game.ts';
 import { PROJECTS } from '../data/projects.ts';
 import { daysLeft, projectState } from '../sim/works.ts';
-import { HARBOR_LEVELS } from '../data/harbors.ts';
+import { HARBOR_LEVELS, LIGHTER_FEE } from '../data/harbors.ts';
 import {
   berths,
   dredgeCost,
@@ -98,10 +98,24 @@ const fmtHours = (h: number) => {
   return min === 0 ? `${whole} Std` : `${whole} Std ${min} Min`;
 };
 
+const m1 = (x: number) => x.toFixed(1).replace('.', ',');
+
+/** Warnung im Hafen, wenn das Schiff für den Kai zu tief geht: Umschlag dann über Schuten */
+function quayWarning(state: GameState, ship: Ship, town: string): string {
+  const quay = quayDepth(state, town);
+  const now = effectiveDraft(ship);
+  const full = effectiveDraft({ ...ship, cargo: { _: { amount: capacityOf(ship), cost: 0 } } });
+  const how = `Umschlag über Schuten: halb so schnell und ${LIGHTER_FEE.toLocaleString('de-DE')} Taler je Tonne Leichtergeld. Ein ausgebauter Hafen (Wasserbau, Kaimauer) hilft.`;
+  if (now > quay) return `<p class="note warn"><b>Zu tief für den Kai:</b> ${m1(now)} m Tiefgang, nur ${m1(quay)} m Wasser am Kai. ${how}</p>`;
+  if (full > quay) return `<p class="note warn"><b>Voll beladen zu tief für den Kai:</b> ${m1(full)} m Tiefgang, nur ${m1(quay)} m Wasser am Kai. ${how}</p>`;
+  return '';
+}
+
 /** Hinweis, solange ein Schiff zu Beginn oder am Ende einer Fahrt am Anleger umschlägt */
-const dockNote = (v: { elapsed: number; hours: number; dock?: number; dockEnd?: number }) => {
-  if (v.dock && v.elapsed < v.dock) return `<p class="note">Wird noch beladen, legt in ${fmtHours(v.dock - v.elapsed)} ab.</p>`;
-  if (v.dockEnd && v.elapsed > v.hours - v.dockEnd) return `<p class="note">Liegt am Kai und wird gelöscht.</p>`;
+const dockNote = (v: Voyage) => {
+  const lighter = v.fees?.some((f) => f.work === 'leichtern') ? ' über Schuten (zu tief für den Kai)' : '';
+  if (v.dock && v.elapsed < v.dock) return `<p class="note">Wird noch${lighter} beladen, legt in ${fmtHours(v.dock - v.elapsed)} ab.</p>`;
+  if (v.dockEnd && v.elapsed > v.hours - v.dockEnd) return `<p class="note">Liegt am Kai und wird${lighter} gelöscht.</p>`;
   return '';
 };
 
@@ -495,7 +509,8 @@ export class Hud {
         const zoll = (v.toll ?? 0) - fees;
         const toll = `${zoll ? `, Zoll ${zoll}` : v.evaded ? `, ${v.evaded} Zoll umgangen, Kontrolle möglich` : ''}${fees ? `, Gebühren ${fees}` : ''}`;
         const dockH = (v.dock ?? 0) + (v.dockEnd ?? 0);
-        const dockText = dockH >= 0.5 ? ` (davon ${fmtHours(dockH)} Laden und Löschen)` : '';
+        const lighter = v.fees?.some((f) => f.work === 'leichtern') ? ', muss leichtern' : '';
+        const dockText = (dockH >= 0.5 ? ` (davon ${fmtHours(dockH)} Laden und Löschen)` : '') + lighter;
         const coal = bunkerPlan(state, ship, sailingHours(v), v.toll ?? 0);
         if (coal.problem) return `<button class="btn dest" disabled title="${coal.problem}"><b>${t.name}</b><small>${coal.buy ? `${coal.buy} t Kohle fehlen` : 'Bunker zu klein'}</small></button>`;
         const coalText = coal.need ? `, Kohle ${String(coal.need).replace('.', ',')} t${coal.buy ? `, bunkert ${coal.buy} t für ${coal.cost} Taler` : ''}` : '';
@@ -537,6 +552,7 @@ export class Hud {
       ${this.renderTownInfo(state, town, industries)}
       ${contracts}
       <p class="note">Laderaum <b>${load}/${cap} t</b> · Tiefgang ${effectiveDraft(ship).toFixed(1).replace('.', ',')} m${kontor ? ' · Kontorbonus' : ''}${bunker}</p>
+      ${quayWarning(state, ship, town.id)}
       ${bunkerBtn}
       <table class="market">
         <thead><tr><th>Ware</th><th title="Preis je Tonne beim Kauf">Kauf</th><th title="Preis je Tonne beim Verkauf">Verkauf</th><th>Bord</th><th></th></tr></thead>
