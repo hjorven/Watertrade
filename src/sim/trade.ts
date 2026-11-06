@@ -1,4 +1,5 @@
 import { KONTOR_CAPACITY, KONTOR_SELL_FACTOR } from '../data/buildings.ts';
+import { hasTrait } from '../data/captains.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import { available, price, SELL_FACTOR, type MarketEntry } from './economy.ts';
 import { FRESH_GOODS } from '../data/ships.ts';
@@ -106,7 +107,7 @@ function sellFrom(
   return { ok: true, message: `${amount} t ${good.name} für ${revenue} Taler verkauft.`, amount, taler: revenue, profit, firstProfit };
 }
 
-const isHaendler = (ship: Ship) => ship.captain?.trait === 'haendler';
+const isHaendler = (ship: Ship) => hasTrait(ship.captain, 'haendler');
 
 export function buy(state: GameState, shipId: number, goodId: string, wanted: number, limit = 0): TradeResult {
   const ship = getShip(state, shipId);
