@@ -12,8 +12,10 @@ import {
 } from './client.ts';
 import { ensureSession } from './auth.ts';
 import { displayName } from './daily.ts';
+import type { LeagueEvent, LeagueEventKind } from './rules.ts';
 
 export { LEAGUE_CAPACITY, LEAGUE_START_GOLD, LEAGUE_TRAVEL_SECONDS, secondsUntilArrival } from './rules.ts';
+export type { LeagueEvent, LeagueEventKind } from './rules.ts';
 
 export interface LeagueMarketRow {
   townId: string;
@@ -31,7 +33,33 @@ export interface LeaguePlayer {
   cargo: Record<string, number>;
   townId: string;
   arrivesAt: string;
+  /** Abfahrt der laufenden oder letzten Fahrt, fehlt bei Servern vor der Saison-Migration */
+  departedAt?: string;
+  /** Schiffstyp, siehe LEAGUE_SHIPS */
+  ship: string;
   wealth: number;
+}
+
+export interface LeagueSeason {
+  id: number;
+  startsAt: string;
+  endsAt: string;
+}
+
+export interface LeagueHallEntry {
+  seasonId: number;
+  rank: number;
+  username: string;
+  wealth: number;
+  players: number;
+  mine: boolean;
+}
+
+/** Saison, laufende und angekündigte Ereignisse und Ruhmeshalle */
+export interface LeagueInfo {
+  season: LeagueSeason | null;
+  events: LeagueEvent[];
+  hall: LeagueHallEntry[];
 }
 
 export interface LeagueTradeResult {
@@ -65,6 +93,8 @@ interface PlayerRow {
   cargo: Record<string, number> | null;
   town_id: string;
   arrives_at: string;
+  departed_at?: string | null;
+  ship?: string | null;
   wealth: number;
 }
 
@@ -80,8 +110,17 @@ export function toMarket(r: MarketRow): LeagueMarketRow {
   };
 }
 
-function toPlayer(r: PlayerRow): LeaguePlayer {
-  return { userId: r.user_id, gold: r.gold, cargo: r.cargo ?? {}, townId: r.town_id, arrivesAt: r.arrives_at, wealth: r.wealth };
+export function toPlayer(r: PlayerRow): LeaguePlayer {
+  return {
+    userId: r.user_id,
+    gold: r.gold,
+    cargo: r.cargo ?? {},
+    townId: r.town_id,
+    arrivesAt: r.arrives_at,
+    ...(r.departed_at ? { departedAt: r.departed_at } : {}),
+    ship: r.ship ?? 'treidelkahn',
+    wealth: r.wealth,
+  };
 }
 
 /** Ganzer Liga-Markt, Lesen geht auch ohne Anmeldung */
@@ -140,6 +179,84 @@ export async function leagueTrade(townId: string, goodId: string, amount: number
     const { data, error } = await sb.rpc('league_trade', { p_town: townId, p_good: goodId, p_amount: amount });
     if (error) return fail(error);
     return { ok: true, data: data as LeagueTradeResult };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Wechselt das Schiff. Das alte geht für den halben Preis zurück, die Ladung muss ins neue passen. */
+export async function leagueBuyShip(shipId: string): Promise<Result<LeaguePlayer>> {
+  const sb = getClient();
+  if (!sb) return offline();
+  const session = await ensureSession();
+  if (!session.ok) return session;
+  try {
+    const { data, error } = await sb.rpc('league_buy_ship', { p_ship: shipId });
+    if (error) return fail(error);
+    return { ok: true, data: toPlayer(data as PlayerRow) };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+interface EventRow {
+  id: number;
+  kind: LeagueEventKind;
+  town_id: string | null;
+  starts_at: string;
+  ends_at: string;
+}
+
+interface HallRow {
+  season_id: number;
+  rank: number;
+  user_id: string | null;
+  username: string | null;
+  wealth: number;
+  players: number;
+}
+
+export function toEvent(r: EventRow): LeagueEvent {
+  return { id: r.id, kind: r.kind, townId: r.town_id, startsAt: r.starts_at, endsAt: r.ends_at };
+}
+
+/**
+ * Saison, Ereignisse (noch nicht beendet) und die Ruhmeshalle der letzten Saisons.
+ * Fehlt etwas auf dem Server (ältere Datenbank), bleibt der Teil leer statt zu scheitern.
+ */
+export async function getLeagueInfo(hallSeasons = 5): Promise<Result<LeagueInfo>> {
+  const sb = getClient();
+  if (!sb) return offline();
+  try {
+    const [season, events, hall, me] = await Promise.all([
+      sb.from('league_seasons').select('id, starts_at, ends_at').order('id', { ascending: false }).limit(1).maybeSingle(),
+      sb.from('league_events').select('id, kind, town_id, starts_at, ends_at').gt('ends_at', new Date().toISOString()).order('starts_at'),
+      sb
+        .from('league_hall_of_fame')
+        .select('season_id, rank, user_id, username, wealth, players')
+        .order('season_id', { ascending: false })
+        .order('rank')
+        .limit(Math.max(1, Math.min(20, hallSeasons)) * 3),
+      sb.auth.getSession(),
+    ]);
+    if (season.error && events.error && hall.error) return fail(season.error);
+    const myId = me.data.session?.user.id;
+    const s = season.data as { id: number; starts_at: string; ends_at: string } | null;
+    return {
+      ok: true,
+      data: {
+        season: s ? { id: s.id, startsAt: s.starts_at, endsAt: s.ends_at } : null,
+        events: ((events.data ?? []) as EventRow[]).map(toEvent),
+        hall: ((hall.data ?? []) as HallRow[]).map((r) => ({
+          seasonId: r.season_id,
+          rank: r.rank,
+          username: r.username ?? (r.user_id ? displayName(null, r.user_id) : 'Unbekannt'),
+          wealth: r.wealth,
+          players: r.players,
+          mine: !!myId && r.user_id === myId,
+        })),
+      },
+    };
   } catch (e) {
     return fail(e);
   }

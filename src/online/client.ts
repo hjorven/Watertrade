@@ -153,6 +153,11 @@ const MESSAGES: Record<string, string> = {
   'nicht in der liga': 'Du bist der Liga noch nicht beigetreten.',
   'unbekannte stadt': 'Diese Stadt gibt es nicht.',
   'unbekannter markt': 'Diese Ware wird hier nicht gehandelt.',
+  'zu viele aktionen': 'Langsamer bitte: höchstens 40 Aktionen pro Minute.',
+  'unbekanntes schiff': 'Dieses Schiff gibt es in der Liga nicht.',
+  'schon dein schiff': 'Das ist schon dein Schiff.',
+  'ladung passt nicht': 'Deine Ladung passt nicht in das neue Schiff. Erst verkaufen.',
+  'saison vorbei': 'Die Saison ist vorbei. Die neue beginnt in wenigen Minuten.',
 };
 
 export function fail<T>(err: unknown): Result<T> {
