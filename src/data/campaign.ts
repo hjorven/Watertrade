@@ -176,7 +176,7 @@ export const CHAPTERS: Chapter[] = [
     title: 'Hundert Jahre am Fluss',
     intro: [
       'Motoren tuckern, wo einst Pferde zogen. Kühlschiffe bringen frischen Fisch bis in die Berge. Dein Haus ist alt geworden, der Fluss nicht.',
-      'Ein letztes Mal: Mach das ganze Tal reich. Jede Stadt soll wachsen, und dein Haus soll das erste am Fluss sein.',
+      'Am Kai erzählt man, das Haus Ahlers in Altenfurt sei knapp bei Kasse. Seine Anteile sind billig wie nie. Wer mehr als die Hälfte hält, bekommt Schiffe, Kontore und Kasse. Ein letztes Mal: Mach dein Haus zum ersten am Fluss.',
     ],
     outro: 'Hundert Jahre am Fluss. Die Treidelpfade sind Spazierwege geworden, aber die Kontore stehen noch, und über den Türen steht dein Name.',
     startTown: 'altenfurt',
@@ -189,11 +189,12 @@ export const CHAPTERS: Chapter[] = [
     startYear: 11,
     kontore: ['altenfurt', 'niedermuend', 'oberau'],
     works: ['bruecke-kessel', 'schleuse-erzbach', 'vertiefung-glas'],
+    weakHouse: 'ahlers',
     goals: [
       { type: 'ships', count: 1, shipType: 'kuehlschiff', text: 'Stell ein Kühlschiff in Dienst' },
       { type: 'project', id: 'kanal-oberlauf', text: 'Bau den Seitenkanal am Oberlauf' },
-      { type: 'allTowns', level: 1, text: 'Jede Stadt im Tal ist mindestens Marktflecken' },
-      { type: 'rank', place: 1, text: 'Sei das reichste Haus im Handelsregister' },
+      { type: 'townLevel', town: 'muehlheim', level: 1, text: 'Lass Mühlheim zum Marktflecken wachsen' },
+      { type: 'takeover', count: 1, text: 'Übernimm ein Handelshaus am Fluss' },
       { type: 'worth', amount: 150000, text: 'Bring dein Haus auf 150.000 Taler Vermögen' },
     ],
   },

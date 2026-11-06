@@ -6,6 +6,8 @@ import { runChapterOne, runSteamChapter } from './balance.ts';
 import { addShip, advance, buy, buyShip, depart, dismantleRaft, fillBunker, newGame, sell } from './game.ts';
 import { bunkerPlan, planVoyage } from './voyage.ts';
 import { STEAM_MIN_HOURS, steamDays } from './steam.ts';
+import { buyShares } from './rivalry.ts';
+import { levelOf, needs } from './towns.ts';
 import { goalProgress } from './goals.ts';
 import { bestRaftPlan } from './rafting.ts';
 
@@ -164,4 +166,59 @@ describe('Kapitel 4: Dampfer mit Kohle versorgen', () => {
     expect(median(steam)).toBeGreaterThanOrEqual(150);
     expect(median(runs.map((r) => r.doneOn ?? Infinity))).toBeLessThan(400);
   }, 60000);
+});
+
+const k6 = CHAPTERS.find((c) => c.id === 'k6')!;
+const startK6 = () =>
+  newGame(VALLEY, {
+    startTown: k6.startTown,
+    money: k6.money,
+    startShip: k6.startShip,
+    extraShips: k6.extraShips,
+    allowedShips: k6.allowedShips,
+    rivals: true,
+    epoch: k6.epoch,
+    startYear: k6.startYear,
+    kontore: k6.kontore,
+    works: k6.works,
+    weakHouse: k6.weakHouse,
+  });
+
+describe('Kapitel 6: Übernahme als Höhepunkt', () => {
+  it('endet mit einer Übernahme statt nur mit Vermögenszielen', () => {
+    expect(k6.goals.some((g) => g.type === 'takeover')).toBe(true);
+    expect(k6.weakHouse).toBeDefined();
+    // "jede Stadt Marktflecken" hieße fünf Städte mehr als verdoppeln, das ist kein Kapitelziel
+    expect(k6.goals.some((g) => g.type === 'allTowns')).toBe(false);
+  });
+
+  it('das geschwächte Haus ist mit Startgeld und etwas Handel zu übernehmen, kein Geschenk', () => {
+    const s = startK6();
+    s.money = k6.money * 2;
+    const house = k6.weakHouse!;
+    let spent = 0;
+    for (let i = 0; i < 6; i++) {
+      const r = buyShares(s, VALLEY, house);
+      if (!r.ok) break;
+      spent += r.taler;
+    }
+    expect(goalProgress(s, k6.goals.find((g) => g.type === 'takeover')!).value).toBe(1);
+    expect(spent).toBeGreaterThan(3000);
+    expect(spent).toBeLessThan(k6.money * 2);
+  });
+
+  it('Mühlheim wird bei guter Versorgung in einem halben Jahr Marktflecken', () => {
+    const s = startK6();
+    const def = VALLEY.towns.find((t) => t.id === 'muehlheim')!;
+    let d = 0;
+    for (; d < 180 && levelOf(s.towns.muehlheim.population) < 1; d++) {
+      for (const g of Object.keys(needs(def, s.towns.muehlheim))) {
+        const m = s.markets.muehlheim[g];
+        m.stock = Math.max(m.stock, m.target * 0.95);
+      }
+      advance(s, VALLEY, 24);
+    }
+    expect(d).toBeLessThan(180);
+    expect(d).toBeGreaterThan(10);
+  });
 });
