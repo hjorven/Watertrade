@@ -28,7 +28,7 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'fahrten100', title: 'Alter Flussschiffer', text: 'Hundert Fahrten unternehmen', test: (s) => s.stats.trips >= 100 },
   { id: 'reich10k', title: 'Wohlhabend', text: '10 000 Taler in der Kasse haben', test: (s) => s.money >= 10000 },
   { id: 'reich100k', title: 'Flussbaron', text: 'Ein Vermögen von 100 000 Talern', test: (s) => playerWorth(s) >= 100000 },
-  { id: 'wasserbau', title: 'Den Fluss formen', text: 'Ein Wasserbauprojekt fertigstellen', test: (s) => s.works.some((w) => w.done && w.started > 0) },
+  { id: 'wasserbau', title: 'Den Fluss formen', text: 'Ein Wasserbauprojekt fertigstellen', test: (s) => s.works.some((w) => w.done && w.started > 0 && (!w.owner || w.owner === 'spieler')) },
   { id: 'dampf', title: 'Unter Dampf', text: 'Ein Dampfschiff besitzen', test: (s) => owns(s, (e) => e === 2) },
   { id: 'motor', title: 'Diesel und Stahl', text: 'Ein Motorschiff besitzen', test: (s) => owns(s, (e) => e >= 3) },
   { id: 'grossstadt', title: 'Stadtgründer', text: 'Eine Stadt zur Großstadt wachsen lassen', test: (s) => Object.values(s.towns).some((t) => levelOf(t.population) >= 3) },
