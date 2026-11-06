@@ -1,7 +1,9 @@
 import { fail, getClient, offline, type Result } from './client.ts';
 import { ensureSession } from './auth.ts';
 
-export const SLOT_COUNT = 5;
+import { SLOT_COUNT } from './rules.ts';
+
+export { SLOT_COUNT };
 
 export interface SlotInfo {
   slot: number;

@@ -3,36 +3,18 @@ import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { ACHIEVEMENTS } from '../sim/achievements.ts';
 import { price, SELL_FACTOR } from '../sim/economy.ts';
+import { dateText } from '../sim/calendar.ts';
 import type { SaveGame } from '../sim/save.ts';
-import {
-  currentPlayer,
-  dailySeed,
-  getLeagueMarket,
-  getUsername,
-  isConfigured,
-  joinLeague,
-  leagueRanking,
-  leagueTrade,
-  leagueTravel,
-  listSlots as listCloudSlots,
-  loadSlot as loadCloudSlot,
-  saveSlot as saveCloudSlot,
-  secondsUntilArrival,
-  setUsername,
-  signInWithMagicLink,
-  signOut,
-  submitDaily,
-  subscribeLeagueMarket,
-  todayUtc,
-  topDaily,
-  LEAGUE_TRAVEL_SECONDS,
-  SLOT_COUNT,
-  type DailyEntry,
-  type LeagueMarketRow,
-  type LeaguePlayer,
-  type LeagueRankEntry,
-  type SlotInfo as CloudSlot,
-} from '../online/index.ts';
+import { dailySeed, LEAGUE_TRAVEL_SECONDS, secondsUntilArrival, SLOT_COUNT, todayUtc } from '../online/rules.ts';
+import type { DailyEntry, LeagueMarketRow, LeaguePlayer, LeagueRankEntry, SlotInfo as CloudSlot } from '../online/index.ts';
+
+type OnlineApi = typeof import('../online/index.ts');
+let api: Promise<OnlineApi> | null = null;
+/** Supabase erst laden, wenn jemand einen Online-Bildschirm öffnet: hält den Spielstart schlank */
+function online(): Promise<OnlineApi> {
+  api ??= import('../online/index.ts');
+  return api;
+}
 import type { Menu } from './menu.ts';
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -41,7 +23,9 @@ const LEAGUE_CARGO = 40;
 
 export interface OnlineHooks {
   startDaily(day: string, seed: number): void;
+  /** Spielstand zum Speichern, null außerhalb eines Spiels oder in Wertungsmodi */
   currentSave(): SaveGame | null;
+  inGame(): boolean;
   loadSave(save: SaveGame): boolean;
   unlock(id: string): void;
   achievements(): Record<string, string>;
@@ -121,7 +105,7 @@ export class OnlineScreens {
         void this.openLeague();
         break;
       case 'leagueTravel':
-        void this.leagueAction(() => leagueTravel(d.id!), (p) => {
+        void this.leagueAction(async () => (await online()).leagueTravel(d.id!), (p) => {
           this.player = p;
           this.hooks.sfx('ablegen');
           this.leagueMsg = `Unterwegs nach ${this.townName(p.townId)}.`;
@@ -129,7 +113,7 @@ export class OnlineScreens {
         break;
       case 'leagueTrade': {
         const amount = Number(d.amount);
-        void this.leagueAction(() => leagueTrade(this.player!.townId, d.good!, amount), (r) => {
+        void this.leagueAction(async () => (await online()).leagueTrade(this.player!.townId, d.good!, amount), (r) => {
           if (!this.player) return;
           this.player = { ...this.player, gold: r.gold, cargo: r.cargo ?? {}, wealth: r.wealth };
           const row = this.market.find((m) => m.townId === this.player!.townId && m.goodId === d.good);
@@ -149,7 +133,7 @@ export class OnlineScreens {
         break;
       case 'setName':
         void this.accountAction(async () => {
-          const r = await setUsername(this.menu.value('name'));
+          const r = await (await online()).setUsername(this.menu.value('name'));
           this.account.status = r.ok ? `Name gespeichert: ${r.data}` : r.error;
           if (r.ok) this.account.name = r.data;
         });
@@ -161,13 +145,13 @@ export class OnlineScreens {
             this.account.status = 'Bitte eine gültige E-Mail-Adresse eingeben.';
             return;
           }
-          const r = await signInWithMagicLink(email);
+          const r = await (await online()).signInWithMagicLink(email);
           this.account.status = r.ok ? `Link verschickt an ${email}. Öffne ihn auf diesem oder einem anderen Gerät.` : niceError(r.error);
         });
         break;
       case 'signOut':
         void this.accountAction(async () => {
-          const r = await signOut();
+          const r = await (await online()).signOut();
           this.account.status = r.ok ? 'Abgemeldet.' : r.error;
           await this.loadAccount();
         });
@@ -177,7 +161,7 @@ export class OnlineScreens {
           const save = this.hooks.currentSave();
           if (!save) return;
           const slot = Number(d.id);
-          const r = await saveCloudSlot(slot, cloudName(save), save);
+          const r = await (await online()).saveSlot(slot, cloudName(save), save);
           this.account.status = r.ok ? `In der Cloud gespeichert, Platz ${slot}.` : niceError(r.error);
           await this.loadSlots();
           if (r.ok) this.hooks.sfx('papier');
@@ -185,7 +169,7 @@ export class OnlineScreens {
         break;
       case 'cloudLoad':
         void this.accountAction(async () => {
-          const r = await loadCloudSlot<SaveGame>(Number(d.id));
+          const r = await (await online()).loadSlot<SaveGame>(Number(d.id));
           if (!r.ok || !r.data) {
             this.account.status = r.ok ? 'Dieser Platz ist leer.' : niceError(r.error);
             return;
@@ -203,10 +187,10 @@ export class OnlineScreens {
   // --- Tagesmarkt ---
 
   private async openDaily(): Promise<void> {
-    this.daily = { entries: null, status: isConfigured() ? 'Bestenliste wird geladen ...' : 'Ohne Verbindung gibt es keine Bestenliste.' };
+    this.daily = { entries: null, status: (await online()).isConfigured() ? 'Bestenliste wird geladen ...' : 'Ohne Verbindung gibt es keine Bestenliste.' };
     this.renderDaily();
-    if (!isConfigured()) return;
-    const r = await topDaily(todayUtc(), 10);
+    if (!(await online()).isConfigured()) return;
+    const r = await (await online()).topDaily(todayUtc(), 10);
     this.daily = r.ok ? { entries: r.data, status: r.data.length ? '' : 'Heute hat noch niemand gespielt. Sei der Erste.' } : { entries: null, status: niceError(r.error) };
     if (this.menu.screen === 'daily') this.renderDaily();
   }
@@ -234,18 +218,18 @@ export class OnlineScreens {
         <button class="btn primary wide" data-menu="dailyStart">${result || best !== null ? 'Noch einmal spielen' : 'Tagesmarkt beginnen'}</button>
         ${result ? '<button class="btn wide" data-menu="resume">Weiterspielen ohne Wertung</button>' : ''}
       </div>
-      <p class="fine"><button class="link" data-menu="main">Hauptmenü</button>${this.account.name ? '' : ' · <button class="link" data-menu="account">Namen für die Bestenliste festlegen</button>'}</p>`);
+      <p class="fine"><button class="link" data-menu="leave">Hauptmenü</button>${this.account.name ? '' : ' · <button class="link" data-menu="account">Namen für die Bestenliste festlegen</button>'}</p>`);
     this.menu.screen = 'daily';
   }
 
   /** Tagesmarkt abgelaufen: eintragen und Bestenliste zeigen */
   async finishDaily(day: string, worth: number): Promise<void> {
     this.hooks.unlock('tagesmarkt');
-    this.daily = { entries: null, status: isConfigured() ? 'Ergebnis wird eingetragen ...' : 'Ohne Verbindung wird nur lokal gezählt.' };
+    this.daily = { entries: null, status: (await online()).isConfigured() ? 'Ergebnis wird eingetragen ...' : 'Ohne Verbindung wird nur lokal gezählt.' };
     this.renderDaily({ worth, improved: null });
-    if (!isConfigured()) return;
-    const sent = await submitDaily(worth, day);
-    const top = await topDaily(day, 10);
+    if (!(await online()).isConfigured()) return;
+    const sent = await (await online()).submitDaily(worth, day);
+    const top = await (await online()).topDaily(day, 10);
     this.daily = top.ok ? { entries: top.data, status: '' } : { entries: null, status: niceError(top.error) };
     if (!sent.ok) this.daily.status = niceError(sent.error);
     if (this.menu.screen === 'daily') this.renderDaily({ worth, improved: sent.ok ? sent.data.improved : null });
@@ -254,7 +238,7 @@ export class OnlineScreens {
   // --- Handelsliga ---
 
   private async openLeague(): Promise<void> {
-    if (!isConfigured()) {
+    if (!(await online()).isConfigured()) {
       this.leagueMsg = 'Die Handelsliga braucht eine Verbindung zum Server.';
       this.renderLeague();
       return;
@@ -262,7 +246,7 @@ export class OnlineScreens {
     this.leagueBusy = true;
     this.leagueMsg = 'Verbinde mit der Liga ...';
     this.renderLeague();
-    const [p, m, r] = await Promise.all([joinLeague(), getLeagueMarket(), leagueRanking(10)]);
+    const [p, m, r] = await Promise.all([(await online()).joinLeague(), (await online()).getLeagueMarket(), (await online()).leagueRanking(10)]);
     this.leagueBusy = false;
     if (!p.ok) {
       this.leagueMsg = niceError(p.error);
@@ -274,10 +258,19 @@ export class OnlineScreens {
     if (r.ok) this.ranking = r.data;
     this.leagueMsg = '';
     if (!this.unsubscribe) {
-      this.unsubscribe = subscribeLeagueMarket((row) => {
+      const subscribe = (await online()).subscribeLeagueMarket as (
+        onChange: (row: LeagueMarketRow) => void,
+        onGiveUp?: () => void,
+      ) => () => void;
+      this.unsubscribe = subscribe((row) => {
         const i = this.market.findIndex((x) => x.townId === row.townId && x.goodId === row.goodId);
         if (i >= 0) this.market[i] = row;
         else this.market.push(row);
+        if (this.menu.screen === 'league') this.renderLeague();
+      }, () => {
+        // Realtime gibt nach mehreren Fehlversuchen auf: Preise nur noch beim Neuladen aktuell
+        this.unsubscribe = null;
+        this.leagueMsg = 'Live-Verbindung unterbrochen. Die Preise aktualisieren sich beim Neuladen.';
         if (this.menu.screen === 'league') this.renderLeague();
       });
     }
@@ -328,7 +321,7 @@ export class OnlineScreens {
       this.leagueMsg = niceError(r.error);
       this.hooks.sfx('fehler');
     }
-    const rank = await leagueRanking(10);
+    const rank = await (await online()).leagueRanking(10);
     if (rank.ok) this.ranking = rank.data;
     if (this.menu.screen === 'league') this.renderLeague();
   }
@@ -399,36 +392,38 @@ export class OnlineScreens {
   }
 
   private menuBack(): string {
-    return this.hooks.currentSave() ? 'resume' : 'main';
+    return this.hooks.inGame() ? 'resume' : 'main';
   }
 
   // --- Konto ---
 
   private async loadAccount(): Promise<void> {
-    const me = await currentPlayer();
+    const ping = await (await online()).getUsername();
+    if (!ping.ok) this.account.status = ping.offline ? 'Ohne Verbindung zum Server gibt es kein Konto.' : 'Der Server ist gerade nicht erreichbar. Versuch es später noch einmal.';
+    const me = await (await online()).currentPlayer();
     this.account.email = me?.email ?? null;
     this.account.anonymous = !me || me.anonymous;
-    const n = await getUsername();
+    const n = await (await online()).getUsername();
     this.account.name = n.ok ? n.data : null;
     await this.loadSlots();
   }
 
   private async loadSlots(): Promise<void> {
-    const me = await currentPlayer();
+    const me = await (await online()).currentPlayer();
     if (!me) {
       this.account.slots = [];
       return;
     }
-    const s = await listCloudSlots();
+    const s = await (await online()).listSlots();
     this.account.slots = s.ok ? s.data : [];
   }
 
   private async openAccount(): Promise<void> {
-    this.account.status = isConfigured() ? 'Lade Konto ...' : 'Ohne Verbindung zum Server gibt es kein Konto.';
+    this.account.status = (await online()).isConfigured() ? 'Lade Konto ...' : 'Ohne Verbindung zum Server gibt es kein Konto.';
     this.renderAccount();
-    if (!isConfigured()) return;
-    await this.loadAccount();
+    if (!(await online()).isConfigured()) return;
     this.account.status = '';
+    await this.loadAccount();
     if (this.menu.screen === 'account') this.renderAccount();
   }
 
@@ -457,14 +452,14 @@ export class OnlineScreens {
         a.email ? `Angemeldet mit ${esc(a.email)}. Deine Spielstände und Ergebnisse gehören zu dieser Adresse.` : 'Du spielst ohne Anmeldung. Mit einer E-Mail-Adresse kannst du dein Konto auf andere Geräte mitnehmen, ein Passwort gibt es nicht.'
       }</p>
       ${a.status ? `<p class="league-msg">${esc(a.status)}</p>` : ''}
-      <form class="inline-form"><label>Name in den Bestenlisten<input name="name" maxlength="20" placeholder="3 bis 20 Zeichen" value="${esc(a.name ?? '')}"></label><button class="btn" data-menu="setName">Speichern</button></form>
+      <form class="inline-form"><label>Name in den Bestenlisten<input name="name" maxlength="20" placeholder="3 bis 20 Zeichen" value="${esc(a.name ?? '')}"></label><button type="button" class="btn" data-menu="setName">Speichern</button></form>
       ${
         a.email
           ? '<p class="fine"><button class="link" data-menu="signOut">Abmelden</button></p>'
-          : '<form class="inline-form"><label>E-Mail für den Anmeldelink<input name="email" type="email" placeholder="name@beispiel.de"></label><button class="btn" data-menu="magicLink">Link senden</button></form>'
+          : '<form class="inline-form"><label>E-Mail für den Anmeldelink<input name="email" type="email" placeholder="name@beispiel.de"></label><button type="button" class="btn" data-menu="magicLink">Link senden</button></form>'
       }
       <h3>Cloud-Speicher</h3>
-      <p class="fine">${save ? 'Speichert das laufende Spiel auf dem Server.' : 'Starte oder lade ein Spiel, um es in der Cloud zu speichern.'}</p>
+      <p class="fine">${save ? 'Speichert das laufende Spiel auf dem Server.' : this.hooks.inGame() ? 'Herausforderungen und Tagesmarkt lassen sich nicht speichern.' : 'Starte oder lade ein Spiel, um es in der Cloud zu speichern.'}</p>
       <div class="cloud-slots">${slots}</div>
       <p class="fine"><button class="link" data-menu="${this.menuBack()}">Zurück</button></p>`);
     this.menu.screen = 'account';
@@ -502,5 +497,5 @@ function cloudName(save: SaveGame): string {
   const what =
     save.mode === 'kampagne' ? 'Kampagne' : save.mode === 'herausforderung' ? 'Herausforderung' : save.mode === 'tagesmarkt' ? 'Tagesmarkt' : 'Freies Spiel';
   const day = Math.floor(save.state.hour / 24) + 1;
-  return `${what}, Tag ${day}, ${fmt(save.state.money)} Taler`.slice(0, 60);
+  return `${what}, ${dateText(day)}, ${fmt(save.state.money)} Taler`.slice(0, 60);
 }
