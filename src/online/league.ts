@@ -3,10 +3,7 @@ import { fail, getClient, offline, type Result } from './client.ts';
 import { ensureSession } from './auth.ts';
 import { displayName } from './daily.ts';
 
-/** Liga-Regeln, gleich wie in supabase/schema.sql */
-export const LEAGUE_CAPACITY = 40;
-export const LEAGUE_TRAVEL_SECONDS = 45;
-export const LEAGUE_START_GOLD = 300;
+export { LEAGUE_CAPACITY, LEAGUE_START_GOLD, LEAGUE_TRAVEL_SECONDS, secondsUntilArrival } from './rules.ts';
 
 export interface LeagueMarketRow {
   townId: string;
@@ -75,11 +72,6 @@ export function toMarket(r: MarketRow): LeagueMarketRow {
 
 function toPlayer(r: PlayerRow): LeaguePlayer {
   return { userId: r.user_id, gold: r.gold, cargo: r.cargo ?? {}, townId: r.town_id, arrivesAt: r.arrives_at, wealth: r.wealth };
-}
-
-/** Ist der Kahn angekommen? Gibt die verbleibenden Sekunden zurück (0 = angekommen) */
-export function secondsUntilArrival(p: LeaguePlayer, now: Date = new Date()): number {
-  return Math.max(0, Math.ceil((Date.parse(p.arrivesAt) - now.getTime()) / 1000));
 }
 
 /** Ganzer Liga-Markt, Lesen geht auch ohne Anmeldung */

@@ -3,13 +3,12 @@ import * as THREE from 'three';
 import { CHAPTERS, type Chapter } from './data/campaign.ts';
 import { CHALLENGES, DAILY_DAYS, dailySetup } from './data/challenges.ts';
 import { newAchievements, ACHIEVEMENTS } from './sim/achievements.ts';
-import { getClient } from './online/index.ts';
 import { OnlineScreens } from './ui/online-screens.ts';
 import { GOOD_BY_ID, GOODS } from './data/goods.ts';
 import { VALLEY } from './data/maps/valley.ts';
 import { Landscape } from './render/landscape.ts';
 import { Stage } from './render/scene.ts';
-import { ambient, isMuted, mute, playSfx, setMusic, unlockAudioOnGesture, type SfxName } from './audio/index.ts';
+import { ambient, getVolume, isMuted, mute, playSfx, setMusic, setVolume, unlockAudioOnGesture, type SfxName } from './audio/index.ts';
 import { RIVAL_BY_ID } from './data/rivals.ts';
 import { SHIPS } from './data/ships.ts';
 import { Estates, PLAYER_COLOR, type EstateInfo } from './render/buildings.ts';
@@ -30,6 +29,7 @@ import {
   kontorSell,
   load,
   newGame,
+  planVoyage,
   sell,
   shipClass,
   store,
@@ -48,7 +48,7 @@ import { EPOCHS } from './data/ships.ts';
 import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
 import { goalDone, goalProgress } from './sim/goals.ts';
 import { deserialize, SAVE_VERSION, serialize, type GameMode, type SaveGame } from './sim/save.ts';
-import { LEVELS, levelOf } from './sim/towns.ts';
+import { LEVELS, levelOf, netFlow } from './sim/towns.ts';
 import { ALL_FEATURES, Hud, type HudFeatures } from './ui/hud.ts';
 import { Menu, type SlotInfo } from './ui/menu.ts';
 import { loadJson, saveJson } from './ui/storage.ts';
@@ -106,7 +106,7 @@ function setupMapData(): void {
   hud.setMapData({
     viewBox: `${f(minX)} ${f(minZ)} ${f(maxX - minX)} ${f(maxZ - minZ)}`,
     rivers: rivers.map((r) => ({ path: 'M' + r.pts.map((p) => `${f(p.x)} ${f(p.z)}`).join(' L'), width: r.width })),
-    towns: Object.fromEntries(towns.map((t) => [t.def.id, { x: t.center.x, y: t.center.z }])),
+    towns: Object.fromEntries(towns.map((t) => [t.def.id, { x: t.mooring.x, y: t.mooring.z }])),
     segMid: Object.fromEntries(
       VALLEY.segments.map((sg) => {
         const p = land.pointAt(sg.river, (sg.fromT + sg.toT) / 2);
@@ -149,8 +149,11 @@ const progress = loadJson<Progress>('progress', { unlocked: ['k1'] });
 progress.challenges ??= {};
 progress.daily ??= {};
 const achieved = loadJson<Record<string, string>>('achievements', {});
-// Anmeldelink aus der Adresse übernehmen, falls jemand über die E-Mail zurückkommt
-getClient();
+// Anmeldelink aus der Adresse übernehmen, falls jemand über die E-Mail zurückkommt.
+// Supabase wird nur dann sofort geladen, sonst erst beim ersten Online-Bildschirm.
+if (/access_token|refresh_token|[?&]code=|error_description/.test(location.hash + location.search)) {
+  void import('./online/index.ts').then((m) => m.getClient());
+}
 stage.postfx.enabled = settings.tiltShift;
 unlockAudioOnGesture();
 mute(settings.sound === false);
@@ -429,6 +432,20 @@ const menu = new Menu(
       mute(!on);
       saveJson('settings', settings);
     },
+    setVolume(channel, v) {
+      setVolume(v, channel);
+    },
+    getVolume: (channel) => getVolume(channel),
+    leaveGame() {
+      if (!inGame) return;
+      saveSlot('auto');
+      inGame = false;
+      running = false;
+      document.body.classList.add('no-game');
+      hud.renderGoals(null, []);
+      hud.setHint(null);
+      setMusic('ruhig');
+    },
     startChallenge(id) {
       const c = CHALLENGES.find((x) => x.id === id)!;
       startGame(
@@ -460,6 +477,7 @@ const menu = new Menu(
     inGame: inGame,
     challenges: progress.challenges!,
     online: true,
+    canSave: canSave(),
   }),
 );
 
@@ -471,7 +489,8 @@ const screens = new OnlineScreens(menu, VALLEY, {
       { mode: 'tagesmarkt', completed: new Set(), finished: false, dailyDay: day },
     );
   },
-  currentSave: () => (inGame ? makeSave() : null),
+  currentSave: () => (inGame && canSave() ? makeSave() : null),
+  inGame: () => inGame,
   loadSave(save) {
     return startSave(save);
   },
@@ -494,6 +513,8 @@ function unlock(id: string): void {
   sfx('stempel');
 }
 let inGame = false;
+document.body.classList.add('no-game');
+const canSave = () => session.mode !== 'tagesmarkt' && session.mode !== 'herausforderung';
 
 function startGame(s: GameState, sess: Session): void {
   for (const view of [...views.values(), ...rivalViews.values()]) view.removeFrom(stage.scene);
@@ -505,6 +526,7 @@ function startGame(s: GameState, sess: Session): void {
   selected = state.ships[0]?.id ?? -1;
   follow = true;
   inGame = true;
+  document.body.classList.remove('no-game');
   running = true;
   lastSeason = null;
   hud.setFeatures(featuresFor(session));
@@ -521,17 +543,47 @@ function featuresFor(sess: Session): HudFeatures {
   return ALL_FEATURES;
 }
 
+/** Nächstgelegene erreichbare Stadt mit Bedarf an einer Ware */
+function buyerFor(ship: Ship, good: string): string | null {
+  let best: { town: string; hours: number } | null = null;
+  for (const def of VALLEY.towns) {
+    if (def.id === ship.port || !state.markets[def.id][good]) continue;
+    if (netFlow(def, good, state.towns[def.id]) >= 0) continue;
+    const plan = planVoyage(state, VALLEY, ship.id, def.id);
+    if (!plan?.ok) continue;
+    if (!best || plan.voyage.hours < best.hours) best = { town: def.id, hours: plan.voyage.hours };
+  }
+  return best?.town ?? null;
+}
+
+/** Erster Handel: Überschussware hier, mit einem nahen Abnehmer */
+function bestFirstTrade(ship: Ship): { good: string; town: string } | null {
+  const here = VALLEY.towns.find((t) => t.id === ship.port);
+  if (!here) return null;
+  for (const g of GOODS) {
+    if (!state.markets[here.id][g.id] || netFlow(here, g.id, state.towns[here.id]) <= 0) continue;
+    const town = buyerFor(ship, g.id);
+    if (town) return { good: g.id, town };
+  }
+  return null;
+}
+
 /** Nächster Schritt im ersten Kapitel, solange man noch lernt */
 function tutorialHint(): string | null {
   if (session.mode !== 'kampagne' || session.chapter?.id !== 'k1' || session.finished) return null;
   const ship = current();
   if (!ship) return null;
-  const loaded = Object.values(ship.cargo).some((c) => c.amount > 0);
+  const aboard = Object.entries(ship.cargo).find(([, c]) => c.amount > 0)?.[0];
   if (!state.firstProfitDone) {
     if (ship.voyage) return 'Unterwegs. Oben rechts lässt sich die Zeit mit <b>4×</b> beschleunigen.';
-    if (!loaded)
-      return 'Kauf eine Ware, die hier im <b>Überschuss</b> ist, denn dann ist sie billig. Zum Beispiel Holz mit <b>+10</b>.';
-    return 'Liegt der Verkaufspreis über deinem Einkauf (ø), verkauf mit <b>Verkaufen</b>. Sonst leg unten ab, zu einer Stadt mit <b>Bedarf</b> an der Ware.';
+    if (!aboard) {
+      const tip = bestFirstTrade(ship);
+      return tip
+        ? `Kauf eine Ware, die hier im <b>Überschuss</b> ist, denn dann ist sie billig. Zum Beispiel <b>${GOOD_BY_ID.get(tip.good)!.name}</b> mit <b>+10</b>, das wird in <b>${townName(tip.town)}</b> gebraucht.`
+        : 'Kauf eine Ware, die hier im <b>Überschuss</b> ist, denn dann ist sie billig, und bring sie in eine Stadt mit <b>Bedarf</b>.';
+    }
+    const dest = buyerFor(ship, aboard);
+    return `Liegt der Verkaufspreis über deinem Einkauf (ø), verkauf mit <b>Verkaufen</b>. Sonst leg ab${dest ? ` nach <b>${townName(dest)}</b>, dort wird ${GOOD_BY_ID.get(aboard)!.name} gebraucht` : ' zu einer Stadt mit <b>Bedarf</b> an der Ware'}.`;
   }
   if (state.stats.rafts < 1)
     return 'Erster Gewinn! In der <b>Werft</b> kannst du ein Floß bauen. Es treibt nur talwärts und wird am Ziel als Holz verkauft.';
@@ -953,6 +1005,10 @@ function updateAmbience(): void {
 const timer = new THREE.Timer();
 let uiTick = 0;
 
+const camAim = new THREE.Vector3();
+const camRight = new THREE.Vector3();
+const ledgerEl = document.querySelector<HTMLElement>('.ledger')!;
+
 function frame(): void {
   timer.update();
   const dt = Math.min(0.1, timer.getDelta());
@@ -992,7 +1048,16 @@ function frame(): void {
   const sel = views.get(selected);
   if (inGame && follow && sel) {
     camOffset.subVectors(stage.camera.position, stage.controls.target);
-    stage.controls.target.lerp(sel.group.position, 1 - Math.exp(-dt * 2));
+    // Das Kontorbuch rechts verdeckt einen Teil des Bildes: Schiff in die Mitte der freien Fläche rücken
+    camAim.copy(sel.group.position);
+    const panel = ledgerEl.offsetWidth;
+    const h = viewport.clientHeight;
+    if (window.innerWidth > 720 && panel > 0 && h > 0) {
+      const worldPerPx = (2 * camOffset.length() * Math.tan(THREE.MathUtils.degToRad(stage.camera.fov / 2))) / h;
+      camRight.setFromMatrixColumn(stage.camera.matrixWorld, 0).setY(0).normalize();
+      camAim.addScaledVector(camRight, (panel / 2 + 12) * worldPerPx);
+    }
+    stage.controls.target.lerp(camAim, 1 - Math.exp(-dt * 2));
     stage.camera.position.copy(stage.controls.target).add(camOffset);
   }
 

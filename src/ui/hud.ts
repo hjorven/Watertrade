@@ -300,7 +300,7 @@ export class Hud {
       `
       <span><small>Kasse</small><b>${fmt(state.money)} Taler</b></span>
       <span title="${EPOCHS[state.epoch - 1].name}"><small>${SEASON_NAME[season(day(state))]} · Jahr ${year(day(state))}</small><b>${dayInSeason(day(state))}. Tag, ${clock(state.hour)}</b></span>
-      <span class="hide-narrow" title="Pegel und Wind bestimmen, welche Schiffe wie schnell fahren"><small>Fluss</small><b>${state.waterLevel >= 0 ? '+' : '−'}${Math.abs(state.waterLevel).toFixed(1).replace('.', ',')} m${state.ice ? ', Eis' : ''} · Wind ${windText(w)}</b></span>${events}`,
+      <span class="river-stat" title="Pegel und Wind bestimmen, welche Schiffe wie schnell fahren"><small>Fluss</small><b>${state.waterLevel >= 0 ? '+' : '−'}${Math.abs(state.waterLevel).toFixed(1).replace('.', ',')} m${state.ice ? ', Eis' : ''} · Wind ${windText(w)}</b></span>${events}`,
     );
     this.newsKey = state.news[0] ? `${state.news[0].day}|${state.news[0].text}` : '';
     if (this.view === 'news') this.newsSeen = this.newsKey;
@@ -813,7 +813,7 @@ export class Hud {
           : st === 'bau'
             ? `<span class="note">noch ${daysLeft(state, p.id)} Tage</span>`
             : locked
-              ? `<span class="note">ab Epoche „${EPOCHS[p.epoch - 1].name}“</span>`
+              ? `<span class="note nowrap">ab Epoche „${EPOCHS[p.epoch - 1].name}“</span>`
               : `<button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" ${state.money >= p.cost ? '' : 'disabled'}>${fmt(p.cost)} Taler</button>`;
       return `<div class="yard-row ${locked ? 'muted' : ''}"><div><b>${p.name}</b> <small>${where} · ${p.days} Tage Bauzeit</small>
         <small class="desc">${p.text}</small></div>${btn}</div>`;
@@ -835,24 +835,68 @@ export class Hud {
     if (!d) return '';
     const rivers = d.rivers.map((r) => `<path d="${r.path}" class="m-river" style="stroke-width:${r.width}"/>`).join('');
     const segs = effectiveSegments(state, this.map);
+    const townPts = Object.values(d.towns);
+    const legend: string[] = [];
+    const noteBoxes: { x: number; y: number; w: number; h: number }[] = [];
     const notes = segs
       .map((seg) => {
-        const m = d.segMid[seg.id];
-        const marks: string[] = [];
-        if (seg.bridgeHeight !== undefined) marks.push(`Brücke ${seg.bridgeHeight} m`);
+        const m = { ...d.segMid[seg.id] };
+        // Beschriftung von nahen Städten wegschieben, damit sich nichts überdeckt
+        for (const t of townPts) {
+          const dx = m.x - t.x;
+          const dy = m.y - t.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < 22) {
+            const k = dist > 0.1 ? 22 / dist : 1;
+            m.x = t.x + (dist > 0.1 ? dx * k : 22);
+            m.y = t.y + (dist > 0.1 ? dy * k : 0);
+          }
+        }
+        const depth = (seg.baseDepth + state.waterLevel).toFixed(1).replace('.', ',');
+        const marks: string[] = [`${depth} m`];
+        if (seg.bridgeHeight !== undefined) marks.push(`Br. ${String(seg.bridgeHeight).replace('.', ',')} m`);
         if (seg.freezes && state.ice) marks.push('Eis');
         const ev = state.events.find((e) => e.seg === seg.id);
         if (ev) marks.push(EVENT_TITLE[ev.kind]);
-        marks.push(`${(seg.baseDepth + state.waterLevel).toFixed(1).replace('.', ',')} m tief`);
-        return `<text x="${m.x}" y="${m.y}" class="m-note">${marks.join(' · ')}</text>`;
+        legend.push(
+          `<li><b>${this.townName(seg.from)} – ${this.townName(seg.to)}</b>: ${depth} m tief${seg.bridgeHeight !== undefined ? `, Brücke ${String(seg.bridgeHeight).replace('.', ',')} m hoch` : ''}${seg.freezes ? (state.ice ? ', zugefroren' : ', friert im Winter zu') : ''}${ev ? `, ${EVENT_TITLE[ev.kind]}` : ''}</li>`,
+        );
+        const text = marks.join(' · ');
+        noteBoxes.push({ x: m.x - text.length * 1.6, y: m.y - 5, w: text.length * 3.2, h: 6 });
+        return `<text x="${m.x.toFixed(1)}" y="${m.y.toFixed(1)}" class="m-note" text-anchor="middle">${text}</text>`;
       })
       .join('');
+    // Ortsnamen so setzen, dass sie sich nicht überdecken: oben, unten, rechts oder links vom Kreis
+    type Box = { x: number; y: number; w: number; h: number };
+    const placed: Box[] = [...noteBoxes];
+    // Überlappungsfläche mit schon gesetzten Beschriftungen, Kreise zählen mit
+    const cost = (b: Box) => {
+      let c = 0;
+      for (const o of placed) {
+        const ox = Math.min(b.x + b.w, o.x + o.w) - Math.max(b.x, o.x);
+        const oy = Math.min(b.y + b.h, o.y + o.h) - Math.max(b.y, o.y);
+        if (ox > 0 && oy > 0) c += ox * oy;
+      }
+      for (const t of townPts) if (t.x > b.x - 5 && t.x < b.x + b.w + 5 && t.y > b.y - 5 && t.y < b.y + b.h + 5) c += 200;
+      return c;
+    };
     const towns = this.map.towns
       .map((t) => {
         const p = d.towns[t.id];
         const lvl = levelOf(state.towns[t.id].population);
-        const mine = state.kontore[t.id] ? '<rect class="m-kontor" x="-3" y="-15" width="6" height="6"/>' : '';
-        return `<g transform="translate(${p.x},${p.y})"><circle r="${4 + lvl * 1.5}" class="m-town"/>${mine}<text y="${-8 - lvl}" x="8" class="m-label">${t.name}</text></g>`;
+        const r = 4 + lvl * 1.5;
+        const w = t.name.length * 4.6 + 4;
+        const h = 9;
+        const options: { box: Box; ax: number; ay: number; anchor: string }[] = [
+          { box: { x: p.x - w / 2, y: p.y - r - 3 - h, w, h }, ax: 0, ay: -r - 4, anchor: 'middle' },
+          { box: { x: p.x - w / 2, y: p.y + r + 2, w, h }, ax: 0, ay: r + 10, anchor: 'middle' },
+          { box: { x: p.x + r + 3, y: p.y - h / 2, w, h }, ax: r + 3, ay: 3, anchor: 'start' },
+          { box: { x: p.x - r - 3 - w, y: p.y - h / 2, w, h }, ax: -r - 3, ay: 3, anchor: 'end' },
+        ];
+        const pick = options.reduce((a, o) => (cost(o.box) < cost(a.box) ? o : a));
+        placed.push(pick.box);
+        const mine = state.kontore[t.id] ? `<rect class="m-kontor" x="-3" y="-3" width="6" height="6"/>` : '';
+        return `<g transform="translate(${p.x},${p.y})"><circle r="${r}" class="m-town"/>${mine}<text x="${pick.ax}" y="${pick.ay}" class="m-label" text-anchor="${pick.anchor}">${t.name}</text></g>`;
       })
       .join('');
     const ships = state.ships
@@ -868,8 +912,9 @@ export class Hud {
         return p ? `<circle cx="${p.x}" cy="${p.y}" r="2.4" fill="${hex(color)}" class="m-rival"/>` : '';
       })
       .join('');
-    return `<div class="ledger-head"><div class="stamp-small">Flusskarte</div><h2>Das Tal</h2><p>Rote Punkte sind deine Schiffe, Quadrate deine Kontore.</p></div>
-      <svg class="paper-map" viewBox="${d.viewBox}" role="img" aria-label="Karte des Flusstals">${rivers}${notes}${towns}${rivals}${ships}</svg>`;
+    return `<div class="ledger-head"><div class="stamp-small">Flusskarte</div><h2>Das Tal</h2><p>Rote Punkte sind deine Schiffe, Quadrate deine Kontore. Zahlen am Fluss: Wassertiefe.</p></div>
+      <div class="map-scroll"><svg class="paper-map" viewBox="${d.viewBox}" role="img" aria-label="Karte des Flusstals">${rivers}${notes}${towns}${rivals}${ships}</svg></div>
+      <details class="more"><summary>Alle Abschnitte mit Tiefe und Brücken</summary><ul class="plain map-legend">${legend.join('')}</ul></details>`;
   }
 
   /* ---------- Rückmeldungen ---------- */

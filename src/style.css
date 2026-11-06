@@ -1588,3 +1588,62 @@ details.more .note {
     min-width: 200px;
   }
 }
+
+/* --- Testfunde: Menü ohne Spiel, Karte, Ton --- */
+body.no-game .topbar,
+body.no-game .ledger,
+body.no-game .toasts {
+  display: none;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.map-scroll {
+  overflow-x: auto;
+}
+
+.map-legend {
+  font-size: 12px;
+  columns: 2 260px;
+}
+
+.volumes {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.volume {
+  display: grid;
+  grid-template-columns: 110px 1fr 46px;
+  gap: 10px;
+  align-items: center;
+  font-size: 15px;
+}
+
+.volume input {
+  width: 100%;
+  accent-color: var(--water);
+}
+
+.volume output {
+  text-align: right;
+  font-size: 13px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 720px) {
+  .paper-map {
+    min-width: 640px;
+  }
+  .river-stat b {
+    font-size: 14px;
+  }
+  .ledger.wide {
+    top: 104px;
+    max-height: none;
+  }
+}

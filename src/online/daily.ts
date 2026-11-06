@@ -1,26 +1,14 @@
 import { fail, getClient, offline, type Result } from './client.ts';
 import { ensureSession } from './auth.ts';
+import { todayUtc } from './rules.ts';
+
+export { dailySeed, todayUtc } from './rules.ts';
 
 export interface DailyEntry {
   rank: number;
   username: string;
   wealth: number;
   mine: boolean;
-}
-
-/** Heutiger Tag als YYYY-MM-DD in UTC, damit alle Spieler denselben Tagesmarkt haben */
-export function todayUtc(now: Date = new Date()): string {
-  return now.toISOString().slice(0, 10);
-}
-
-/** Startwert für den Zufallsgenerator des Tagesmarkts, für alle Spieler gleich */
-export function dailySeed(day: string = todayUtc()): number {
-  let h = 2166136261;
-  for (let i = 0; i < day.length; i++) {
-    h ^= day.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
 }
 
 /** Trägt das Tagesergebnis ein. Pro Tag zählt das beste Ergebnis, schlechtere werden ignoriert. */

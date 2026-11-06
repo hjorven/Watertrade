@@ -16,11 +16,23 @@ export interface MenuActions {
   load(slot: string): void;
   setTiltShift(on: boolean): void;
   setSound(on: boolean): void;
+  setVolume(channel: VolumeChannel, value: number): void;
+  getVolume(channel: VolumeChannel): number;
+  /** Laufendes Spiel verlassen und ins Hauptmenü */
+  leaveGame(): void;
   resume(): void;
   startChallenge(id: string): void;
   /** Bildschirme außerhalb des Menüs: Tagesmarkt, Liga, Konto, Erfolge */
   other(cmd: string, data: DOMStringMap): void;
 }
+
+export type VolumeChannel = 'master' | 'music' | 'sfx' | 'ambient';
+const VOLUME_LABELS: [VolumeChannel, string][] = [
+  ['master', 'Gesamt'],
+  ['music', 'Musik'],
+  ['sfx', 'Geräusche'],
+  ['ambient', 'Fluss und Wind'],
+];
 
 export interface MenuInfo {
   slots: SlotInfo[];
@@ -31,6 +43,8 @@ export interface MenuInfo {
   /** bestandene Herausforderungen mit benötigten Tagen */
   challenges: Record<string, number>;
   online: boolean;
+  /** Herausforderungen und Tagesmarkt lassen sich nicht speichern, sonst wären beliebig viele Versuche möglich */
+  canSave: boolean;
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -49,6 +63,15 @@ export class Menu {
     this.el.hidden = true;
     root.appendChild(this.el);
 
+    this.el.addEventListener('input', (ev) => {
+      const input = ev.target as HTMLInputElement;
+      const channel = input.dataset.volume as VolumeChannel | undefined;
+      if (!channel) return;
+      const v = Number(input.value) / 100;
+      this.actions.setVolume(channel, v);
+      const out = input.parentElement?.querySelector('output');
+      if (out) out.textContent = `${Math.round(v * 100)} %`;
+    });
     this.el.addEventListener('submit', (ev) => {
       ev.preventDefault();
       const form = ev.target as HTMLFormElement;
@@ -96,10 +119,20 @@ export class Menu {
           break;
         case 'sound':
           this.actions.setSound(!this.info().sound);
+          this.showSound();
+          break;
+        case 'soundDialog':
+          this.showSound();
+          break;
+        case 'back':
           if (this.info().inGame) this.showGameMenu();
           else this.showMain();
           break;
         case 'main':
+          this.showMain();
+          break;
+        case 'leave':
+          this.actions.leaveGame();
           this.showMain();
           break;
         case 'resume':
@@ -183,7 +216,7 @@ export class Menu {
         <button class="btn wide" data-menu="league">Handelsliga<small>Live mit allen Spielern auf einem gemeinsamen Markt</small></button>
         ${info.slots.some((s) => s.slot !== 'auto') ? `<button class="btn wide" data-menu="loadlist">Spielstand laden</button>` : ''}
       </div>
-      <p class="fine"><button class="link" data-menu="achievements">Erfolge</button> · <button class="link" data-menu="account">Konto und Cloud</button> · <button class="link" data-menu="tilt">Tilt-Shift-Effekt: ${info.tiltShift ? 'an' : 'aus'}</button> · <button class="link" data-menu="sound">Ton: ${info.sound ? 'an' : 'aus'}</button></p>`);
+      <p class="fine"><button class="link" data-menu="achievements">Erfolge</button> · <button class="link" data-menu="account">Konto und Cloud</button> · <button class="link" data-menu="tilt">Tilt-Shift-Effekt: ${info.tiltShift ? 'an' : 'aus'}</button> · <button class="link" data-menu="soundDialog">Ton</button></p>`);
   }
 
   showCampaign(): void {
@@ -198,6 +231,20 @@ export class Menu {
       <h2>Hundert Jahre am Fluss</h2>
       <div class="menu-buttons">${list}</div>
       <p class="fine"><button class="link" data-menu="main">Zurück</button></p>`);
+  }
+
+  showSound(): void {
+    const info = this.info();
+    const rows = VOLUME_LABELS.map(([ch, label]) => {
+      const v = Math.round(this.actions.getVolume(ch) * 100);
+      return `<label class="volume"><span>${label}</span><input type="range" min="0" max="100" step="5" value="${v}" data-volume="${ch}" aria-label="${label}"><output>${v} %</output></label>`;
+    }).join('');
+    this.show(`
+      <div class="card-head">Einstellungen</div>
+      <h2>Ton</h2>
+      <div class="volumes">${rows}</div>
+      <div class="menu-buttons"><button class="btn wide" data-menu="sound">${info.sound ? 'Stumm schalten' : 'Ton wieder einschalten'}</button></div>
+      <p class="fine"><button class="link" data-menu="back">Zurück</button></p>`);
   }
 
   showChallenges(): void {
@@ -226,7 +273,7 @@ export class Menu {
         <button class="btn primary wide" data-menu="beginChallenge" data-id="${c.id}">${won ? 'Noch einmal, schneller' : 'Neuer Versuch'}</button>
         ${won ? '<button class="btn wide" data-menu="resume">Weiterspielen ohne Ziele</button>' : ''}
         <button class="btn wide" data-menu="challenges">Andere Herausforderung</button>
-        <button class="btn wide" data-menu="main">Hauptmenü</button>
+        <button class="btn wide" data-menu="leave">Hauptmenü</button>
       </div>`);
   }
 
@@ -251,7 +298,7 @@ export class Menu {
       <div class="menu-buttons">
         ${next ? `<button class="btn primary wide" data-menu="chapter" data-id="${next.id}">Weiter mit Kapitel ${next.number}: ${esc(next.title)}</button>` : ''}
         <button class="btn wide" data-menu="resume">Weiterspielen ohne Ziele</button>
-        <button class="btn wide" data-menu="main">Hauptmenü</button>
+        <button class="btn wide" data-menu="leave">Hauptmenü</button>
       </div>`);
   }
 
@@ -270,14 +317,18 @@ export class Menu {
       <div class="menu-buttons">
         <button class="btn primary wide" data-menu="resume">Weiterspielen</button>
       </div>
-      <h3>Speichern</h3>
-      <div class="slot-grid">${saveButtons}</div>
+      ${
+        info.canSave
+          ? `<h3>Speichern</h3>
+      <div class="slot-grid">${saveButtons}</div>`
+          : '<p class="fine">Herausforderungen und Tagesmarkt werden nur automatisch gespeichert, damit jeder Versuch zählt.</p>'
+      }
       <div class="menu-buttons">
         ${slots.length ? '<button class="btn wide" data-menu="loadlist">Spielstand laden</button>' : ''}
-        <button class="btn wide" data-menu="main">Hauptmenü</button>
+        <button class="btn wide" data-menu="leave">Hauptmenü</button>
       </div>
       <p class="fine"><button class="link" data-menu="achievements">Erfolge</button> · <button class="link" data-menu="account">Konto und Cloud-Speicher</button></p>
-      <p class="fine">Das Spiel speichert außerdem jeden Tag automatisch. <button class="link" data-menu="tilt">Tilt-Shift: ${info.tiltShift ? 'an' : 'aus'}</button> · <button class="link" data-menu="sound">Ton: ${info.sound ? 'an' : 'aus'}</button></p>`);
+      <p class="fine">Das Spiel speichert außerdem jeden Tag automatisch. <button class="link" data-menu="tilt">Tilt-Shift: ${info.tiltShift ? 'an' : 'aus'}</button> · <button class="link" data-menu="soundDialog">Ton</button></p>`);
   }
 
   showLoad(): void {
