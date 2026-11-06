@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { findRoute, travelTime, type Segment, type ShipType } from './river.ts';
+import { explainBlock, findRoute, travelTime, windOfDay, withWind, type Segment, type ShipType } from './river.ts';
 
-const kahn: ShipType = { id: 'k', name: 'Kahn', speed: 5, draft: 1, height: 3, capacity: 40, canGoUpstream: true };
+const kahn: ShipType = { id: 'k', name: 'Kahn', propulsion: 'tow', speed: 5, draft: 1, height: 3, capacity: 40, canGoUpstream: true };
 const floss: ShipType = { ...kahn, id: 'f', name: 'Floß', canGoUpstream: false };
 const seg: Segment = { id: 'ab', from: 'a', to: 'b', length: 60, current: 2, baseDepth: 2 };
 
@@ -56,5 +56,32 @@ describe('findRoute', () => {
 
   it('Start gleich Ziel ist eine leere Route', () => {
     expect(findRoute(net, 'a', 'a', kahn, 0)).toEqual({ path: [], hours: 0 });
+  });
+});
+
+describe('Wind und Sperrgründe', () => {
+  it('Segler hängen vom Wind ab, andere nicht', () => {
+    const segler: ShipType = { ...kahn, propulsion: 'sail', speed: 8 };
+    expect(withWind(segler, 0.5).speed).toBe(4);
+    expect(withWind(segler, 0).speed).toBe(1.5);
+    expect(withWind(kahn, 0.5).speed).toBe(5);
+  });
+
+  it('Wind liegt immer im gültigen Bereich', () => {
+    for (let d = 1; d < 400; d++) {
+      const w = windOfDay(d);
+      expect(w).toBeGreaterThanOrEqual(0.25);
+      expect(w).toBeLessThanOrEqual(1.25);
+    }
+  });
+
+  it('erklärt, warum ein Ziel nicht erreichbar ist', () => {
+    const net: Segment[] = [
+      { id: 'ab', from: 'a', to: 'b', length: 30, current: 1, baseDepth: 3, bridgeHeight: 2 },
+      { id: 'bc', from: 'b', to: 'c', length: 30, current: 1, baseDepth: 0.5 },
+    ];
+    const r = explainBlock(net, 'a', 'c', kahn, 0);
+    expect(r.map((x) => x.reason)).toEqual(['bruecke', 'tiefgang']);
+    expect(explainBlock(net, 'c', 'a', floss, 0)[0].reason).toBe('nurTalwaerts');
   });
 });

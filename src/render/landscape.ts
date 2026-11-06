@@ -1,8 +1,10 @@
 import * as THREE from 'three';
+import type { RiverDef } from '../data/maps/valley.ts';
 
 /** Größe des Dioramas in Welteinheiten (1 Einheit ≈ 0,5 km, nur optisch) */
 export const WORLD_W = 220;
 export const WORLD_D = 140;
+/** Halbe Breite des Hauptstroms; schmalere Flüsse werden auf dieses Maß umgerechnet */
 export const RIVER_HALF_WIDTH = 3.6;
 const BASE_Y = -7;
 
@@ -40,35 +42,45 @@ function noise(x: number, z: number): number {
   );
 }
 
+interface RiverSample {
+  p: THREE.Vector3;
+  river: RiverDef;
+  t: number;
+}
+
 export class Landscape {
   readonly group = new THREE.Group();
-  readonly curve: THREE.CatmullRomCurve3;
-  private readonly samples: THREE.Vector3[];
+  readonly curves = new Map<string, THREE.CatmullRomCurve3>();
+  private readonly rivers: RiverDef[];
+  private readonly samples: RiverSample[] = [];
   private ripples!: THREE.InstancedMesh;
-  private readonly rippleState: { t: number; offset: number; speed: number }[] = [];
+  private readonly rippleState: { river: string; t: number; offset: number; speed: number }[] = [];
   private readonly dummy = new THREE.Object3D();
 
   private readonly townSpots: { pos: THREE.Vector3; radius: number; fields: boolean }[] = [];
 
-  constructor() {
-    // Fließrichtung von links oben (Quelle, Gebirge) nach rechts unten (Aue)
-    this.curve = new THREE.CatmullRomCurve3(
-      [
-        new THREE.Vector3(-WORLD_W / 2, 0, -38),
-        new THREE.Vector3(-80, 0, -30),
-        new THREE.Vector3(-55, 0, -8),
-        new THREE.Vector3(-28, 0, -18),
-        new THREE.Vector3(0, 0, 4),
-        new THREE.Vector3(28, 0, 22),
-        new THREE.Vector3(55, 0, 8),
-        new THREE.Vector3(82, 0, 26),
-        new THREE.Vector3(WORLD_W / 2, 0, 34),
-      ],
-      false,
-      'catmullrom',
-      0.5,
-    );
-    this.samples = this.curve.getSpacedPoints(400);
+  constructor(rivers: RiverDef[]) {
+    this.rivers = rivers;
+    for (const r of rivers) {
+      const pts = r.points.map(([x, z]) => new THREE.Vector3(x, 0, z));
+      if (r.joins) pts.push(this.curves.get(r.joins.river)!.getPointAt(r.joins.t));
+      const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.5);
+      this.curves.set(r.id, curve);
+      const n = Math.round(curve.getLength() * 1.6);
+      curve.getSpacedPoints(n).forEach((p, i) => this.samples.push({ p, river: r, t: i / n }));
+    }
+  }
+
+  curve(river: string): THREE.CatmullRomCurve3 {
+    return this.curves.get(river)!;
+  }
+
+  pointAt(river: string, t: number): THREE.Vector3 {
+    return this.curve(river).getPointAt(clamp01(t));
+  }
+
+  tangentAt(river: string, t: number): THREE.Vector3 {
+    return this.curve(river).getTangentAt(clamp01(t));
   }
 
   /** Baut Gelände, Wasser und Bäume. Stadtflächen werden vom Wald ausgespart, Äcker liegen um Städte mit `fields`. */
@@ -81,21 +93,24 @@ export class Landscape {
     this.group.add(this.buildTrees());
   }
 
-  /** Abstand zum Flusslauf in der Ebene und Position auf dem Fluss (0..1) */
+  /**
+   * Abstand zum nächsten Fluss, umgerechnet auf die Breite des Hauptstroms (d < RIVER_HALF_WIDTH heißt: im Wasser),
+   * und wie weit oben im Tal der Punkt liegt (0 = Gebirge, 1 = Aue).
+   */
   riverDistance(x: number, z: number): { d: number; t: number } {
     let best = Infinity;
-    let bestI = 0;
-    for (let i = 0; i < this.samples.length; i++) {
-      const p = this.samples[i];
-      const dx = p.x - x;
-      const dz = p.z - z;
-      const d2 = dx * dx + dz * dz;
-      if (d2 < best) {
-        best = d2;
-        bestI = i;
+    let bestS = this.samples[0];
+    for (const s of this.samples) {
+      const dx = s.p.x - x;
+      const dz = s.p.z - z;
+      const edge = Math.sqrt(dx * dx + dz * dz) - s.river.halfWidth;
+      if (edge < best) {
+        best = edge;
+        bestS = s;
       }
     }
-    return { d: Math.sqrt(best), t: bestI / (this.samples.length - 1) };
+    const valley = bestS.river.joins ? 0.25 + bestS.t * 0.3 : bestS.t;
+    return { d: best + RIVER_HALF_WIDTH, t: valley };
   }
 
   heightAt(x: number, z: number): number {
@@ -117,9 +132,13 @@ export class Landscape {
   }
 
   /** Ufernormale (in der Ebene, rechts in Fließrichtung) bei Position t */
-  normalAt(t: number): THREE.Vector3 {
-    const tan = this.curve.getTangentAt(Math.min(1, Math.max(0, t)));
+  normalAt(river: string, t: number): THREE.Vector3 {
+    const tan = this.tangentAt(river, t);
     return new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+  }
+
+  halfWidth(river: string): number {
+    return this.rivers.find((r) => r.id === river)!.halfWidth;
   }
 
   private colorFor(x: number, z: number, h: number, d: number): THREE.Color {
@@ -247,15 +266,27 @@ export class Landscape {
 
   /** Helle Striche auf dem Wasser, die mit der Strömung treiben */
   private buildRipples(): THREE.InstancedMesh {
-    const count = 140;
+    const count = 180;
     const geo = new THREE.PlaneGeometry(1.4, 0.12);
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.MeshBasicMaterial({ color: 0xe8f4f6, transparent: true, opacity: 0.55 });
     const mesh = new THREE.InstancedMesh(geo, mat, count);
     const rand = mulberry32(7);
-    for (let i = 0; i < count; i++) {
-      this.rippleState.push({ t: rand(), offset: (rand() * 2 - 1) * (RIVER_HALF_WIDTH - 0.8), speed: 0.8 + rand() * 0.4 });
-    }
+    const lengths = this.rivers.map((r) => this.curve(r.id).getLength());
+    const total = lengths.reduce((a, b) => a + b, 0);
+    this.rivers.forEach((r, k) => {
+      const n = Math.round((count * lengths[k]) / total);
+      for (let i = 0; i < n && this.rippleState.length < count; i++) {
+        this.rippleState.push({
+          river: r.id,
+          t: rand(),
+          offset: (rand() * 2 - 1) * (r.halfWidth - 0.8),
+          // gleiche Geschwindigkeit in Welteinheiten, also kürzere Flüsse schneller in t
+          speed: ((0.8 + rand() * 0.4) * lengths[0]) / lengths[k],
+        });
+      }
+    });
+    mesh.count = this.rippleState.length;
     return mesh;
   }
 
@@ -265,9 +296,9 @@ export class Landscape {
       const r = this.rippleState[i];
       r.t += dt * flowSpeed * r.speed;
       if (r.t > 1) r.t -= 1;
-      const p = this.curve.getPointAt(r.t);
-      const n = this.normalAt(r.t);
-      const tan = this.curve.getTangentAt(r.t);
+      const p = this.pointAt(r.river, r.t);
+      const n = this.normalAt(r.river, r.t);
+      const tan = this.tangentAt(r.river, r.t);
       this.dummy.position.set(p.x + n.x * r.offset, 0.0, p.z + n.z * r.offset);
       this.dummy.rotation.set(0, Math.atan2(-tan.z, tan.x), 0);
       // an den Enden ausblenden durch Skalierung
@@ -332,3 +363,5 @@ export class Landscape {
     return g;
   }
 }
+
+const clamp01 = (t: number) => Math.min(1, Math.max(0, t));

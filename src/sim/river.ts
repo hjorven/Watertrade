@@ -8,10 +8,13 @@ export interface Segment {
   bridgeHeight?: number; // Durchfahrtshöhe bei Normalwasser in m
 }
 
+export type Propulsion = 'drift' | 'tow' | 'sail';
+
 export interface ShipType {
   id: string;
   name: string;
-  speed: number; // Eigengeschwindigkeit in km/h
+  propulsion: Propulsion; // treiben, treideln/staken, segeln
+  speed: number; // Eigengeschwindigkeit in km/h (Segel: bei gutem Wind)
   draft: number; // Tiefgang in m
   height: number; // Höhe über Wasser in m
   capacity: number; // Ladung in Tonnen
@@ -21,6 +24,30 @@ export interface ShipType {
 /** Mindestgeschwindigkeit über Grund, darunter gilt ein Abschnitt als nicht befahrbar */
 const MIN_GROUND_SPEED = 0.5;
 
+export type BlockReason = 'nurTalwaerts' | 'tiefgang' | 'bruecke' | 'stroemung';
+
+export const BLOCK_TEXT: Record<BlockReason, string> = {
+  nurTalwaerts: 'fährt nur talwärts',
+  tiefgang: 'zu seicht für den Tiefgang',
+  bruecke: 'passt nicht unter die Brücke',
+  stroemung: 'kommt gegen die Strömung nicht an',
+};
+
+/** Warum ein Schiff einen Abschnitt nicht befahren kann, oder null */
+export function blockReason(
+  seg: Segment,
+  ship: ShipType,
+  downstream: boolean,
+  waterLevel: number,
+): BlockReason | null {
+  if (!downstream && !ship.canGoUpstream) return 'nurTalwaerts';
+  if (seg.baseDepth + waterLevel < ship.draft) return 'tiefgang';
+  // Hochwasser verringert die Durchfahrtshöhe unter Brücken
+  if (seg.bridgeHeight !== undefined && seg.bridgeHeight - waterLevel < ship.height) return 'bruecke';
+  if (groundSpeed(seg, ship, downstream) <= MIN_GROUND_SPEED) return 'stroemung';
+  return null;
+}
+
 /** Fahrzeit in Stunden oder null, wenn der Abschnitt nicht befahrbar ist */
 export function travelTime(
   seg: Segment,
@@ -28,25 +55,60 @@ export function travelTime(
   downstream: boolean,
   waterLevel: number, // Abweichung vom Normalwasser in m, z. B. -0.8 im Sommer
 ): number | null {
-  if (!downstream && !ship.canGoUpstream) return null;
+  if (blockReason(seg, ship, downstream, waterLevel)) return null;
+  return seg.length / groundSpeed(seg, ship, downstream);
+}
 
-  const depth = seg.baseDepth + waterLevel;
-  if (depth < ship.draft) return null;
+/** Segelschiffe hängen vom Wind ab (0 = Flaute, 1 = guter Wind), alle anderen nicht */
+export function withWind<T extends ShipType>(ship: T, wind: number): T {
+  if (ship.propulsion !== 'sail') return ship;
+  // auch bei Flaute bleibt etwas Fahrt durch Staken und Treiben
+  return { ...ship, speed: Math.max(1.5, ship.speed * wind) };
+}
 
-  // Hochwasser verringert die Durchfahrtshöhe unter Brücken
-  if (seg.bridgeHeight !== undefined && seg.bridgeHeight - waterLevel < ship.height) {
-    return null;
-  }
-
-  const v = groundSpeed(seg, ship, downstream);
-  if (v <= MIN_GROUND_SPEED) return null;
-
-  return seg.length / v;
+/** Wind des Tages, deterministisch aus der Tagesnummer, zwischen 0.25 und 1.25 */
+export function windOfDay(day: number): number {
+  const x = Math.sin(day * 12.9898 + 78.233) * 43758.5453;
+  const r = x - Math.floor(x);
+  const y = Math.sin(day * 0.45) * 0.5 + 0.5; // Wetterlagen über mehrere Tage
+  return 0.25 + (r * 0.4 + y * 0.6);
 }
 
 /** Geschwindigkeit über Grund in km/h */
 export function groundSpeed(seg: Segment, ship: ShipType, downstream: boolean): number {
   return downstream ? ship.speed + seg.current : ship.speed - seg.current;
+}
+
+/**
+ * Weg durch das Netz ohne Rücksicht auf Sperren (nach Länge), um Sperrgründe zu erklären.
+ * Gibt je Abschnitt Richtung und Grund zurück.
+ */
+export function explainBlock(
+  segments: Segment[],
+  start: string,
+  goal: string,
+  ship: ShipType,
+  waterLevel: number,
+): { seg: Segment; reason: BlockReason }[] {
+  const anyShip: ShipType = { ...ship, propulsion: 'tow', speed: 1000, draft: 0, height: 0, canGoUpstream: true };
+  const route = findRoute(
+    segments.map((s) => ({ ...s, current: 0 })),
+    start,
+    goal,
+    anyShip,
+    0,
+  );
+  if (!route) return [];
+  const out: { seg: Segment; reason: BlockReason }[] = [];
+  let node = start;
+  for (const id of route.path) {
+    const seg = segments.find((s) => s.id === id)!;
+    const downstream = seg.from === node;
+    const reason = blockReason(seg, ship, downstream, waterLevel);
+    if (reason) out.push({ seg, reason });
+    node = downstream ? seg.to : seg.from;
+  }
+  return out;
 }
 
 /** Schnellste Route (Dijkstra) als Liste von Abschnitts-IDs */

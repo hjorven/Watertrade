@@ -1,16 +1,28 @@
 import './style.css';
 import * as THREE from 'three';
 import { GOODS } from './data/goods.ts';
-import { MAP_M1 } from './data/maps/m1.ts';
-import { SHIPS } from './data/ships.ts';
+import { VALLEY } from './data/maps/valley.ts';
 import { Landscape } from './render/landscape.ts';
 import { Stage } from './render/scene.ts';
-import { BargeView } from './render/ships.ts';
-import { buildTown, placeTown } from './render/towns.ts';
-import { advance, buy, depart, newGame, sell, type GameState } from './sim/game.ts';
+import { ShipView } from './render/ships.ts';
+import { buildBridge, buildTown, placeTown } from './render/towns.ts';
+import {
+  advance,
+  anySailing,
+  buy,
+  buyShip,
+  depart,
+  dismantleRaft,
+  newGame,
+  sell,
+  shipClass,
+  voyagePosition,
+  type GameState,
+  type Ship,
+} from './sim/game.ts';
 import { Hud } from './ui/hud.ts';
 
-/** Spielstunden pro echter Sekunde während einer Fahrt */
+/** Spielstunden pro echter Sekunde, solange ein Schiff fährt */
 const HOURS_PER_SECOND = 3;
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -19,42 +31,68 @@ const viewport = app.querySelector<HTMLDivElement>('.viewport')!;
 
 // --- Welt ---
 const stage = new Stage(viewport);
-const land = new Landscape();
-const towns = MAP_M1.towns.map((def) => placeTown(land, def));
-land.build(towns.map((t) => ({ pos: t.center, radius: t.radius, fields: t.def.id === 'niedermuend' })));
+const land = new Landscape(VALLEY.rivers);
+const towns = VALLEY.towns.map((def) => placeTown(land, def));
+land.build(towns.map((t) => ({ pos: t.center, radius: t.radius, fields: !!t.def.fields })));
 stage.scene.add(land.group);
 towns.forEach((t, i) => {
   stage.scene.add(buildTown(land, t, 100 + i));
   stage.addLabel(t.def.name, t.center.clone().setY(land.heightAt(t.center.x, t.center.z) + 5));
 });
-
-const barge = new BargeView(land);
-barge.addTo(stage.scene);
+for (const seg of VALLEY.segments) if (seg.bridgeHeight !== undefined) stage.scene.add(buildBridge(land, seg));
 const placeOf = (id: string) => towns.find((t) => t.def.id === id)!;
+const segOf = (id: string) => VALLEY.segments.find((s) => s.id === id)!;
 
 // --- Spiel ---
-const state: GameState = newGame(MAP_M1, SHIPS.treidelkahn, 'oberau');
+const state: GameState = newGame(VALLEY, 'oberau');
+let selected = state.ships[0].id;
 let started = false;
 let follow = true;
+let timeScale = 1;
+const views = new Map<number, ShipView>();
 
-const hud = new Hud(app, MAP_M1, {
+const current = (): Ship | undefined => state.ships.find((s) => s.id === selected);
+
+const hud = new Hud(app, VALLEY, {
+  select(id) {
+    selected = id;
+    follow = true;
+    refresh();
+  },
   buy(good, n) {
-    hud.tradeFeedback(buy(state, good, n));
+    hud.tradeFeedback(buy(state, selected, good, n));
     refresh();
   },
   sell(good, n) {
-    hud.tradeFeedback(sell(state, good, n));
+    hud.tradeFeedback(sell(state, selected, good, n));
     refresh();
   },
   depart(to) {
-    const v = depart(state, MAP_M1, to);
-    if (!v) hud.toast('Diese Fahrt ist nicht möglich.', 'warn');
+    if (!depart(state, VALLEY, selected, to)) hud.toast('Diese Fahrt ist nicht möglich.', 'warn');
     follow = true;
     refresh();
   },
   wait() {
-    advance(state, 24);
-    hud.toast('Ein Tag vergeht. Die Märkte erholen sich.');
+    advance(state, VALLEY, 24);
+    hud.toast('Ein Tag vergeht. Die Städte arbeiten.');
+    refresh();
+  },
+  buyShip(type) {
+    const ship = current();
+    if (!ship?.port) return;
+    const r = buyShip(state, VALLEY, ship.port, type);
+    hud.toast(r.message, r.ok ? 'info' : 'warn');
+    if (r.ship) selected = r.ship.id;
+    refresh();
+  },
+  dismantle() {
+    const r = dismantleRaft(state, selected);
+    hud.tradeFeedback(r);
+    if (r.ok) selected = state.ships[0]?.id ?? -1;
+    refresh();
+  },
+  speed(f) {
+    timeScale = f;
     refresh();
   },
   start() {
@@ -62,37 +100,85 @@ const hud = new Hud(app, MAP_M1, {
   },
 });
 
-function refresh(): void {
-  hud.render(state);
-  barge.setCargo(
-    GOODS.map((g) => ({ color: g.color, amount: state.cargo[g.id].amount })),
-    state.shipType.capacity,
-  );
-  if (state.port) {
-    const p = placeOf(state.port);
-    barge.dock(p.mooring, p.def.riverT);
+/** Schiffsansichten mit dem Spielstand abgleichen */
+function syncViews(): void {
+  for (const [id, view] of views) {
+    if (!state.ships.some((s) => s.id === id)) {
+      view.removeFrom(stage.scene);
+      views.delete(id);
+    }
+  }
+  const slots = new Map<string, number>();
+  for (const ship of state.ships) {
+    let view = views.get(ship.id);
+    if (!view) {
+      view = new ShipView(land, shipClass(ship), ship.id);
+      view.addTo(stage.scene);
+      views.set(ship.id, view);
+    }
+    view.setSelected(ship.id === selected);
+    view.setCargo(GOODS.map((g) => ({ color: g.color, amount: ship.cargo[g.id]?.amount ?? 0 })));
+    if (ship.port) {
+      const p = placeOf(ship.port);
+      const slot = slots.get(ship.port) ?? 0;
+      slots.set(ship.port, slot + 1);
+      view.dock(p.mooring, p.def.river, p.def.riverT, slot);
+    }
   }
 }
 
-// Kamera folgt dem Kahn, bis der Spieler selbst die Ansicht bewegt
+function refresh(): void {
+  hud.render(state, selected);
+  syncViews();
+}
+
+const smooth = (x: number) => x * x * (3 - 2 * x);
+
+function placeOnVoyage(ship: Ship, view: ShipView): void {
+  const v = ship.voyage!;
+  const { leg, progress, index } = voyagePosition(v);
+  const seg = segOf(leg.seg);
+  const t = leg.downstream
+    ? seg.fromT + (seg.toT - seg.fromT) * progress
+    : seg.toT - (seg.toT - seg.fromT) * progress;
+  view.sail(seg.river, t, leg.downstream);
+
+  // Ablegen und Anlegen weich vom Steg in die Fahrrinne
+  const pos = view.group.position;
+  const legLen = Math.max(1, seg.length);
+  const ease = 4 / legLen; // etwa 4 km Manöver
+  if (index === 0 && progress < ease) pos.lerp(placeOf(v.from).mooring.clone().setY(0), 1 - smooth(progress / ease));
+  if (index === v.legs.length - 1 && progress > 1 - ease) {
+    pos.lerp(placeOf(v.to).mooring.clone().setY(0), 1 - smooth((1 - progress) / ease));
+  }
+}
+
+// Kamera folgt dem ausgewählten Schiff, bis der Spieler selbst die Ansicht bewegt
 stage.controls.addEventListener('start', () => (follow = false));
 const camOffset = new THREE.Vector3();
 
-function placeBargeOnVoyage(): void {
-  const v = state.voyage!;
-  const from = placeOf(v.from);
-  const to = placeOf(v.to);
-  const p = v.elapsed / v.hours;
-  const t = from.def.riverT + (to.def.riverT - from.def.riverT) * p;
-  barge.sail(t, v.downstream);
-  // Ablegen und Anlegen weich vom Steg in die Fahrrinne
-  const leave = Math.min(1, p * 14);
-  const arrive = Math.min(1, (1 - p) * 14);
-  const pos = barge.group.position;
-  if (leave < 1) pos.lerp(from.mooring.clone().setY(0), 1 - smooth(leave));
-  if (arrive < 1) pos.lerp(to.mooring.clone().setY(0), 1 - smooth(arrive));
-}
-const smooth = (x: number) => x * x * (3 - 2 * x);
+// Schiff anklicken wählt es aus
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let downAt: { x: number; y: number } | null = null;
+stage.renderer.domElement.addEventListener('pointerdown', (e) => (downAt = { x: e.clientX, y: e.clientY }));
+stage.renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 5) return;
+  const rect = stage.renderer.domElement.getBoundingClientRect();
+  pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(pointer, stage.camera);
+  const hits = raycaster.intersectObjects([...views.values()].map((v) => v.group), true);
+  for (const hit of hits) {
+    let o: THREE.Object3D | null = hit.object;
+    while (o && o.userData.shipId === undefined) o = o.parent;
+    if (o) {
+      selected = o.userData.shipId as number;
+      follow = true;
+      refresh();
+      return;
+    }
+  }
+});
 
 // --- Schleife ---
 const timer = new THREE.Timer();
@@ -102,30 +188,37 @@ function frame(): void {
   timer.update();
   const dt = Math.min(0.1, timer.getDelta());
 
-  if (started && state.voyage) {
-    const events = advance(state, dt * HOURS_PER_SECOND);
-    if (state.voyage) placeBargeOnVoyage();
+  if (started && anySailing(state)) {
+    const events = advance(state, VALLEY, dt * HOURS_PER_SECOND * timeScale);
+    let changed = false;
     for (const e of events) {
       if (e.type === 'arrived') {
-        hud.toast(`Angekommen in ${placeOf(e.town).def.name}.`);
-        refresh();
+        const ship = state.ships.find((s) => s.id === e.ship)!;
+        hud.toast(`${ship.name} ist in ${placeOf(e.town).def.name} angekommen.`);
+        changed = true;
       }
     }
+    if (changed) refresh();
     uiTick += dt;
-    if (uiTick > 0.15 && state.voyage) {
+    if (uiTick > 0.2) {
       uiTick = 0;
-      hud.render(state);
+      hud.render(state, selected);
     }
+  }
+
+  for (const ship of state.ships) {
+    const view = views.get(ship.id)!;
+    if (ship.voyage) placeOnVoyage(ship, view);
+    view.update(dt);
   }
 
   // Strömung: Anteil der Flusslänge pro Sekunde, sichtbar aber ruhig
   land.update(dt, 0.012);
-  barge.update(dt);
 
-  if (follow) {
-    const target = barge.group.position;
+  const sel = views.get(selected);
+  if (follow && sel) {
     camOffset.subVectors(stage.camera.position, stage.controls.target);
-    stage.controls.target.lerp(target, 1 - Math.exp(-dt * 2));
+    stage.controls.target.lerp(sel.group.position, 1 - Math.exp(-dt * 2));
     stage.camera.position.copy(stage.controls.target).add(camOffset);
   }
 
