@@ -19,7 +19,7 @@ export function goalProgress(state: GameState, goal: Goal): { value: number; tar
     case 'townLevel':
       return { value: levelOf(state.towns[goal.town].population), target: goal.level };
     case 'supply':
-      return { value: Math.round(state.towns[goal.town].satisfaction * 100), target: goal.percent };
+      return { value: Math.floor(state.towns[goal.town].satisfaction * 100), target: goal.percent };
     case 'steamDays':
       return { value: steamDays(state), target: goal.days };
     case 'deliver':
@@ -56,4 +56,17 @@ export function goalProgress(state: GameState, goal: Goal): { value: number; tar
 export function goalDone(state: GameState, goal: Goal): boolean {
   const p = goalProgress(state, goal);
   return p.value >= p.target;
+}
+
+/**
+ * Erfüllte Ziele aus einem Spielstand wiederherstellen. Neuere Stände merken sich die Zieltexte,
+ * so passen sie auch nach einer Überarbeitung des Kapitels. Ältere Stände kennen nur Nummern:
+ * Dann zählt ein Ziel nur, wenn es jetzt erfüllt ist, sonst hakt eine alte Nummer das falsche Ziel ab.
+ */
+export function restoreCompleted(state: GameState, goals: Goal[], indices: number[], texts?: string[]): Set<number> {
+  const out = new Set<number>();
+  goals.forEach((g, i) => {
+    if (texts ? texts.includes(g.text) : indices.includes(i) && goalDone(state, g)) out.add(i);
+  });
+  return out;
 }

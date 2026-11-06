@@ -4,11 +4,12 @@ import { VALLEY } from '../data/maps/valley.ts';
 import { chapterOneHint } from '../ui/tutorial.ts';
 import { runChapterOne, runSteamChapter } from './balance.ts';
 import { addShip, advance, buy, buyShip, depart, dismantleRaft, fillBunker, newGame, sell } from './game.ts';
-import { bunkerPlan, planVoyage } from './voyage.ts';
+import { bunkerPlan, planVoyage, sailingHours } from './voyage.ts';
+import type { Voyage } from './state.ts';
 import { STEAM_MIN_HOURS, steamDays } from './steam.ts';
 import { buyShares } from './rivalry.ts';
 import { levelOf, needs } from './towns.ts';
-import { goalProgress } from './goals.ts';
+import { goalProgress, restoreCompleted } from './goals.ts';
 import { bestRaftPlan } from './rafting.ts';
 
 const k1 = CHAPTERS.find((c) => c.id === 'k1')!;
@@ -124,20 +125,18 @@ describe('Kapitel 4: Dampfer mit Kohle versorgen', () => {
     expect(steamDays(s)).toBe(0);
   });
 
-  it('Dampfer bunkern zuerst eigene Kohle aus dem Kontor', () => {
+  it('Dampfer bunkern zuerst eigene Kohle aus dem Kontor, aber nur den Bedarf der Fahrt', () => {
     const s = startK4();
     const ship = s.ships[0];
     ship.bunker = 0;
-    s.kontore.niedermuend.stock.kohle = { amount: 10, cost: 120 };
-    const hours = (planVoyage(s, VALLEY, ship.id, 'muehlheim') as { voyage: { hours: number } }).voyage.hours;
+    s.kontore.niedermuend.stock.kohle = { amount: 40, cost: 480 };
+    const hours = sailingHours((planVoyage(s, VALLEY, ship.id, 'muehlheim') as { voyage: Voyage }).voyage);
     const plan = bunkerPlan(s, ship, hours);
-    expect(plan.fromKontor).toBe(10);
+    expect(plan.fromKontor).toBe(Math.ceil(plan.need));
     const money = s.money;
-    const marketBefore = s.markets.niedermuend.kohle.stock;
     depart(s, VALLEY, ship.id, 'muehlheim');
-    expect(s.kontore.niedermuend.stock.kohle).toBeUndefined();
-    // der Rest kam vom Markt
-    expect(s.markets.niedermuend.kohle.stock).toBeCloseTo(marketBefore - plan.buy);
+    // der Rest bleibt für Betriebe im Kontor
+    expect(s.kontore.niedermuend.stock.kohle.amount).toBe(40 - plan.fromKontor);
     expect(money - s.money).toBe(plan.cost);
   });
 
@@ -181,30 +180,28 @@ const startK6 = () =>
     startYear: k6.startYear,
     kontore: k6.kontore,
     works: k6.works,
-    weakHouse: k6.weakHouse,
   });
 
 describe('Kapitel 6: Übernahme als Höhepunkt', () => {
   it('endet mit einer Übernahme statt nur mit Vermögenszielen', () => {
     expect(k6.goals.some((g) => g.type === 'takeover')).toBe(true);
-    expect(k6.weakHouse).toBeDefined();
     // "jede Stadt Marktflecken" hieße fünf Städte mehr als verdoppeln, das ist kein Kapitelziel
     expect(k6.goals.some((g) => g.type === 'allTowns')).toBe(false);
   });
 
-  it('das geschwächte Haus ist mit Startgeld und etwas Handel zu übernehmen, kein Geschenk', () => {
+  it('kein Haus lässt sich mit dem Startgeld allein übernehmen', () => {
     const s = startK6();
-    s.money = k6.money * 2;
-    const house = k6.weakHouse!;
-    let spent = 0;
-    for (let i = 0; i < 6; i++) {
-      const r = buyShares(s, VALLEY, house);
-      if (!r.ok) break;
-      spent += r.taler;
+    for (const r of s.rivals) {
+      const before = s.money;
+      let done = false;
+      for (let i = 0; i < 6 && !done; i++) {
+        const res = buyShares(s, VALLEY, r.id);
+        if (!res.ok) break;
+        done = res.message.includes('gehört dir');
+      }
+      expect(done, r.id).toBe(false);
+      s.money = before; // nächster Versuch mit vollem Startgeld (Anteile bleiben, macht es nur leichter)
     }
-    expect(goalProgress(s, k6.goals.find((g) => g.type === 'takeover')!).value).toBe(1);
-    expect(spent).toBeGreaterThan(3000);
-    expect(spent).toBeLessThan(k6.money * 2);
   });
 
   it('Mühlheim wird bei guter Versorgung in einem halben Jahr Marktflecken', () => {
@@ -220,5 +217,20 @@ describe('Kapitel 6: Übernahme als Höhepunkt', () => {
     }
     expect(d).toBeLessThan(180);
     expect(d).toBeGreaterThan(10);
+  });
+});
+
+describe('Spielstände nach der Überarbeitung', () => {
+  it('alte Nummern haken nur Ziele ab, die jetzt wirklich erfüllt sind', () => {
+    const s = startK1();
+    // alter Stand: Ziele 0 bis 4 erledigt, Nummer 4 heißt jetzt "vier Flöße"
+    const done = restoreCompleted(s, k1.goals, [0, 1, 2, 3, 4]);
+    expect(done.size).toBe(0);
+  });
+
+  it('neue Stände ordnen über den Zieltext zu', () => {
+    const s = startK1();
+    const texts = [k1.goals[2].text, k1.goals[5].text];
+    expect([...restoreCompleted(s, k1.goals, [9, 9], texts)].sort()).toEqual([2, 5]);
   });
 });

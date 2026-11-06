@@ -130,8 +130,8 @@ function kontorCoal(state: GameState, ship: Ship): number {
 }
 
 /**
- * Was ein Dampfer vor dieser Fahrt bunkern muss. Fehlt Kohle, kommt sie zuerst aus dem eigenen Kontor
- * im Hafen, der Rest wird beim Ablegen am Hafenmarkt gekauft, und zwar gleich bis zum vollen Bunker,
+ * Was ein Dampfer vor dieser Fahrt bunkern muss. Fehlt Kohle, kommt der Bedarf der Fahrt zuerst aus dem
+ * eigenen Kontor im Hafen, der Rest wird beim Ablegen am Hafenmarkt gekauft, und zwar gleich bis zum vollen Bunker,
  * soweit Geld und Markt reichen, damit auch die Rückfahrt aus einem Hafen ohne Kohlehandel klappt.
  */
 export function bunkerPlan(state: GameState, ship: Ship, hours: number, toll = 0): BunkerPlan {
@@ -143,11 +143,12 @@ export function bunkerPlan(state: GameState, ship: Ship, hours: number, toll = 0
   const min = Math.max(0, Math.ceil(need - (ship.bunker ?? 0)));
   if (min === 0) return { ...none, need };
   const room = Math.max(0, Math.floor((cls.bunker ?? 0) - (ship.bunker ?? 0)));
-  // eigene Kohle zuerst, gleich bis zum vollen Bunker
-  const fromKontor = Math.min(room, kontorCoal(state, ship));
+  // eigene Kohle zuerst, aber nur so viel, wie die Fahrt braucht: Betriebe im Kontor brauchen sie vielleicht auch
+  const fromKontor = Math.min(min, room, kontorCoal(state, ship));
   const rest = Math.max(0, min - fromKontor);
-  if (rest === 0) return { need, buy: 0, fromKontor, cost: 0, problem: null };
   const m = ship.port ? state.markets[ship.port]?.kohle : undefined;
+  // reicht die Kontorkohle für die Fahrt, füllt der Markt (falls es einen gibt) nur noch freiwillig auf
+  if (rest === 0 && !m) return { need, buy: 0, fromKontor, cost: 0, problem: null };
   const stored = fromKontor ? `, im Kontor liegen nur ${fromKontor} t` : '';
   if (!m) return { need, buy: rest, fromKontor, cost: 0, problem: `Zu wenig Kohle im Bunker${stored}, und hier wird keine verkauft (${rest} t fehlen)` };
   if (available(m) < rest) return { need, buy: rest, fromKontor, cost: 0, problem: `Der Markt hat nur ${available(m)} t Kohle${stored}, es fehlen ${rest} t` };

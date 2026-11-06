@@ -13,6 +13,7 @@ import { bestRaftPlan } from './rafting.ts';
 import { goalDone } from './goals.ts';
 import { PROJECT_BY_ID } from '../data/projects.ts';
 import { startProject } from './works.ts';
+import { sailingHours } from './voyage.ts';
 import { steamDays } from './steam.ts';
 import { advance, buy, bunkerPlan, buyShip, cargoLoad, day, depart, dismantleRaft, kontorBuy, kontorSell, newGame, planVoyage, sell, shipClass, type GameState } from './game.ts';
 import { betriebeIn, buildBetrieb, buildingAllowed, buildKontor, dailyUpkeep, playerWorth, sellBetrieb } from './house.ts';
@@ -38,7 +39,7 @@ function bestTrade(state: GameState, map: MapDef, shipId: number, allow: (town: 
     if (!plan || !plan.ok) continue;
     const there = state.markets[town.id];
     // Dampfer: Kohle für die Fahrt mitrechnen (Kontorkohle kostet nichts mehr, Marktkohle zum Marktpreis)
-    const coal = bunkerPlan(state, ship, plan.voyage.hours, plan.voyage.toll ?? 0);
+    const coal = bunkerPlan(state, ship, sailingHours(plan.voyage), plan.voyage.toll ?? 0);
     if (coal.problem) continue;
     // verbrannte Kohle zum Preis, den Nachkaufen kostet (auch wenn sie schon im Bunker liegt)
     const coalMarket = state.markets[ship.port!].kohle;
@@ -422,8 +423,8 @@ export function runSteamChapter(map: MapDef, chapter: Chapter, maxDays: number, 
       if (t && t.perHour > minGain) {
         buy(state, ship.id, t.good, t.amount);
         while (cargoLoad(ship) > 0 && !depart(state, map, ship.id, t.to)) sell(state, ship.id, t.good, 5);
-      } else if (fleetReady && shipClass(ship).coal && steamDays(state) < (goal?.type === 'steamDays' ? goal.days : 0)) {
-        // für die Dampfertage leer zum nächsten Hafen mit Kohle weiterfahren
+      } else if (fleetReady && shipClass(ship).coal && state.money > 2000 && steamDays(state) < (goal?.type === 'steamDays' ? goal.days : 0)) {
+        // für die Dampfertage leer zum nächsten Hafen mit Kohle weiterfahren, solange Geld für Kohle da ist
         const next = map.towns
           .filter((x) => x.id !== ship.port && coalOk(x.id))
           .map((x) => ({ id: x.id, plan: planVoyage(state, map, ship.id, x.id) }))

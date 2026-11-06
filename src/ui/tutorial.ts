@@ -62,11 +62,16 @@ function tradeHint(state: GameState, map: MapDef, ship: Ship, townName: (id: str
 
 /** Erstes Floß: zimmern, beladen, treiben lassen, verkaufen, zerlegen */
 function raftHint(state: GameState, map: MapDef, ship: Ship, townName: (id: string) => string): string | null {
-  const raft = state.ships.find((s) => s.type === 'floss');
+  // ein Floß im Hafen braucht eine Anweisung, eins auf dem Wasser nicht
+  const rafts = state.ships.filter((s) => s.type === 'floss');
+  const raft = rafts.find((s) => s.id === ship.id) ?? rafts.find((s) => s.port) ?? rafts[0];
   if (!raft) {
     const yard = map.towns.find((t) => t.shipyard.includes('floss'));
     if (!yard) return null;
-    if (ship.port !== yard.id) return state.firstProfitDone ? null : tradeHint(state, map, ship, townName);
+    if (ship.port !== yard.id) {
+      if (!state.firstProfitDone) return tradeHint(state, map, ship, townName);
+      return ship.voyage ? null : `Flöße zimmert nur die Werft in <b>${yard.name}</b>. Fahr mit Ladung dorthin, dann bau dort dein erstes Floß.`;
+    }
     const plan = timberPlan(state, yard.id, 'floss');
     if (plan.problem) {
       // zu wenig Geld oder Holz: erst einmal mit dem Kahn handeln
@@ -87,7 +92,8 @@ function raftHint(state: GameState, map: MapDef, ship: Ship, townName: (id: stri
     if (load === 0 && plan.good) {
       return `Das Floß trägt noch ${capacityOf(raft)} t. Am meisten bringen gerade <b>${plan.amount} t ${goodName(plan.good)}</b> nach <b>${townName(plan.to)}</b>. Mit dem Floßholz bringt das etwa ${Math.round(plan.profit)} Taler ein. Kauf die Ladung im <b>Markt</b>.`;
     }
-    return `Leg ab nach <b>${townName(plan.to)}</b>. Ein Floß treibt nur mit der Strömung und kommt nicht zurück.`;
+    const more = plan.good && load > 0 ? `Es passen noch ${plan.amount} t ${goodName(plan.good)} dazu. ` : '';
+    return `${more}Leg ab nach <b>${townName(plan.to)}</b>. Ein Floß treibt nur mit der Strömung und kommt nicht zurück.`;
   }
   if (load > 0) return 'Angekommen. Verkauf die Ladung im <b>Markt</b> mit <b>Verkaufen</b>.';
   if (!state.markets[raft.port!]?.holz) {

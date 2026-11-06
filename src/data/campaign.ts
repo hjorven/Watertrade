@@ -139,7 +139,7 @@ export const CHAPTERS: Chapter[] = [
     goals: [
       { type: 'ships', count: 3, shipType: 'raddampfer', text: 'Stell drei Raddampfer in Dienst' },
       { type: 'project', id: 'schleuse-erzbach', text: 'Bau die Schleusentreppe am Erzbach' },
-      { type: 'steamDays', days: 90, text: 'Halte deine Dampfer 90 Dampfertage unter Dampf, etwa drei Dampfer 30 Tage lang' },
+      { type: 'steamDays', days: 90, text: 'Sammle 90 Dampfertage, etwa drei Dampfer 30 Tage lang (ein Dampfertag: mindestens 4 Fahrstunden an einem Tag)' },
       { type: 'worth', amount: 50000, text: 'Bring dein Haus auf 50.000 Taler Vermögen' },
     ],
   },
@@ -176,7 +176,7 @@ export const CHAPTERS: Chapter[] = [
     title: 'Hundert Jahre am Fluss',
     intro: [
       'Motoren tuckern, wo einst Pferde zogen. Kühlschiffe bringen frischen Fisch bis in die Berge. Dein Haus ist alt geworden, der Fluss nicht.',
-      'Am Kai erzählt man, das Haus Ahlers in Altenfurt sei knapp bei Kasse. Seine Anteile sind billig wie nie. Wer mehr als die Hälfte hält, bekommt Schiffe, Kontore und Kasse. Ein letztes Mal: Mach dein Haus zum ersten am Fluss.',
+      'Die alten Handelshäuser tun sich schwer mit der neuen Zeit, ihre Anteile werden im Register gehandelt. Wer mehr als die Hälfte eines Hauses hält, bekommt Schiffe, Kontore und Kasse, muss aber die übrigen Teilhaber auszahlen. Ein letztes Mal: Mach dein Haus zum ersten am Fluss.',
     ],
     outro: 'Hundert Jahre am Fluss. Die Treidelpfade sind Spazierwege geworden, aber die Kontore stehen noch, und über den Türen steht dein Name.',
     startTown: 'altenfurt',
@@ -189,7 +189,6 @@ export const CHAPTERS: Chapter[] = [
     startYear: 11,
     kontore: ['altenfurt', 'niedermuend', 'oberau'],
     works: ['bruecke-kessel', 'schleuse-erzbach', 'vertiefung-glas'],
-    weakHouse: 'ahlers',
     goals: [
       { type: 'ships', count: 1, shipType: 'kuehlschiff', text: 'Stell ein Kühlschiff in Dienst' },
       { type: 'project', id: 'kanal-oberlauf', text: 'Bau den Seitenkanal am Oberlauf' },

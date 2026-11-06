@@ -54,7 +54,7 @@ import { activePlan, resetBook, stopsOf, winterSeasonsOf } from './sim/routes.ts
 import type { RoutePlan } from './sim/state.ts';
 import { EPOCHS } from './data/ships.ts';
 import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
-import { goalDone, goalProgress } from './sim/goals.ts';
+import { goalDone, goalProgress, restoreCompleted } from './sim/goals.ts';
 import { deserialize, SAVE_VERSION, serialize, type GameMode, type SaveGame } from './sim/save.ts';
 import { LEVELS, levelOf } from './sim/towns.ts';
 import { chapterOneHint } from './ui/tutorial.ts';
@@ -693,6 +693,7 @@ function makeSave(): SaveGame {
     mode: session.mode,
     chapter: session.chapter?.id,
     completedGoals: [...session.completed],
+    completedTexts: session.chapter ? [...session.completed].map((i) => session.chapter!.goals[i]?.text).filter((t): t is string => !!t) : undefined,
     startHour: session.startHour,
     dailyDay: session.dailyDay,
     dailyScored: session.dailyScored,
@@ -727,12 +728,16 @@ function startSave(save: SaveGame): boolean {
   if (!save?.state || !Array.isArray(save.state.ships)) return false;
   const chapter = [...CHAPTERS, ...CHALLENGES].find((c) => c.id === save.chapter);
   const daysPlayed = save.startHour !== undefined ? (save.state.hour - save.startHour) / 24 : 0;
-  startGame(upgradeState(save.state, VALLEY), {
+  const loaded = upgradeState(save.state, VALLEY);
+  // nur Kampagnenkapitel wurden umgebaut, Herausforderungen behalten ihre Nummern
+  const remap = !!chapter && (!!save.completedTexts || save.mode === 'kampagne');
+  const completed = remap ? restoreCompleted(loaded, chapter!.goals, save.completedGoals, save.completedTexts) : new Set(save.completedGoals);
+  startGame(loaded, {
     mode: save.mode,
     chapter,
-    completed: new Set(save.completedGoals),
+    completed,
     finished:
-      (!!chapter && save.completedGoals.length >= chapter.goals.length) ||
+      (!!chapter && completed.size >= chapter.goals.length) ||
       (save.mode === 'tagesmarkt' && daysPlayed >= DAILY_DAYS) ||
       (save.mode === 'herausforderung' && !!chapter?.deadlineDays && daysPlayed >= chapter.deadlineDays),
     startHour: save.startHour,
@@ -782,7 +787,8 @@ function checkGoals(silent = false): void {
       const p = goalProgress(state, g);
       const done = session.completed.has(i);
       const binary = ['profit', 'townLevel', 'rank', 'project'].includes(g.type);
-      const progressText = binary ? '' : `${fmtNum(Math.min(p.value, p.target))} / ${fmtNum(p.target)}`;
+      const unit = g.type === 'supply' ? ' %' : '';
+      const progressText = binary ? '' : `${fmtNum(Math.min(p.value, p.target))} / ${fmtNum(p.target)}${unit}`;
       return { text: g.text, done, progress: progressText };
     }),
   );
