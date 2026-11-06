@@ -13,7 +13,9 @@ import { addNews, day, shipClass, type GameEvent, type GameState, type NewsItem 
 import { tickWorks } from './works.ts';
 import { observe, tickMarketInfo, tripArrive, tripSail } from './market-info.ts';
 import { initialMarket, initialTown, tickTown } from './towns.ts';
-import { wearFactor, wearRate } from './voyage.ts';
+import { movingHours, wearFactor, wearRate } from './voyage.ts';
+import { tickWaterworks } from './wasserbau.ts';
+import { PROJECT_BY_ID } from '../data/projects.ts';
 
 export * from './state.ts';
 export * from './trade.ts';
@@ -118,6 +120,13 @@ export function upgradeState(state: GameState, map: MapDef): GameState {
   s.rng ??= 20260601;
   s.ledger ??= { day: 0, wages: 0, upkeep: 0, production: 0 };
   s.works ??= [];
+  // ältere Spielstände: selbst gebaute Werke (Baubeginn nach Tag 0) gehören dem Spieler
+  for (const w of s.works) {
+    if (w.owner || w.started <= 0) continue;
+    w.owner = 'spieler';
+    w.fee ??= 'normal';
+    if (PROJECT_BY_ID.get(w.id)?.kind === 'vertiefung') w.upkeep ??= true;
+  }
   s.fuelToday ??= 0;
   s.priceBook ??= {};
   s.priceHistory ??= {};
@@ -185,6 +194,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     tickHouse(state);
     pushNews(events, tickCaptains(state, map), true);
     pushNews(events, tickWorks(state, map), true);
+    pushNews(events, tickWaterworks(state, map), false);
     if (state.epochAuto) {
       const e = epochOfYear(year(d));
       if (e > state.epoch) {
@@ -207,8 +217,10 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
   for (const ship of state.ships) {
     const v = ship.voyage;
     if (v) {
-      const dt = Math.min(hours, v.hours - v.elapsed);
+      const before = v.elapsed;
       v.elapsed = Math.min(v.hours, v.elapsed + hours);
+      // Verbrauch und Verschleiß nur in Fahrstunden, nicht während des Ladens und Löschens
+      const dt = movingHours(v, before, v.elapsed);
       const cls = shipClass(ship);
       ship.condition = Math.max(0, ship.condition - dt * wearRate(ship, wearFactor(state, map, ship)));
       // Diesel wird unterwegs bezahlt, Kohle kommt aus dem Bunker (beim Ablegen gekauft)
