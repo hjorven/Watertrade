@@ -6,7 +6,8 @@ import { BUILDINGS, betriebUpkeep, KONTOR_PRICE, KONTOR_SLOTS, type BuildingType
 import type { Chapter } from '../data/campaign.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
-import { buyCost, price, sellRevenue } from './economy.ts';
+import { buyCost, price, SELL_FACTOR, sellRevenue } from './economy.ts';
+import { MIN_FRESH, PERISH } from '../data/ships.ts';
 import { hasYard, repair } from './fleet.ts';
 import { advance, buy, cargoLoad, day, depart, kontorBuy, kontorSell, newGame, planVoyage, sell, shipClass, type GameState } from './game.ts';
 import { betriebeIn, buildBetrieb, buildingAllowed, buildKontor, dailyUpkeep, playerWorth, sellBetrieb } from './house.ts';
@@ -39,7 +40,9 @@ function bestTrade(state: GameState, map: MapDef, shipId: number) {
       for (let amount = 5; amount <= max; amount += 5) {
         const cost = buyCost(base, m, amount);
         if (cost > state.money) break;
-        const perHour = (sellRevenue(base, dest, amount) - cost) / plan.voyage.hours;
+        // verderbliche Ware kommt ohne Kühlraum mit weniger Wert an
+        const fresh = shipClass(ship).fresh ? 1 : Math.max(MIN_FRESH, 1 - ((PERISH[goodId] ?? 0) * plan.voyage.hours) / 24);
+        const perHour = (sellRevenue(base, dest, amount, SELL_FACTOR * fresh) - cost) / plan.voyage.hours;
         if (!best || perHour > best.perHour) best = { good: goodId, to: town.id, amount, perHour };
       }
     }
