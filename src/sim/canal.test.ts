@@ -1,3 +1,4 @@
+import { EPOCH_GOODS } from './supply.ts';
 import { describe, expect, it } from 'vitest';
 import { SCHEITELKANAL } from '../data/canal.ts';
 import { GOOD_BY_ID, GOODS } from '../data/goods.ts';
@@ -72,9 +73,11 @@ describe('Karte Zwei Täler', () => {
   it('jede Ware wird im Norden erzeugt oder dort gebraucht, und der Norden hat eine Werft', () => {
     const north = MAP.towns.filter((t) => NORTH_TOWN_IDS.includes(t.id));
     for (const g of GOODS) {
-      const touched = north.some(
-        (t) => g.id in t.produces || g.id in t.consumes || t.industries.some((i) => g.id in i.inputs || g.id in i.outputs),
-      );
+      // Waren einer späteren Epoche (Diesel) stehen in supply.ts, nicht in den Stadtdaten
+      const epoch = EPOCH_GOODS.find((e) => e.good === g.id);
+      const touched =
+        north.some((t) => g.id in t.produces || g.id in t.consumes || t.industries.some((i) => g.id in i.inputs || g.id in i.outputs)) ||
+        (!!epoch && north.some((t) => t.id in epoch.produces || t.id in epoch.consumes));
       expect(touched, g.name).toBe(true);
     }
     expect(north.some((t) => t.shipyard.includes('treidelkahn'))).toBe(true);

@@ -3,6 +3,8 @@ export interface Good {
   name: string;
   base: number; // Grundpreis in Talern je Tonne
   color: number; // Farbe der Ladung an Deck
+  /** erst ab dieser Epoche im Handel (Diesel) */
+  epoch?: number;
 }
 
 export const GOODS: Good[] = [
@@ -22,6 +24,13 @@ export const GOODS: Good[] = [
   { id: 'stoff', name: 'Stoff', base: 40, color: 0x9c3b3b },
   { id: 'bier', name: 'Bier', base: 30, color: 0xc7862e },
   { id: 'arznei', name: 'Arznei', base: 90, color: 0x6a8f5a },
+  // Ergänzung Plan 7: Baustoffe, Milchwirtschaft, Luxusware und Brennstoff der Motorzeit
+  { id: 'lehm', name: 'Lehm', base: 6, color: 0xa8683f },
+  { id: 'ziegel', name: 'Ziegel', base: 24, color: 0xb5482f },
+  { id: 'milch', name: 'Milch', base: 9, color: 0xf7f5ee },
+  { id: 'kaese', name: 'Käse', base: 50, color: 0xe8b93c },
+  { id: 'wein', name: 'Wein', base: 60, color: 0x7b1f3d },
+  { id: 'diesel', name: 'Diesel', base: 40, color: 0x3d4a3a, epoch: 3 },
 ];
 
 export const GOOD_BY_ID = new Map(GOODS.map((g) => [g.id, g]));

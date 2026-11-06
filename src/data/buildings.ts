@@ -33,6 +33,12 @@ export const BUILDINGS: BuildingType[] = [
   { id: 'schmiede', name: 'Schmiede', price: 1800, wage: 16, inputs: { erz: 3, kohle: 3 }, outputs: { werkzeug: 2 }, description: 'Erz und Kohle werden zu Werkzeug.' },
   { id: 'glashuette', name: 'Glashütte', price: 1150, wage: 14, inputs: { kohle: 3 }, outputs: { glas: 2 }, description: '3 t Kohle und Sand werden zu 2 t Glas.' },
   { id: 'apotheke', name: 'Apotheke', price: 1550, wage: 15, inputs: { glas: 1, salz: 2 }, outputs: { arznei: 2 }, description: 'Glas und Salz werden zu Arznei.' },
+  // Plan 7: Baustoffe, Milchwirtschaft und Wein
+  { id: 'lehmgrube', name: 'Lehmgrube', price: 1250, wage: 7, inputs: {}, outputs: { lehm: 7 }, rawFrom: 'lehm', description: 'Sticht Lehm in der Aue.' },
+  { id: 'ziegelei', name: 'Ziegelei', price: 1100, wage: 11, inputs: { lehm: 4, kohle: 1 }, outputs: { ziegel: 4 }, description: '4 t Lehm und 1 t Kohle werden zu 4 t Ziegeln.' },
+  { id: 'milchhof', name: 'Milchhof', price: 1400, wage: 8, inputs: {}, outputs: { milch: 6 }, rawFrom: 'milch', description: 'Kühe auf den Weiden. Milch verdirbt schnell.' },
+  { id: 'kaeserei', name: 'Käserei', price: 1050, wage: 12, inputs: { milch: 5 }, outputs: { kaese: 2 }, description: '5 t Milch werden zu 2 t Käse, der sich viel länger hält.' },
+  { id: 'weingut', name: 'Weingut', price: 2300, wage: 14, inputs: {}, outputs: { wein: 1.5 }, rawFrom: 'wein', description: 'Reben an den Südhängen. Wenig Menge, hoher Preis.' },
 ];
 
 export const BUILDING_BY_ID = new Map(BUILDINGS.map((b) => [b.id, b]));

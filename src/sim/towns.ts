@@ -21,12 +21,15 @@ export const LEVELS = [
   { name: 'Großstadt', from: 4500 },
 ];
 
-/** Zusätzlicher Bedarf je Stufe, in Tonnen pro Tag bei Startgröße der Stadt */
+/**
+ * Zusätzlicher Bedarf je Stufe, in Tonnen pro Tag bei Startgröße der Stadt.
+ * Eine Stadt baut mit Ziegeln und isst Käse, eine Großstadt will dazu Wein.
+ */
 export const LEVEL_NEEDS: Record<string, number>[] = [
   {},
   { bier: 1, stoff: 0.6 },
-  { moebel: 0.5, glas: 0.5, werkzeug: 0.4 },
-  { moebel: 0.8, stoff: 1, bier: 1.5, brot: 2 },
+  { moebel: 0.5, glas: 0.5, werkzeug: 0.4, ziegel: 0.6, kaese: 0.3 },
+  { moebel: 0.8, stoff: 1, bier: 1.5, brot: 2, ziegel: 0.5, wein: 0.6 },
 ];
 
 export const MAX_POPULATION = 8000;

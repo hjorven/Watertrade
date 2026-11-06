@@ -1,3 +1,4 @@
+import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { isIce, waterLevel } from './calendar.ts';
 import { captainArrived, tickCaptains } from './captains.ts';
@@ -23,6 +24,7 @@ import { movingHours, wearFactor, wearRate } from './voyage.ts';
 import { voyageProgress } from './navigation.ts';
 import { tickWaterworks } from './wasserbau.ts';
 import { PROJECT_BY_ID, registerProjects } from '../data/projects.ts';
+import { addMissingMarkets, tickBuildSites, tickSupply } from './supply.ts';
 
 export * from './state.ts';
 export * from './trade.ts';
@@ -100,6 +102,7 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
     epochAuto: opts.epoch === undefined,
     works: (opts.works ?? []).map((id) => ({ id, started: 0, done: true })),
     fuelToday: 0,
+    dieselTanks: true,
   };
   registerProjects(map);
   // Zufallskarten (mit Startwert) reisen vollständig im Spielstand mit
@@ -117,6 +120,8 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
   for (const town of opts.kontore ?? []) state.kontore[town] = { level: 1, stock: {} };
   withStream(state, 'kneipe', 0, () => refreshTavern(state, map));
   if (state.rivalsActive) state.rivals = withStream(state, 'konkurrenz-start', 0, () => initialRivals(state));
+  // Spielbeginn in der Motorzeit: Diesel ist von Anfang an im Handel
+  tickSupply(state, map);
   state.priceBook = {};
   state.priceHistory = {};
   observe(state, opts.startTown);
@@ -170,7 +175,11 @@ export function upgradeState(state: GameState, map: MapDef): GameState {
     ship.route ??= null;
     // ältere Spielstände: Dampfer bekommen einen vollen Bunker, damit keiner in einem Hafen ohne Kohle festsitzt
     ship.bunker ??= SHIPS[ship.type]?.bunker ?? 0;
+    // Motorschiffe hatten vor dem Diesel als Ware keinen Tank: einmal vollmachen
+    if (!s.dieselTanks && SHIPS[ship.type]?.diesel && !ship.bunker) ship.bunker = SHIPS[ship.type].bunker ?? 0;
   }
+  s.dieselTanks = true;
+  addMissingMarkets(s, map);
   if (!Object.keys(s.tavern).length) refreshTavern(s, map);
   // nicht neu anlegen, wenn alle Häuser pleite oder übernommen sind
   if (s.rivalsActive && !s.rivals.length && !s.housesGone?.length) s.rivals = initialRivals(s);
@@ -237,6 +246,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
       }
     }
     closeSteamDay(state);
+    pushNews(events, tickSupply(state, map), true);
     tickHouse(state);
     // gleich nach der Lohnzahlung buchen, bevor Kapitäne gehen oder abgeworben werden
     bookRouteWages(state);
@@ -244,6 +254,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     pushNews(events, tickCaptains(state, map), true);
     closeFinanceDay(state);
     pushNews(events, tickFinance(state, map), true);
+    pushNews(events, tickBuildSites(state, map), false);
     pushNews(events, tickWorks(state, map), true);
     pushNews(events, tickWaterworks(state, map), false);
     pushNews(events, tickCanal(state, map), true);
@@ -281,18 +292,20 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
       const dt = movingHours(v, before, v.elapsed);
       const cls = shipClass(ship);
       ship.condition = Math.max(0, ship.condition - dt * wearRate(ship, wearFactor(state, map, ship)));
-      // Diesel wird unterwegs bezahlt, Kohle kommt aus dem Bunker (beim Ablegen gekauft)
-      const fuel = (cls.fuel ?? 0) * dt;
-      state.money -= fuel;
-      state.fuelToday += fuel;
-      tripSail(ship, dt, fuel, moved.real);
-      if (ship.route?.active) bookRoute(state, ship.route, -fuel);
-      if (cls.coal) {
-        const burnt = Math.min(ship.bunker ?? 0, cls.coal * dt);
-        ship.bunker = Math.max(0, (ship.bunker ?? 0) - cls.coal * dt);
-        if (ship.route?.active) bookCoal(state, ship.route, burnt);
-        logSteam(state, ship.id, dt);
+      // Kohle oder Diesel kommt aus Bunker oder Tank (beim Ablegen gekauft)
+      const burn = cls.coal ?? cls.diesel;
+      if (burn) {
+        const burnt = Math.min(ship.bunker ?? 0, burn * dt);
+        ship.bunker = Math.max(0, (ship.bunker ?? 0) - burn * dt);
+        if (ship.route?.active) {
+          // Routenbuch: Kohle zum Kohlepreis, Diesel zum Grundpreis
+          if (cls.coal) bookCoal(state, ship.route, burnt);
+          else bookRoute(state, ship.route, -burnt * (GOOD_BY_ID.get('diesel')?.base ?? 0));
+        }
+        if (cls.coal) logSteam(state, ship.id, dt);
       }
+      // Fahrtenbuch: Diesel zum Grundpreis anrechnen (Kohle rechnet tripSail selbst)
+      tripSail(ship, dt, (cls.diesel ?? 0) * dt * (GOOD_BY_ID.get('diesel')?.base ?? 0), moved.real);
       // Versicherungsprämie und Gefahren unterwegs (Eisgang, Ladung über Bord)
       sailFinance(state, map, ship, state.hour - hours, dt);
       // ohne Kühlraum verdirbt Fisch, Brot und Bier unterwegs

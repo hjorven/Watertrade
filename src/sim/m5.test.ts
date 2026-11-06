@@ -1,3 +1,5 @@
+import { FUEL_DEALER_FACTOR } from './voyage.ts';
+import { GOOD_BY_ID } from '../data/goods.ts';
 import { describe, expect, it } from 'vitest';
 import { CHAPTERS } from '../data/campaign.ts';
 import { VALLEY } from '../data/maps/valley.ts';
@@ -70,10 +72,13 @@ describe('Epochen', () => {
     advance(s, VALLEY, hoursToArrival(s, ship));
     expect(ship.port).toBe('muehlheim');
     expect(ship.bunker).toBeCloseTo(SHIPS.raddampfer.bunker! - v.hours * SHIPS.raddampfer.coal!, 3);
-    // in Mühlheim gibt es keine Kohle: mit leerem Bunker kommt der Dampfer nicht weg
+    // in Mühlheim gibt es keinen Kohlemarkt: mit leerem Bunker hilft der Händler zum Aufpreis, nur so viel wie nötig
     ship.bunker = 0;
-    expect(departProblem(s, VALLEY, 1, 'niedermuend')).toMatch(/Kohle/);
-    expect(depart(s, VALLEY, 1, 'niedermuend')).toBeNull();
+    expect(departProblem(s, VALLEY, 1, 'niedermuend')).toBeNull();
+    const before = s.money;
+    expect(depart(s, VALLEY, 1, 'niedermuend')).not.toBeNull();
+    expect(before - s.money).toBe(ship.bunker * Math.round(GOOD_BY_ID.get('kohle')!.base * FUEL_DEALER_FACTOR));
+    ship.voyage = null;
     // in Niedermünd wird die fehlende Kohle beim Ablegen gekauft
     ship.port = 'niedermuend';
     const coal = s.markets.niedermuend.kohle.stock;
@@ -126,7 +131,7 @@ describe('Wasserbau', () => {
     expect(planVoyage(s, VALLEY, 1, 'muehlheim')!.ok).toBe(true);
     expect(needsMastDown(seg(), SHIPS.segelkahn, s.waterLevel)).toBe(true);
     expect(startProject(s, 'bruecke-kessel').ok).toBe(true);
-    advance(s, VALLEY, 24 * 21);
+    advance(s, VALLEY, 24 * 31); // 20 Bautage, dazu höchstens 10 Tage Wartezeit auf Ziegel
     expect(seg().bridgeHeight).toBe(11);
     expect(needsMastDown(seg(), SHIPS.segelkahn, s.waterLevel)).toBe(false);
   });
@@ -136,7 +141,7 @@ describe('Wasserbau', () => {
     expect(startProject(s, 'schleuse-erzbach').ok).toBe(false);
     s.epoch = 2;
     expect(startProject(s, 'schleuse-erzbach').ok).toBe(true);
-    advance(s, VALLEY, 24 * 31);
+    advance(s, VALLEY, 24 * 46); // 30 Bautage, dazu höchstens 15 Tage Wartezeit auf Ziegel
     const seg = effectiveSegments(s, VALLEY).find((x) => x.id === 'grube-glas')!;
     expect(seg.baseDepth).toBeCloseTo(2, 5);
   });

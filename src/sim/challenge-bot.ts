@@ -91,8 +91,8 @@ function goalBonus(state: GameState, map: MapDef, goals: Goal[], open: boolean[]
 /** Kosten einer Fahrt ohne Zoll: Diesel, Kohle und die spätere Reparatur des Verschleißes */
 function runningCost(ship: Ship, hours: number): number {
   const cls = SHIPS[ship.type];
-  // Kohle ist abseits der Gruben meist knapp: lieber mit dem anderthalbfachen Grundpreis rechnen
-  const fuel = (cls.fuel ?? 0) * hours + (cls.coal ?? 0) * hours * base('kohle') * 1.6;
+  // Kohle ist abseits der Gruben meist knapp: lieber mit dem anderthalbfachen Grundpreis rechnen; Diesel etwas über Grundpreis
+  const fuel = (cls.diesel ?? 0) * hours * base('diesel') * 1.3 + (cls.coal ?? 0) * hours * base('kohle') * 1.6;
   return fuel + hours * wearRate(ship) * cls.price * 0.5;
 }
 

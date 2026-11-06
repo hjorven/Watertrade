@@ -5,7 +5,8 @@ import { renderCanal } from './canal-panel.ts';
 import { GOOD_BY_ID, GOODS } from '../data/goods.ts';
 import type { MapDef, TownDef } from '../data/maps/valley.ts';
 import { RIVAL_BY_ID } from '../data/rivals.ts';
-import { EPOCHS, SHIPS, UPGRADES } from '../data/ships.ts';
+import { EPOCHS, fuelOf, SHIPS, UPGRADES } from '../data/ships.ts';
+import { goodIcon } from './goodicons.ts';
 import { dayInSeason, season, SEASON_NAME, SEASONS, year } from '../sim/calendar.ts';
 import { MAX_ACCEPTED, PENALTY } from '../sim/contracts.ts';
 import { buyPrice, sellPrice } from '../sim/economy.ts';
@@ -224,7 +225,7 @@ function keepForms(root: HTMLElement, redraw: () => void): void {
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 const goodName = (id: string) => GOOD_BY_ID.get(id)?.name ?? id;
-const swatch = (id: string) => `<span class="swatch" style="background:${hex(GOOD_BY_ID.get(id)?.color ?? 0x999999)}"></span>`;
+const swatch = (id: string) => goodIcon(id) || `<span class="swatch" style="background:${hex(GOOD_BY_ID.get(id)?.color ?? 0x999999)}"></span>`;
 const flows = (r: Record<string, number>) =>
   Object.entries(r)
     .map(([g, n]) => `${n} ${goodName(g)}`)
@@ -628,8 +629,9 @@ export class Hud {
         const lighter = v.fees?.some((f) => f.work === 'leichtern') ? ', muss leichtern' : '';
         const dockText = (dockH >= 0.5 ? ` (davon ${fmtHours(dockH)} Laden und Löschen)` : '') + lighter;
         const coal = bunkerPlan(state, ship, sailingHours(v), v.toll ?? 0);
-        if (coal.problem) return `<button class="btn dest" disabled title="${coal.problem}"><b>${t.name}</b><small>${coal.buy ? `${coal.buy} t Kohle fehlen` : 'Bunker zu klein'}</small></button>`;
-        const coalText = coal.need ? `, Kohle ${String(coal.need).replace('.', ',')} t${coal.fromKontor ? `, ${coal.fromKontor} t aus dem Kontor` : ''}${coal.buy ? `, bunkert ${coal.buy} t für ${coal.cost} Taler` : ''}` : '';
+        if (coal.problem) return `<button class="btn dest" disabled title="${coal.problem}"><b>${t.name}</b><small>${coal.buy ? `${coal.buy} t ${coal.fuelName} fehlen` : coal.good === 'diesel' ? 'Tank zu klein' : 'Bunker zu klein'}</small></button>`;
+        const dealerText = coal.dealer ? `, davon ${coal.dealer} t beim Händler` : '';
+        const coalText = coal.need ? `, ${coal.fuelName} ${String(coal.need).replace('.', ',')} t${coal.fromKontor ? `, ${coal.fromKontor} t aus dem Kontor` : ''}${coal.buy ? `, bunkert ${coal.buy} t für ${coal.cost} Taler${dealerText}` : ''}` : '';
         const tooDear = (v.toll ?? 0) + coal.cost > state.money;
         // echte Dauer mit Nachtfahrt ab jetzt
         const eta = realHours(state, ship.type, v);
@@ -655,10 +657,12 @@ export class Hud {
         : '';
 
     const cls = shipClass(ship);
-    const bunker = cls.coal ? ` · Bunker <b>${Math.floor(ship.bunker ?? 0)}/${cls.bunker} t</b> Kohle` : '';
+    const fuel = fuelOf(cls);
+    const tankName = fuel?.good === 'diesel' ? 'Tank' : 'Bunker';
+    const bunker = fuel ? ` · ${tankName} <b>${Math.floor(ship.bunker ?? 0)}/${cls.bunker} t</b> ${fuel.name}` : '';
     const bunkerBtn =
-      cls.coal && (market.kohle || (kontor?.stock.kohle?.amount ?? 0) >= 1) && (ship.bunker ?? 0) < (cls.bunker ?? 0) - 1
-        ? `<button class="btn wide" data-act="cmd" data-cmd="bunker">Bunker füllen<small>${(kontor?.stock.kohle?.amount ?? 0) >= 1 ? 'Erst eigene Kohle aus dem Kontor, dann vom Markt' : 'Kohle vom Markt für Häfen ohne Kohlehandel'}</small></button>`
+      fuel && (market[fuel.good] || (kontor?.stock[fuel.good]?.amount ?? 0) >= 1) && (ship.bunker ?? 0) < (cls.bunker ?? 0) - 1
+        ? `<button class="btn wide" data-act="cmd" data-cmd="bunker">${tankName} füllen<small>${(kontor?.stock[fuel.good]?.amount ?? 0) >= 1 ? `Erst ${fuel.good === 'diesel' ? 'eigener' : 'eigene'} ${fuel.name} aus dem Kontor, dann vom Markt` : `${fuel.name} vom Markt für Häfen ohne ${fuel.name}handel`}</small></button>`
         : '';
 
     const here = state.contracts.filter((c) => c.accepted && c.town === town.id);
@@ -1068,7 +1072,7 @@ export class Hud {
       ${dockNote(v)}
       ${status}
       <ol class="route">${route}</ol>
-      <p class="note">Ladung: ${cargo || 'leer'} · Zustand ${Math.round(ship.condition * 100)} %${cls.coal ? ` · Bunker ${Math.floor(ship.bunker ?? 0)} t Kohle` : ''}</p>
+      <p class="note">Ladung: ${cargo || 'leer'} · Zustand ${Math.round(ship.condition * 100)} %${fuelOf(cls) ? ` · ${cls.coal ? 'Bunker' : 'Tank'} ${Math.floor(ship.bunker ?? 0)} t ${fuelOf(cls)!.name}` : ''}</p>
       ${captain}`;
   }
 
