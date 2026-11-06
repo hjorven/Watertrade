@@ -3,6 +3,8 @@ export type Goal =
   | { type: 'money'; amount: number; text: string }
   | { type: 'ships'; count: number; shipType?: string; text: string }
   | { type: 'townLevel'; town: string; level: number; text: string }
+  /** Versorgung einer Stadt in Prozent (die Leiste im Stadtfenster) */
+  | { type: 'supply'; town: string; percent: number; text: string }
   | { type: 'deliver'; town: string; good: string; amount: number; text: string }
   | { type: 'rafts'; count: number; text: string }
   | { type: 'kontore'; count: number; text: string }
@@ -46,19 +48,21 @@ export const CHAPTERS: Chapter[] = [
     title: 'Der erste Kahn',
     intro: [
       'Oberau, im Frühjahr. Dein Onkel hat dir einen alten Treidelkahn und 300 Taler hinterlassen, dazu einen Satz in seiner krakeligen Schrift: "Der Fluss gibt, wer ihn versteht."',
-      'Kaufe, wo eine Ware reichlich da ist, und verkaufe, wo sie gebraucht wird. Talwärts trägt dich die Strömung, bergwärts ziehen Pferde. Im Frühjahr ist das Wasser hoch und schnell, im Sommer wird es flach.',
+      'Am Oberlauf fängt jeder Händler mit Holz an. Zimmere ein Floß, lade Holz darauf und lass es talwärts treiben. Wo Holz gebraucht wird, verkaufst du Ladung und Floß zusammen. Bergwärts kommt nur dein Kahn, von Pferden gezogen. Im Frühjahr ist das Wasser hoch und schnell, im Sommer wird es flach.',
     ],
-    outro: 'Oberau ist kein Dorf mehr, und in den Kontoren am Fluss kennt man deinen Namen. Das Handelshaus steht.',
+    outro: 'In Oberau werden neue Häuser gezimmert, und in den Kontoren am Fluss kennt man deinen Namen. Das Handelshaus steht.',
     startTown: 'oberau',
     money: 300,
     startShip: 'treidelkahn',
     allowedShips: ['floss', 'treidelkahn'],
     goals: [
-      { type: 'profit', text: 'Mach mit einem Verkauf Gewinn' },
-      { type: 'rafts', count: 1, text: 'Bau in Oberau ein Floß, lass es talwärts treiben und zerlege es am Ziel' },
-      { type: 'deliver', town: 'oberau', good: 'getreide', amount: 60, text: 'Bring 60 t Getreide nach Oberau' },
+      { type: 'ships', count: 1, shipType: 'floss', text: 'Zimmere in der Werft von Oberau ein Floß' },
+      { type: 'profit', text: 'Verkauf eine Ladung mit Gewinn' },
+      { type: 'rafts', count: 1, text: 'Lass das Floß talwärts treiben und zerlege es am Ziel' },
+      { type: 'deliver', town: 'oberau', good: 'getreide', amount: 60, text: 'Bring mit dem Kahn 60 t Getreide bergwärts nach Oberau' },
+      { type: 'rafts', count: 4, text: 'Bring insgesamt vier Flöße ans Ziel' },
       { type: 'ships', count: 2, shipType: 'treidelkahn', text: 'Besitze zwei Treidelkähne' },
-      { type: 'townLevel', town: 'oberau', level: 1, text: 'Lass Oberau zum Marktflecken wachsen' },
+      { type: 'supply', town: 'oberau', percent: 80, text: 'Bring die Versorgung von Oberau auf 80 %' },
       { type: 'money', amount: 6000, text: 'Besitze 6000 Taler' },
     ],
   },

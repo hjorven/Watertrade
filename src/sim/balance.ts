@@ -7,11 +7,14 @@ import type { Chapter } from '../data/campaign.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { buyCost, price, SELL_FACTOR, sellRevenue } from './economy.ts';
-import { MIN_FRESH, PERISH } from '../data/ships.ts';
-import { hasYard, repair } from './fleet.ts';
-import { advance, buy, cargoLoad, day, depart, kontorBuy, kontorSell, newGame, planVoyage, sell, shipClass, type GameState } from './game.ts';
+import { MIN_FRESH, PERISH, SHIPS } from '../data/ships.ts';
+import { hasYard, repair, timberPlan } from './fleet.ts';
+import { bestRaftPlan } from './rafting.ts';
+import { goalDone } from './goals.ts';
+import { advance, buy, buyShip, cargoLoad, day, depart, dismantleRaft, kontorBuy, kontorSell, newGame, planVoyage, sell, shipClass, type GameState } from './game.ts';
 import { betriebeIn, buildBetrieb, buildingAllowed, buildKontor, dailyUpkeep, playerWorth, sellBetrieb } from './house.ts';
 import { rivalWorth } from './rivals.ts';
+import { netFlow } from './towns.ts';
 
 export interface BalanceReport {
   days: number;
@@ -247,4 +250,108 @@ export function runGrowth(map: MapDef, chapter: Chapter, target: number, maxDays
     }
   }
   return { reachedOn, worth: playerWorth(state), ships: state.ships.length, betriebe: state.betriebe.length, built: state.betriebe.map((b) => `${b.town}:${b.type}`), worthByDay };
+}
+
+/* ---------- Kapitel-Bots (Kampagne) ---------- */
+
+export interface ChapterRun {
+  /** Tag, an dem jedes Ziel erfüllt war (Index wie in chapter.goals), null = nie */
+  goalDays: (number | null)[];
+  /** Tag, an dem alle Ziele erfüllt waren, oder null */
+  doneOn: number | null;
+}
+
+/** Ziele eines Kapitels täglich prüfen, bis alle erfüllt sind (erfüllte Ziele bleiben erfüllt wie im Spiel) */
+function trackGoals(state: GameState, chapter: Chapter, startDay: number, goalDays: (number | null)[]): boolean {
+  chapter.goals.forEach((g, i) => {
+    if (goalDays[i] === null && goalDone(state, g)) goalDays[i] = day(state) - startDay;
+  });
+  return goalDays.every((d) => d !== null);
+}
+
+/**
+ * Kapitel 1 wie ein Spieler, der den Hinweisen folgt: Flöße aus Oberau talwärts, der Treidelkahn
+ * bringt Getreide nach Oberau und handelt, ab genug Geld kommt ein zweiter Kahn, und knappe Waren
+ * fahren nach Oberau, bis die Stadt gut versorgt ist.
+ */
+export function runChapterOne(map: MapDef, chapter: Chapter, maxDays: number, seed = 1): ChapterRun {
+  const state = newGame(map, {
+    startTown: chapter.startTown,
+    money: chapter.money,
+    startShip: chapter.startShip,
+    allowedShips: chapter.allowedShips,
+    rivals: chapter.rivals ?? false,
+    seed,
+  });
+  const home = chapter.startTown;
+  const homeDef = map.towns.find((t) => t.id === home)!;
+  const grainGoal = chapter.goals.find((g) => g.type === 'deliver');
+  const grain = grainGoal?.type === 'deliver' ? grainGoal.amount : 0;
+  const startDay = day(state);
+  const goalDays: (number | null)[] = chapter.goals.map(() => null);
+  let lastDay = startDay;
+  while (day(state) - startDay < maxDays) {
+    // ein Floß zur Zeit; das erste gleich zu Beginn wie im Hinweis, später nur bei billigem Holz und Geld übrig für den Kahn
+    let raft = state.ships.find((s) => s.type === 'floss');
+    if (!raft && (state.stats.rafts === 0 || (state.money > 800 && (timberPlan(state, home, 'floss').cost || Infinity) < 200))) raft = buyShip(state, map, home, 'floss').ship;
+    if (raft?.port === home) {
+      const plan = bestRaftPlan(state, map, raft);
+      if (plan?.good && cargoLoad(raft) === 0) buy(state, raft.id, plan.good, plan.amount);
+      if (plan) depart(state, map, raft.id, plan.to);
+    } else if (raft?.port) {
+      for (const good of Object.keys(raft.cargo)) sell(state, raft.id, good, Infinity);
+      dismantleRaft(state, raft.id);
+    }
+    const kahne = state.ships.filter((s) => s.type === 'treidelkahn');
+    const yard = kahne.find((s) => s.port && map.towns.find((t) => t.id === s.port)?.shipyard.includes('treidelkahn'));
+    if (kahne.length < 2 && yard && state.money > SHIPS.treidelkahn.price + 400) buyShip(state, map, yard.port!, 'treidelkahn');
+    const grainLeft = grain - (state.stats.delivered[home]?.getreide ?? 0);
+    for (const ship of state.ships) {
+      if (ship.type === 'floss' || !ship.port) continue;
+      for (const good of Object.keys(ship.cargo)) sell(state, ship.id, good, Infinity);
+      if (ship.condition < 0.6 && hasYard(map, ship.port)) repair(state, map, ship.id);
+      // Getreide bergwärts, bis Oberau genug hat
+      if (grainLeft > 0 && state.markets[ship.port].getreide && ship.port !== home && state.money > 200) {
+        buy(state, ship.id, 'getreide', Math.min(shipClass(ship).capacity, grainLeft, Math.floor(state.money / 12)));
+        if (cargoLoad(ship) > 0 && depart(state, map, ship.id, home)) continue;
+        for (const good of Object.keys(ship.cargo)) sell(state, ship.id, good, Infinity);
+      }
+      // der erste Kahn versorgt Oberau mit dem, was dort knapp ist, solange es nicht viel Verlust bringt; der zweite nur mit viel Geld
+      const supplier = ship === state.ships.find((s) => s.type !== 'floss') ? 1000 : 4000;
+      if (ship.port !== home && state.money > supplier) {
+        const there = state.markets[home];
+        const cap = shipClass(ship).capacity;
+        // alles, was Oberau fehlt und hier zu haben ist, bis der Laderaum voll ist
+        for (const [g, m] of Object.entries(there)) {
+          const here = state.markets[ship.port][g];
+          if (!here || m.stock > m.target * 1.2 || netFlow(homeDef, g, state.towns[home]) >= 0) continue;
+          const base = GOOD_BY_ID.get(g)!.base;
+          const room = cap - cargoLoad(ship);
+          const amount = Math.min(room, Math.floor(here.stock) - 5, Math.ceil(m.target * 1.4 - m.stock));
+          if (amount < 3 || buyCost(base, here, amount) > state.money - 300) continue;
+          if (sellRevenue(base, m, amount) - buyCost(base, here, amount) > -100) buy(state, ship.id, g, amount);
+        }
+        if (cargoLoad(ship) > 0) {
+          if (depart(state, map, ship.id, home)) continue;
+          for (const good of Object.keys(ship.cargo)) sell(state, ship.id, good, Infinity);
+        }
+      }
+      const t = bestTrade(state, map, ship.id);
+      if (t && t.perHour > 0) {
+        buy(state, ship.id, t.good, t.amount);
+        while (cargoLoad(ship) > 0 && !depart(state, map, ship.id, t.to)) sell(state, ship.id, t.good, 5);
+      } else if (state.money < 300 && ship.port !== home && ship.port !== 'muehlheim') {
+        // ohne Geld und ohne Geschäft: leer zur Kornkammer fahren, dort ist Ware billig
+        depart(state, map, ship.id, 'muehlheim');
+      }
+    }
+    advance(state, map, 1);
+    const d = day(state);
+    if (d !== lastDay) {
+      lastDay = d;
+      if (trackGoals(state, chapter, startDay, goalDays)) break;
+    }
+  }
+  const doneOn = goalDays.every((d) => d !== null) ? Math.max(...(goalDays as number[])) : null;
+  return { goalDays, doneOn };
 }

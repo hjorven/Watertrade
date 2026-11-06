@@ -17,6 +17,8 @@ export function goalProgress(state: GameState, goal: Goal): { value: number; tar
     }
     case 'townLevel':
       return { value: levelOf(state.towns[goal.town].population), target: goal.level };
+    case 'supply':
+      return { value: Math.round(state.towns[goal.town].satisfaction * 100), target: goal.percent };
     case 'deliver':
       return { value: state.stats.delivered[goal.town]?.[goal.good] ?? 0, target: goal.amount };
     case 'rafts':
