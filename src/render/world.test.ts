@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { VALLEY } from '../data/maps/valley.ts';
 import { Landscape, RIVER_HALF_WIDTH, WORLD_D, WORLD_W } from './landscape.ts';
@@ -9,6 +10,17 @@ const towns = VALLEY.towns.map((def) => placeTown(land, def));
 land.build(towns.map((t) => ({ pos: t.center, radius: t.radius * 1.4, fields: !!t.def.fields })));
 
 describe('Gelände', () => {
+  it('hat keine Spalten: benachbarte Punkte abseits der Flüsse springen nicht in der Höhe', () => {
+    for (let x = -108; x < 108; x += 1.3) {
+      for (let z = -68; z < 68; z += 1.3) {
+        if (land.riverDistance(x, z).d < RIVER_HALF_WIDTH + 1) continue;
+        const h = land.heightAt(x, z);
+        expect(Math.abs(land.heightAt(x + 0.5, z) - h)).toBeLessThan(1.6);
+        expect(Math.abs(land.heightAt(x, z + 0.5) - h)).toBeLessThan(1.6);
+      }
+    }
+  });
+
   it('hat keine Pfützen: abseits der Flüsse liegt das Land über dem Wasser', () => {
     for (let x = -WORLD_W / 2 + 2; x < WORLD_W / 2; x += 3.7) {
       for (let z = -WORLD_D / 2 + 2; z < WORLD_D / 2; z += 3.1) {
@@ -29,6 +41,20 @@ describe('Gelände', () => {
 });
 
 describe('Städte', () => {
+  it('nichts ragt über den Kartenrand: Bauplätze, Häuser, Wahrzeichen, Wege', () => {
+    towns.forEach((place, i) => {
+      for (const l of place.lots) expect(Math.abs(l.pos.x)).toBeLessThan(WORLD_W / 2 - 3);
+      const view = buildTown(land, place, 100 + i);
+      view.setPopulation(place.def.population * 4);
+      view.group.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(view.group);
+      expect(box.min.x).toBeGreaterThan(-WORLD_W / 2 - 0.5);
+      expect(box.max.x).toBeLessThan(WORLD_W / 2 + 0.5);
+      expect(box.min.z).toBeGreaterThan(-WORLD_D / 2 - 0.5);
+      expect(box.max.z).toBeLessThan(WORLD_D / 2 + 0.5);
+    });
+  });
+
   it('jede Stadt der Karte hat einen eigenen Stil', () => {
     for (const t of VALLEY.towns) expect(TOWN_STYLES[t.id]).toBeDefined();
   });
