@@ -521,7 +521,8 @@ create table public.league_hall_of_fame (
 
 -- hochwasser: alle Fahrten dauern länger (flood_seconds), gilt im ganzen Tal
 -- zollstreit: in einer Stadt kostet Kaufen 15 % mehr und Verkaufen bringt 15 % weniger
--- markttag:   in einer Stadt bringt Verkaufen 20 % mehr
+-- markttag:   in einer Stadt bringt Verkaufen 10 % mehr (höchstens so viel, dass Kaufen und sofort
+--             Zurückverkaufen wegen des Händlerabschlags von 10 % weiter Verlust bleibt: 0,9 * 1,1 < 1)
 create table public.league_events (
   id bigint generated always as identity primary key,
   kind text not null check (kind in ('hochwasser', 'zollstreit', 'markttag')),
@@ -554,6 +555,7 @@ create policy "ereignisse lesbar"   on public.league_events       for select usi
 
 -- Höchstens 40 Aktionen (Handel, Reise, Schiffskauf) pro 60 Sekunden.
 -- Schlägt die aufrufende Funktion fehl, wird auch die Zählung zurückgerollt.
+-- Außerdem: nach Saisonende bis zum Wechsel durch den Cron-Job ruht der Handel.
 create or replace function public.league_rate_check()
 returns void
 language plpgsql
@@ -563,6 +565,9 @@ as $$
 declare
   v_count integer;
 begin
+  if (select ends_at from public.league_seasons order by id desc limit 1) <= now() then
+    raise exception 'saison vorbei';
+  end if;
   update public.league_players
      set rate_count  = case when rate_window <= now() - interval '60 seconds' then 1 else rate_count + 1 end,
          rate_window = case when rate_window <= now() - interval '60 seconds' then now() else rate_window end
@@ -584,7 +589,7 @@ as $$
   select coalesce((
     select case
              when e.kind = 'zollstreit' then case when p_buy then 115 else 85 end
-             when e.kind = 'markttag'   then case when p_buy then 100 else 120 end
+             when e.kind = 'markttag'   then case when p_buy then 100 else 110 end
              else 100
            end
       from public.league_events e

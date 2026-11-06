@@ -7,7 +7,7 @@
 --   psql -d liga -f supabase/tests/liga_saisons_test.sql
 -- Der Block endet absichtlich mit einer Ausnahme "ERGEBNIS ...", damit alle Änderungen zurückgerollt werden.
 -- Erwartet: kauf5 brot=260, verkauf5 mit zoll=195, plaette gold=720 wealth=860, reise dauer=30 s,
--- rate: zu viele aktionen, halle=1/1/999/1, spieler=0, maerkte abweichend=0, drei Cron-Jobs.
+-- rate: zu viele aktionen, nach ende: saison vorbei, halle=1/1/999/1, spieler=0, maerkte abweichend=0, drei Cron-Jobs.
 do $t$
 declare
   u uuid;
@@ -71,6 +71,10 @@ begin
   -- Saison
   update public.league_players set wealth = 999 where user_id = u;
   update public.league_seasons set ends_at = now() - interval '30 days', starts_at = now() - interval '40 days';
+  begin
+    p := public.league_travel('weidenhof');
+  exception when others then out := out || 'nach ende: ' || sqlerrm || '; ';
+  end;
   perform public.league_season_tick();
   select string_agg(id || ':' || starts_at::date || '-' || ends_at::date, ',') into e from public.league_seasons;
   out := out || format('saisons=%s; ', e);

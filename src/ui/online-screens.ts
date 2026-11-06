@@ -428,7 +428,15 @@ export class OnlineScreens {
     const info = await (await online()).getLeagueInfo();
     if (!info.ok) return;
     const changed = JSON.stringify(info.data) !== JSON.stringify(this.leagueInfo);
+    const oldSeason = this.leagueInfo.season?.id;
     this.leagueInfo = info.data;
+    // Neue Saison: der Server hat alle Spieler gelöscht, also gleich neu beitreten statt alte Zahlen zu zeigen
+    if (oldSeason && info.data.season && info.data.season.id !== oldSeason && this.menu.screen === 'league' && !this.leagueBusy) {
+      await this.openLeague();
+      this.leagueMsg = `Saison ${info.data.season.id} hat begonnen. Alle starten wieder mit ${LEAGUE_START_GOLD} Talern und dem Treidelkahn.`;
+      this.renderLeague();
+      return;
+    }
     const wait = this.player ? secondsUntilArrival(this.player) : 0;
     if (changed && !wait && this.menu.screen === 'league' && !this.leagueBusy) this.renderLeague();
   }

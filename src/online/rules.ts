@@ -121,7 +121,7 @@ export function leagueEventPercent(events: LeagueEvent[], townId: string, buy: b
     .sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt))[0];
   if (!e) return 100;
   if (e.kind === 'zollstreit') return buy ? 115 : 85;
-  if (e.kind === 'markttag') return buy ? 100 : 120;
+  if (e.kind === 'markttag') return buy ? 100 : 110;
   return 100;
 }
 
@@ -158,7 +158,7 @@ export function leagueEventText(e: LeagueEvent, townName: (id: string) => string
     case 'zollstreit':
       return { title: `Zollstreit in ${town}`, text: `In ${town} kostet jeder Kauf 15 % mehr und jeder Verkauf bringt 15 % weniger.` };
     case 'markttag':
-      return { title: `Markttag in ${town}`, text: `In ${town} bringt jeder Verkauf 20 % mehr.` };
+      return { title: `Markttag in ${town}`, text: `In ${town} bringt jeder Verkauf 10 % mehr.` };
   }
 }
 

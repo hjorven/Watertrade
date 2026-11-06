@@ -157,6 +157,7 @@ const MESSAGES: Record<string, string> = {
   'unbekanntes schiff': 'Dieses Schiff gibt es in der Liga nicht.',
   'schon dein schiff': 'Das ist schon dein Schiff.',
   'ladung passt nicht': 'Deine Ladung passt nicht in das neue Schiff. Erst verkaufen.',
+  'saison vorbei': 'Die Saison ist vorbei. Die neue beginnt in wenigen Minuten.',
 };
 
 export function fail<T>(err: unknown): Result<T> {

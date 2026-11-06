@@ -9,7 +9,7 @@ import {
   toEvent,
   toPlayer,
 } from './index.ts';
-import { MAX_FACTOR, MIN_FACTOR } from '../sim/economy.ts';
+import { MAX_FACTOR, MIN_FACTOR, price, SELL_FACTOR } from '../sim/economy.ts';
 import {
   LEAGUE_ACTIONS_PER_MINUTE,
   LEAGUE_CAPACITY,
@@ -91,7 +91,7 @@ describe('Liga-Schiffe', () => {
     // Preisformel wie src/sim/economy.ts, sonst zeigt der Client andere Preise als der Server rechnet
     expect(MIGRATION).toContain(`least(${MAX_FACTOR.toFixed(1)}, greatest(${MIN_FACTOR}, p_target::numeric`);
     expect(MIGRATION).toContain("when e.kind = 'zollstreit' then case when p_buy then 115 else 85 end");
-    expect(MIGRATION).toContain("when e.kind = 'markttag'   then case when p_buy then 100 else 120 end");
+    expect(MIGRATION).toContain("when e.kind = 'markttag'   then case when p_buy then 100 else 110 end");
   });
 });
 
@@ -114,9 +114,22 @@ describe('Liga-Ereignisse', () => {
     expect(leagueEventPercent(list, 'oberau', true, NOW)).toBe(115);
     expect(leagueEventPercent(list, 'oberau', false, NOW)).toBe(85);
     expect(leagueEventPercent(list, 'weidenhof', true, NOW)).toBe(100);
-    expect(leagueEventPercent(list, 'weidenhof', false, NOW)).toBe(120);
+    expect(leagueEventPercent(list, 'weidenhof', false, NOW)).toBe(110);
     expect(leagueEventPercent(list, 'altenfurt', true, NOW)).toBe(100);
     expect(leagueEventPercent([ev('zollstreit', 'oberau', -60, -1)], 'oberau', true, NOW)).toBe(100);
+  });
+
+  it('Markttag macht Kaufen und sofort Zurückverkaufen nicht zum Gewinn', () => {
+    const list = [ev('markttag', 'oberau')];
+    for (const base of [8, 14, 30, 70]) {
+      for (const stock of [10, 40, 50, 100, 200]) {
+        let buy = 0;
+        let sell = 0;
+        for (let i = 1; i <= 20; i++) buy += price(base, stock - i, 100);
+        for (let i = 1; i <= 20; i++) sell += Math.floor(price(base, stock - 20 + i, 100) * SELL_FACTOR);
+        expect(leagueSellTotal(sell, leagueEventPercent(list, 'oberau', false, NOW))).toBeLessThan(leagueBuyTotal(buy, leagueEventPercent(list, 'oberau', true, NOW)));
+      }
+    }
   });
 
   it('rundet wie der Server: Kauf auf, Verkauf ab', () => {
@@ -131,7 +144,7 @@ describe('Liga-Ereignisse', () => {
   it('beschreibt jedes Ereignis mit Stadtnamen', () => {
     const name = (id: string) => id.toUpperCase();
     expect(leagueEventText(ev('zollstreit', 'oberau'), name).title).toBe('Zollstreit in OBERAU');
-    expect(leagueEventText(ev('markttag', 'oberau'), name).text).toContain('20 %');
+    expect(leagueEventText(ev('markttag', 'oberau'), name).text).toContain('10 %');
     expect(leagueEventText(ev('hochwasser', null), name).title).toContain('Hochwasser');
   });
 });
