@@ -205,6 +205,7 @@ export function hireCaptain(state: GameState, shipId: number, captainId: number)
 /** Wer zurück in die Kneipe geht, vergisst Angebot und Kränkung und verlangt wieder, was er wert ist */
 function releaseCaptain(c: Captain): Captain {
   c.offer = undefined;
+  c.promised = undefined;
   c.warned = undefined;
   c.loyalty = undefined;
   c.wage = Math.max(c.wage, fairWage(c));

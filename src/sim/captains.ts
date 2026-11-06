@@ -13,6 +13,9 @@ export const LOYALTY_WARN = 45;
 /** Unter dieser Treue nimmt der Kapitän Angebote anderer Reeder an */
 export const LOYALTY_POACH = 30;
 
+/** So viele Tage gilt die Lohnzusage, mit der ein Kapitän gehalten wurde */
+export const PROMISE_DAYS = 30;
+
 /** Chance, an einer Zollstelle vorbei erwischt zu werden; Altmeister halb so oft */
 export const SMUGGLE_CATCH = 0.1;
 /** Strafe in Vielfachen des umgangenen Zolls */
@@ -27,8 +30,8 @@ export function fairWage(c: Pick<Captain, 'trait' | 'trait2' | 'km'>): number {
 }
 
 /** Zufällige Eigenschaft nach Seltenheit, ohne die ausgeschlossene */
-export function rollTrait(state: GameState, not?: Trait): Trait {
-  const list = (Object.keys(TRAITS) as Trait[]).filter((t) => t !== not);
+export function rollTrait(state: GameState, ...not: Trait[]): Trait {
+  const list = (Object.keys(TRAITS) as Trait[]).filter((t) => !not.includes(t));
   const total = list.reduce((s, t) => s + TRAITS[t].weight, 0);
   let r = rand(state) * total;
   for (const t of list) {
@@ -48,15 +51,13 @@ export function setCaptainWage(state: GameState, shipId: number, wage: number): 
   if (wage > MAX_WAGE * 2) return fail(`Mehr als ${MAX_WAGE * 2} Taler am Tag sind zu viel.`);
   const old = c.wage;
   if (wage === old) return fail('Der Lohn bleibt gleich.');
+  if (c.promised && day(state) <= c.promised.until && wage < c.promised.wage)
+    return fail(`Du hast ${c.name} bis Tag ${c.promised.until} ${c.promised.wage} Taler am Tag zugesagt.`);
   c.wage = wage;
   const loyalty = c.loyalty ?? LOYALTY_START;
   c.loyalty = clamp(wage > old ? loyalty + (wage - old) * 2 : loyalty - (old - wage) * 3);
   let message = wage > old ? `${c.name} bekommt jetzt ${wage} Taler am Tag.` : `${c.name} bekommt nur noch ${wage} Taler am Tag und ist verstimmt.`;
-  if (c.offer && wage >= c.offer.wage) {
-    c.offer = undefined;
-    c.loyalty = Math.max(c.loyalty, LOYALTY_START);
-    message = `${c.name} bleibt für ${wage} Taler am Tag an Bord der ${ship.name}.`;
-  }
+  if (c.offer && wage >= c.offer.wage) message = `${c.name} bekommt jetzt ${wage} Taler am Tag und bleibt, wenn es dabei bleibt.`;
   return { ok: true, message, amount: 0, taler: 0 };
 }
 
@@ -86,6 +87,8 @@ function settleOffer(state: GameState, ship: Ship, town: string): NewsItem | nul
   if (c.wage >= c.offer.wage) {
     c.offer = undefined;
     c.loyalty = Math.max(c.loyalty ?? 0, LOYALTY_START);
+    // Zusage: so lange darf der Lohn nicht wieder sinken
+    c.promised = { wage: c.wage, until: day(state) + PROMISE_DAYS };
     return addNews(state, 'haus', `${c.name} schlägt das fremde Angebot aus und bleibt auf der ${ship.name}.`);
   }
   if (day(state) <= c.offer.day) return null;
@@ -105,6 +108,16 @@ function settleOffer(state: GameState, ship: Ship, town: string): NewsItem | nul
 export function tickCaptains(state: GameState, map: MapDef): NewsItem[] {
   const news: NewsItem[] = [];
   const townName = (id: string) => map.towns.find((t) => t.id === id)?.name ?? id;
+  // alte Kneipengäste verlangen nach der neuen Lohnordnung
+  for (const list of Object.values(state.tavern)) {
+    for (const x of list) {
+      const w = fairWage(x);
+      if (x.wage < w) {
+        x.wage = w;
+        x.hire = Math.max(x.hire, w * 10);
+      }
+    }
+  }
   for (const ship of state.ships) {
     const c = ship.captain;
     if (!c) continue;
@@ -115,6 +128,11 @@ export function tickCaptains(state: GameState, map: MapDef): NewsItem[] {
     }
     const fair = fairWage(c);
     const diff = c.wage - fair;
+    if (c.loyalty === undefined && c.wage < fair) {
+      // Spielstand von vor der Lohnordnung: der Lohn steigt einmal auf das, was der Kapitän wert ist
+      news.push(addNews(state, 'haus', `Neue Lohnordnung auf dem Fluss: ${c.name} bekommt jetzt ${fair} statt ${c.wage} Taler am Tag.`));
+      c.wage = fair;
+    }
     let loyalty = c.loyalty ?? 70;
     if (state.money < 0) loyalty -= 4;
     else if (diff >= 0) loyalty += 1 + Math.min(4, diff);
@@ -135,7 +153,7 @@ export function tickCaptains(state: GameState, map: MapDef): NewsItem[] {
         addNews(
           state,
           from ? 'konkurrenz' : 'haus',
-          `${from ? poacherName(from) : 'Ein anderer Reeder'} bietet ${c.name} ${wage} Taler am Tag. Zahlst du nicht mindestens so viel, geht ${c.name} im nächsten Hafen von Bord der ${ship.name}.`,
+          `${from ? poacherName(from) : 'Ein anderer Reeder'} bietet ${c.name} ${wage} Taler am Tag. Zahlst du nicht mindestens so viel, geht ${c.name} ${ship.port ? `morgen in ${townName(ship.port)}` : 'im nächsten Hafen'} von Bord der ${ship.name}.`,
         ),
       );
     }
@@ -180,7 +198,7 @@ export function captainArrived(state: GameState, map: MapDef, ship: Ship, v: Voy
         addNews(
           state,
           'haus',
-          `Zollkontrolle vor ${town}: ${c.name} wird beim Schmuggeln erwischt. Strafe ${fine} Taler${seized ? `, ${fmtT(seized)} t Ladung beschlagnahmt` : ''}.`,
+          `Zollkontrolle auf dem Weg nach ${town}: ${c.name} wird beim Schmuggeln erwischt. Strafe ${fine} Taler${seized ? `, ${fmtT(seized)} t Ladung beschlagnahmt` : ''}.`,
         ),
       );
     }
@@ -191,13 +209,13 @@ export function captainArrived(state: GameState, map: MapDef, ship: Ship, v: Voy
   c.km = Math.round((c.km ?? 0) + voyageKm(state, map, v));
   const rank = captainRank(c.km);
   if (rank > rankBefore) {
-    if (rank >= 1 && !c.trait2) c.trait2 = rollTrait(state, c.trait);
+    // Schmuggeln lernt man nicht nebenbei: sonst müsste der Spieler gegen seinen Willen schmuggeln
+    if (rank >= 1 && !c.trait2) c.trait2 = rollTrait(state, c.trait, 'schmuggler');
     const fair = fairWage(c);
-    const what =
-      rank === 1 && c.trait2
-        ? `ist jetzt erfahren und hat dazugelernt: ${TRAITS[c.trait2].name} (${TRAITS[c.trait2].text})`
-        : `ist jetzt Altmeister: 5 % schneller und seltener beim Zoll erwischt`;
-    news.push(addNews(state, 'haus', `${c.name} hat ${c.km} km auf dem Fluss und ${what}. Gute Leute wollen ${fair} Taler am Tag.`));
+    const parts: string[] = [];
+    if (rankBefore < 1 && c.trait2) parts.push(`hat dazugelernt: ${TRAITS[c.trait2].name} (${TRAITS[c.trait2].text})`);
+    parts.push(rank >= 2 ? 'ist jetzt Altmeister: 5 % schneller und seltener beim Zoll erwischt' : 'ist jetzt erfahren');
+    news.push(addNews(state, 'haus', `${c.name} hat ${c.km} km auf dem Fluss, ${parts.reverse().join(' und ')}. Gute Leute wollen ${fair} Taler am Tag.`));
   }
 
   // Abwerbung

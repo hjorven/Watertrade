@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_WAGE, TRAITS, type Trait } from '../data/captains.ts';
 import { VALLEY } from '../data/maps/valley.ts';
-import { captainArrived, fairWage, LOYALTY_POACH, LOYALTY_START, setCaptainWage, SMUGGLE_FINE, tickCaptains } from './captains.ts';
+import { captainArrived, fairWage, LOYALTY_POACH, LOYALTY_START, PROMISE_DAYS, setCaptainWage, SMUGGLE_FINE, tickCaptains } from './captains.ts';
 import { dismissCaptain, hireCaptain, newCaptain } from './fleet.ts';
 import { advance, buy, depart, newGame, type GameState } from './game.ts';
 import type { Captain, Voyage } from './state.ts';
@@ -96,6 +96,17 @@ describe('Kapitäne: Erfahrung', () => {
     expect(s.ships[0].captain?.km).toBe(40);
   });
 
+  it('Schmuggeln wird nie als zweite Eigenschaft gelernt', () => {
+    const s = fresh();
+    for (let i = 0; i < 200; i++) {
+      const c = withCaptain(s, 'vorsichtig');
+      s.ships[0].port = 'niedermuend';
+      for (let k = 0; k < 3; k++) captainArrived(s, VALLEY, s.ships[0], longVoyage());
+      expect(c.trait2).toBeDefined();
+      expect(c.trait2).not.toBe('schmuggler');
+    }
+  });
+
   it('Altmeister fahren schneller', () => {
     const a = fresh();
     withCaptain(a, 'vorsichtig');
@@ -155,13 +166,40 @@ describe('Kapitäne: Treue und Abwerbung', () => {
       tickCaptains(s, VALLEY);
     }
     expect(c.offer).toBeDefined();
-    expect(setCaptainWage(s, 1, c.offer!.wage).ok).toBe(true);
-    expect(c.offer).toBeUndefined();
+    const offer = c.offer!.wage;
+    expect(setCaptainWage(s, 1, offer).ok).toBe(true);
+    // entschieden wird erst im Hafen, mit dem Lohn, der dann gilt
+    expect(c.offer).toBeDefined();
     s.hour += 24;
     s.ships[0].voyage = null;
     s.ships[0].port = 'niedermuend';
     captainArrived(s, VALLEY, s.ships[0], longVoyage());
     expect(s.ships[0].captain).toBe(c);
+    expect(c.offer).toBeUndefined();
+    // die Zusage hält: gleich wieder kürzen geht nicht
+    expect(setCaptainWage(s, 1, 1).ok).toBe(false);
+    expect(c.wage).toBe(offer);
+    s.hour += 24 * (PROMISE_DAYS + 1);
+    expect(setCaptainWage(s, 1, offer - 1).ok).toBe(true);
+  });
+
+  it('Lohn kurz vor der Ankunft hoch- und wieder runterdrehen hilft nicht', () => {
+    const s = fresh(50_000, true);
+    const c = withCaptain(s, 'haendler', { wage: 10, loyalty: 0 });
+    s.ships[0].port = null;
+    s.ships[0].voyage = longVoyage();
+    for (let d = 0; d < 30 && !c.offer; d++) {
+      s.hour += 24;
+      tickCaptains(s, VALLEY);
+    }
+    expect(c.offer).toBeDefined();
+    setCaptainWage(s, 1, c.offer!.wage);
+    setCaptainWage(s, 1, 10);
+    s.hour += 24;
+    s.ships[0].voyage = null;
+    s.ships[0].port = 'niedermuend';
+    captainArrived(s, VALLEY, s.ships[0], longVoyage());
+    expect(s.ships[0].captain).toBeNull();
   });
 
   it('Lohn senken kostet Treue, erhöhen bringt sie', () => {
@@ -174,13 +212,20 @@ describe('Kapitäne: Treue und Abwerbung', () => {
     expect(setCaptainWage(s, 1, 0).ok).toBe(false);
   });
 
-  it('Alte Spielstände ohne Treue laufen weiter', () => {
-    const s = fresh();
+  it('Alte Spielstände: Löhne steigen einmal auf die neue Lohnordnung, der Kapitän bleibt', () => {
+    const s = fresh(50_000);
     const c = withCaptain(s, 'schnell', { wage: 6 });
     delete c.loyalty;
-    advance(s, VALLEY, 24 * 3);
-    expect(c.loyalty).toBeDefined();
-    expect(c.loyalty!).toBeLessThan(70);
+    const guest = s.tavern.oberau[0];
+    guest.wage = 5;
+    guest.hire = 80;
+    delete guest.trait2;
+    delete guest.km;
+    advance(s, VALLEY, 24 * 60);
+    expect(c.wage).toBe(fairWage(c));
+    expect(c.loyalty).toBeGreaterThan(70);
+    expect(s.ships[0].captain).toBe(c);
+    expect(s.news.some((n) => n.text.includes('Lohnordnung'))).toBe(true);
   });
 });
 

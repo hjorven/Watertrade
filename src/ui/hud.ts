@@ -465,7 +465,7 @@ export class Hud {
         }
         const v = plan.voyage;
         const dir = v.legs.every((l) => l.downstream) ? 'talwärts' : v.legs.every((l) => !l.downstream) ? 'bergwärts' : 'tal- und bergwärts';
-        const toll = v.toll ? `, Zoll ${v.toll}` : '';
+        const toll = v.toll ? `, Zoll ${v.toll}` : v.evaded ? `, ${v.evaded} Zoll umgangen, Kontrolle möglich` : '';
         const coal = bunkerPlan(state, ship, v.hours, v.toll ?? 0);
         if (coal.problem) return `<button class="btn dest" disabled title="${coal.problem}"><b>${t.name}</b><small>${coal.buy ? `${coal.buy} t Kohle fehlen` : 'Bunker zu klein'}</small></button>`;
         const coalText = coal.need ? `, Kohle ${String(coal.need).replace('.', ',')} t${coal.buy ? `, bunkert ${coal.buy} t für ${coal.cost} Taler` : ''}` : '';
@@ -647,7 +647,7 @@ export class Hud {
   }
 
   /** Kapitän an Bord: Erfahrung, Treue, Lohn mit Knöpfen zum Anpassen */
-  private captainBox(ship: Ship, dismiss: boolean): string {
+  private captainBox(state: GameState, ship: Ship, dismiss: boolean): string {
     const c = ship.captain!;
     const fair = fairWage(c);
     const rank = CAPTAIN_RANKS[captainRank(c.km)];
@@ -656,13 +656,14 @@ export class Hud {
     const mood = loyalty >= 60 ? 'zufrieden' : loyalty >= LOYALTY_WARN ? 'unruhig' : loyalty >= LOYALTY_POACH ? 'unzufrieden' : 'sieht sich um';
     const target = Math.max(fair, c.offer?.wage ?? 0);
     const who = c.offer ? (c.offer.from ? (RIVAL_BY_ID.get(c.offer.from)?.name ?? c.offer.from) : 'Ein anderer Reeder') : '';
+    const promise = c.promised && c.promised.until >= Math.floor(state.hour / 24) + 1 ? `, zugesagt bis Tag ${c.promised.until}` : '';
     const offer = c.offer
-      ? `<p class="note">${who} bietet ${c.name} ${c.offer.wage} Taler am Tag. Zahlst du nicht mindestens so viel, geht ${c.name} im nächsten Hafen von Bord.</p>`
+      ? `<p class="note">${who} bietet ${c.name} ${c.offer.wage} Taler am Tag. Zahlst du nicht mindestens so viel, geht ${c.name} ${ship.port ? 'morgen hier' : 'im nächsten Hafen'} von Bord.</p>`
       : '';
     return `<div class="captain"><b>${c.name}</b> führt die ${ship.name}
         <small>${traitText(c)}</small>
         <small>${rank.name}, ${fmt(c.km ?? 0)} km gefahren${next ? `, ${next.name} ab ${fmt(next.km)} km` : ''} · Treue ${loyalty} von 100, ${mood}</small>
-        <small>Lohn ${c.wage} Taler am Tag, wert ist ${c.name.split(' ')[0]} ${fair}</small>
+        <small>Lohn ${c.wage} Taler am Tag${promise}, wert ist ${c.name.split(' ')[0]} ${fair}</small>
         <span class="wage-btns"><button class="btn" data-act="cmd" data-cmd="wage" data-wage="${c.wage - 1}" ${c.wage > 1 ? '' : 'disabled'} aria-label="Lohn senken">Lohn −1</button>
         <button class="btn" data-act="cmd" data-cmd="wage" data-wage="${c.wage + 1}" aria-label="Lohn erhöhen">Lohn +1</button>
         ${c.wage < target ? `<button class="btn primary" data-act="cmd" data-cmd="wage" data-wage="${target}">Auf ${target} erhöhen</button>` : ''}
@@ -673,7 +674,7 @@ export class Hud {
     const town = this.map.towns.find((t) => t.id === ship.port)!;
     const c = ship.captain;
     const mine = c
-      ? this.captainBox(ship, true)
+      ? this.captainBox(state, ship, true)
       : `<p>${ship.type === 'floss' ? 'Ein Floß steuert sich selbst.' : `Die ${ship.name} hat keinen Kapitän. Ohne Kapitän fährt sie nur auf deinen Befehl, mit Kapitän kann sie Handelsrouten allein fahren.`}</p>`;
     const list = state.tavern[town.id] ?? [];
     const guests = list.length
@@ -789,7 +790,7 @@ export class Hud {
     const route = v.legs
       .map((l, i) => `<li class="${i < index ? 'done' : i === index ? 'now' : ''}">${this.townName(l.from)} → ${this.townName(l.to)} <small>${fmtHours(l.hours)}</small></li>`)
       .join('');
-    const captain = ship.captain ? `${ship.route?.active ? '<p class="note">Der Kapitän fährt die Handelsroute.</p>' : ''}${this.captainBox(ship, false)}` : '';
+    const captain = ship.captain ? `${ship.route?.active ? '<p class="note">Der Kapitän fährt die Handelsroute.</p>' : ''}${this.captainBox(state, ship, false)}` : '';
     void state;
     return `
       <div class="ledger-head">

@@ -58,6 +58,8 @@ export interface Captain {
   loyalty?: number;
   /** Abwerbeangebot: geht im nächsten Hafen von Bord, wenn der Lohn bis dahin nicht mindestens so hoch ist */
   offer?: { wage: number; from: string; day: number };
+  /** Lohnzusage nach einem abgewehrten Angebot: bis zum Tag `until` nicht unter `wage` */
+  promised?: { wage: number; until: number };
   /** wurde schon wegen zu wenig Lohn gewarnt */
   warned?: boolean;
 }
