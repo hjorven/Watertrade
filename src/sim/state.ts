@@ -1,6 +1,7 @@
 import type { Trait } from '../data/captains.ts';
 import { PERISH, SHIPS, type ShipClass } from '../data/ships.ts';
 import { windOfDay, withWind, type Conditions, type ShipType } from './river.ts';
+import type { PriceBookPage, PricePoint, TripRecord } from './market-info.ts';
 import type { TownMarket, TownState } from './towns.ts';
 
 /** Datentypen des Spielstands und kleine Helfer, die alle Simulationsmodule brauchen */
@@ -87,6 +88,10 @@ export interface Ship {
   route: TradeRoute | null;
   /** Kohle im Bunker (Dampfer), in Tonnen */
   bunker?: number;
+  /** Schiffsbuch: laufende oder zuletzt beendete Fahrt (nimmt Verkäufe im Zielhafen auf) */
+  trip?: TripRecord;
+  /** Schiffsbuch: abgeschlossene Fahrten, neueste zuerst */
+  tripLog?: TripRecord[];
 }
 
 export interface Kontor {
@@ -138,7 +143,7 @@ export interface WorldEvent {
 
 export interface NewsItem {
   day: number;
-  kind: 'ereignis' | 'konkurrenz' | 'stadt' | 'auftrag' | 'haus';
+  kind: 'ereignis' | 'konkurrenz' | 'stadt' | 'auftrag' | 'haus' | 'geruecht';
   text: string;
 }
 
@@ -209,6 +214,10 @@ export interface GameState {
   works: Work[];
   /** Brennstoffkosten seit Mitternacht */
   fuelToday: number;
+  /** Preisbuch: Stand des letzten Besuchs je Stadt */
+  priceBook?: Record<string, PriceBookPage>;
+  /** Beobachteter Preisverlauf: Stadt -> Ware -> Punkte */
+  priceHistory?: Record<string, Record<string, PricePoint[]>>;
 }
 
 export function shipClass(ship: { type: string }): ShipClass {
