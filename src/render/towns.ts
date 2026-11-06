@@ -4,7 +4,7 @@ import type { SegmentDef, TownDef } from '../data/maps/valley.ts';
 import { houseModel, type HouseType } from './houses.ts';
 import { boxGeo, cylGeo, DECAL_MATERIAL, KIT_MATERIAL, Kit } from './kit.ts';
 import { barrel, C, crate, type Anim } from './landmarks.ts';
-import { Landscape, mulberry32, RIVER_HALF_WIDTH } from './landscape.ts';
+import { inWorld, Landscape, mulberry32, RIVER_HALF_WIDTH } from './landscape.ts';
 import { DEFAULT_STYLE, TOWN_STYLES, type StyleCtx, type TownStyle } from './townstyles.ts';
 
 export interface TownPlacement {
@@ -37,13 +37,12 @@ export function placeTown(land: Landscape, def: TownDef): TownPlacement {
   const center = p.clone().addScaledVector(n, hw + 3 + radius);
   const mooring = p.clone().addScaledVector(n, Math.max(0.6, hw - 1.3));
   const len = land.curve(def.river).getLength();
-  // Plätze, die über das Flussende hinausragen würden, entfallen; dafür rücken weiter entfernte nach
-  const usable = LOT_ALONG.filter((along) => {
+  // Plätze, die über das Flussende oder den Kartenrand hinausragen würden, entfallen; dafür rücken weiter entfernte nach
+  const lots: Lot[] = [];
+  for (const along of LOT_ALONG) {
+    if (lots.length >= LOT_COUNT) break;
     const t = def.riverT + along / len;
-    return t > 0.015 && t < 0.985;
-  }).slice(0, LOT_COUNT);
-  const lots: Lot[] = usable.map((along) => {
-    const t = def.riverT + along / len;
+    if (t <= 0.015 || t >= 0.985) continue;
     const q = land.pointAt(def.river, t);
     const qn = land.normalAt(def.river, t).multiplyScalar(def.side);
     let off = hw + 5;
@@ -53,9 +52,10 @@ export function placeTown(land: Landscape, def: TownDef): TownPlacement {
       off += 1;
       pos = q.clone().addScaledVector(qn, off);
     }
+    if (!inWorld(pos.x, pos.z, 4.5)) continue;
     pos.y = land.heightAt(pos.x, pos.z);
-    return { pos, facing: Math.atan2(qn.x, qn.z) + Math.PI };
-  });
+    lots.push({ pos, facing: Math.atan2(qn.x, qn.z) + Math.PI });
+  }
   return { def, center, mooring, radius, lots };
 }
 
@@ -185,7 +185,8 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
   const along = land.tangentAt(def.river, def.riverT);
   const center = place.center;
   const R = place.radius;
-  const outer = R * Math.sqrt(3);
+  // dicht gebaut wie eine alte Stadt: kleiner Umkreis, Häuser Wand an Wand an engen Gassen
+  const outer = R * 1.3;
 
   const worldXZ = (u: number, v: number) =>
     new THREE.Vector3(center.x + out.x * u + along.x * v, 0, center.z + out.z * u + along.z * v);
@@ -204,7 +205,7 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
 
   // --- Straßen: vom Steg durch die Mitte bergwärts, quer über den Platz, hinter den Uferplätzen entlang ---
   const roads: Road[] = [];
-  const roadHalf = style.plaza !== null ? 0.85 : 0.7;
+  const roadHalf = style.plaza !== null ? 0.7 : 0.6;
   const line = (pts: THREE.Vector3[], half: number) => {
     const fine: THREE.Vector3[] = [];
     for (let i = 0; i < pts.length - 1; i++) {
@@ -231,6 +232,7 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
       const a = road.pts[i];
       const b = road.pts[i + 1];
       if (!onLand(a.x, a.z, 1.6) || !onLand(b.x, b.z, 1.6)) continue;
+      if (!inWorld(a.x, a.z, 1) || !inWorld(b.x, b.z, 1)) continue;
       const ha = land.surfaceAt(a.x, a.z);
       const hb = land.surfaceAt(b.x, b.z);
       if (ha > 9 || hb > 9) continue;
@@ -252,7 +254,7 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
   }
 
   // --- Marktplatz ---
-  const plazaRadius = style.plaza !== null ? Math.min(5.5, 2.6 + R * 0.18) : 0;
+  const plazaRadius = style.plaza !== null ? Math.min(4.6, 2.3 + R * 0.15) : 0;
   if (style.plaza !== null) {
     const c = at(0, 0);
     // Pflaster als Scheibe, die dem Gelände folgt, mit dunklerem Randstein
@@ -292,6 +294,7 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
 
   // --- Wahrzeichen ---
   const freeAt = (x: number, z: number, r: number) => {
+    if (!inWorld(x, z, r + 1)) return false;
     if (!onLand(x, z, 2.4 + r * 0.6)) return false;
     if (place.lots.some((l) => Math.hypot(l.pos.x - x, l.pos.z - z) < 3.6 + r)) return false;
     if (reserved.some((s) => Math.hypot(s.x - x, s.z - z) < s.r + r)) return false;
@@ -338,36 +341,101 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
   style.decorate(ctx);
 
   // --- Häuser: Kandidaten in wachsenden Ringen, an den Straßen zuerst ---
+  // Enge Gassen im Raster entlang der Hauptachsen, nur wo nichts anderes steht
+  const lanes: Road[] = [];
+  const laneHalf = 0.36;
+  const gap = 2.9;
+  const laneOk = (p: THREE.Vector3) =>
+    onLand(p.x, p.z, 2) &&
+    inWorld(p.x, p.z, 1) &&
+    land.heightAt(p.x, p.z) < 9 &&
+    !place.lots.some((l) => Math.hypot(l.pos.x - p.x, l.pos.z - p.z) < 3.2) &&
+    !reserved.some((q) => Math.hypot(q.x - p.x, q.z - p.z) < q.r + 0.3);
+  const addLane = (pts: THREE.Vector3[]) => {
+    // in zusammenhängende Stücke zerlegen, die frei liegen
+    let run: THREE.Vector3[] = [];
+    const flush = () => {
+      if (run.length > 2) lanes.push({ pts: run, half: laneHalf });
+      run = [];
+    };
+    for (const p of pts) {
+      if (laneOk(p)) run.push(p);
+      else flush();
+    }
+    flush();
+  };
+  const steps = (a: number, b: number) => {
+    const out: number[] = [];
+    for (let x = a; x <= b; x += 0.8) out.push(x);
+    return out;
+  };
+  for (const k of [-2, -1, 1, 2]) {
+    if (Math.abs(k) * gap > outer) continue;
+    addLane(steps(-R * 0.45, outer).map((u) => worldXZ(u, k * gap + Math.sin(u * 0.5 + k) * 0.25)));
+    addLane(steps(-outer, outer).map((v) => worldXZ(k * gap + Math.sin(v * 0.5 + k) * 0.25, v)));
+  }
+  const lanePos: number[] = [];
+  for (const lane of lanes) {
+    for (let i = 0; i < lane.pts.length - 1; i++) {
+      const a = lane.pts[i];
+      const b = lane.pts[i + 1];
+      if (roads.some((rd) => distToRoad(a.x, a.z, rd) < rd.half)) continue;
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const l = Math.hypot(dx, dz) || 1;
+      const nx = (-dz / l) * laneHalf;
+      const nz = (dx / l) * laneHalf;
+      const ya = land.surfaceAt(a.x, a.z) + 0.05;
+      const yb = land.surfaceAt(b.x, b.z) + 0.05;
+      lanePos.push(a.x + nx, ya, a.z + nz, b.x + nx, yb, b.z + nz, b.x - nx, yb, b.z - nz);
+      lanePos.push(a.x + nx, ya, a.z + nz, b.x - nx, yb, b.z - nz, a.x - nx, ya, a.z - nz);
+    }
+  }
+  if (lanePos.length) {
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute(lanePos, 3));
+    const c = new THREE.Color(style.road).multiplyScalar(0.88);
+    ribbon.addMatrix(lg, c.getHex(), new THREE.Matrix4());
+  }
+  const allWays = [...roads, ...lanes];
+
+  // --- Häuser: Kandidaten in wachsenden Ringen, Wand an Wand an den Gassen ---
   const max = def.houses * 3;
-  type Spot = { x: number; z: number; d: number; type: HouseType; rot: number; s: number };
+  type Spot = { x: number; z: number; d: number; type: HouseType; rot: number; s: number; sy: number };
   const spots: Spot[] = [];
   let tries = 0;
-  while (spots.length < max && tries < 7000) {
+  while (spots.length < max && tries < 9000) {
     tries++;
     const a = rand() * Math.PI * 2;
-    const r = Math.sqrt(rand()) * outer;
+    const r = Math.sqrt(rand()) * outer * (tries > 6000 ? 1.25 : 1);
     const x = center.x + Math.cos(a) * r;
     const z = center.z + Math.sin(a) * r;
     const type = pickWeighted(style.houses, rand());
     const model = houseModel(type);
     const s = style.scale * (0.88 + rand() * 0.24) * (r < R * 0.6 ? 1.08 : 1);
     const foot = model.radius * s;
+    if (!inWorld(x, z, foot + 1)) continue;
     if (!onLand(x, z, 2.2 + foot * 0.5)) continue;
     if (land.heightAt(x, z) > 9) continue; // nicht an den Steilhang
-    if (spots.some((p) => Math.hypot(p.x - x, p.z - z) < foot + houseModel(p.type).radius * p.s * 0.95)) continue;
+    if (spots.some((p) => Math.hypot(p.x - x, p.z - z) < (foot + houseModel(p.type).radius * p.s) * 0.55)) continue;
     if (place.lots.some((l) => Math.hypot(l.pos.x - x, l.pos.z - z) < 3.4 + foot * 0.8)) continue; // Bauplätze freihalten
     if (reserved.some((q) => Math.hypot(q.x - x, q.z - z) < q.r + foot * 0.85)) continue;
     let nearRoad: Road | null = null;
     let roadDist = Infinity;
-    for (const rd of roads) {
+    let blocked = false;
+    for (const rd of allWays) {
       const d = distToRoad(x, z, rd);
+      if (d < rd.half + foot * 0.58) {
+        blocked = true;
+        break;
+      }
       if (d < roadDist) {
         roadDist = d;
         nearRoad = rd;
       }
     }
-    if (nearRoad && roadDist < nearRoad.half + foot * 0.75) continue;
-    // Front zur nächsten Straße, sonst zur Mitte
+    if (blocked) continue;
+    // Front zur nächsten Gasse oder Straße, sonst zur Mitte
     let rot: number;
     if (nearRoad && roadDist < nearRoad.half + foot + 2.2) {
       const q = nearestOnRoad(x, z, nearRoad);
@@ -375,8 +443,9 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
     } else {
       rot = Math.atan2(center.x - x, center.z - z) + (rand() - 0.5) * 0.5;
     }
-    const roadBonus = roadDist < 4.5 ? 3.5 : 0;
-    spots.push({ x, z, d: r - roadBonus + rand() * 2, type, rot, s });
+    // innen höher gebaut, außen niedrig
+    const sy = type === 'scheune' || type === 'huette' ? 1 : 1 + Math.max(0, 1 - r / (R * 0.9)) * 0.45 * (0.6 + rand() * 0.4);
+    spots.push({ x, z, d: r + rand() * 1.5, type, rot, s, sy });
   }
   spots.sort((p, q) => p.d - q.d);
 
@@ -404,7 +473,7 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
     const y = groundUnder(sp.x, sp.z, m.radius * sp.s);
     dummy.position.set(sp.x, y, sp.z);
     dummy.rotation.set(0, sp.rot, 0);
-    dummy.scale.setScalar(sp.s);
+    dummy.scale.set(sp.s, sp.s * sp.sy, sp.s);
     dummy.updateMatrix();
     entry.body.setMatrixAt(entry.n, dummy.matrix);
     entry.roof.setMatrixAt(entry.n, dummy.matrix);

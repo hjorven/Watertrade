@@ -77,6 +77,11 @@ const PLINTH = 0x5a3d26;
 
 const WATER: Record<Season, number> = { fruehling: 0x4a8aa0, sommer: 0x3f86a3, herbst: 0x3d7a8e, winter: 0x5f8596 };
 
+/** Liegt der Punkt mit Abstand `margin` innerhalb der Kartenplatte? */
+export function inWorld(x: number, z: number, margin = 0): boolean {
+  return Math.abs(x) < WORLD_W / 2 - margin && Math.abs(z) < WORLD_D / 2 - margin;
+}
+
 /** Deterministischer Zufall, damit die Landschaft bei jedem Start gleich aussieht */
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -251,7 +256,21 @@ export class Landscape {
         bestS = s;
       }
     }
-    const valley = bestS.river.joins ? 0.25 + bestS.t * 0.3 : bestS.t;
+    // Talposition weich gemittelt über alle nahen Stützpunkte: sonst springt sie dort, wo zwei Flussarme
+    // gleich weit entfernt sind, und das Gelände bekommt eine Kante (Spalte)
+    let wSum = 0;
+    let tSum = 0;
+    for (const s of this.samples) {
+      const dx = s.p.x - x;
+      const dz = s.p.z - z;
+      const edge = Math.sqrt(dx * dx + dz * dz) - s.river.halfWidth;
+      const k = edge - best;
+      if (k > 30) continue;
+      const w = Math.exp(-k / 6);
+      wSum += w;
+      tSum += w * (s.river.joins ? 0.25 + s.t * 0.3 : s.t);
+    }
+    const valley = tSum / wSum;
     const side = (x - bestS.p.x) * bestS.n.x + (z - bestS.p.z) * bestS.n.z >= 0 ? 1 : -1;
     return { d: best + RIVER_HALF_WIDTH, t: valley, side, sample: bestS };
   }
@@ -912,7 +931,7 @@ export class Landscape {
         const off = side * (r.halfWidth + SHORE + (rand() - 0.6) * 0.7);
         const x = p.x + nr.x * off;
         const z = p.z + nr.z * off;
-        if (this.nearTown(x, z, 4, 4)) continue;
+        if (!inWorld(x, z, 1) || this.nearTown(x, z, 4, 4)) continue;
         if (this.riverDistance(x, z).d < RIVER_HALF_WIDTH + 0.4) continue;
         items.push({ x, y: Math.max(this.heightAt(x, z), -0.2) - 0.05, z, r: rand() * 6, s: 0.8 + rand() * 0.6 });
       }

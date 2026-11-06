@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ShipClass } from '../data/ships.ts';
 import { boxGeo, cylGeo, gableGeo, KIT_MATERIAL, Kit, torusGeo } from './kit.ts';
-import { Landscape, RIVER_HALF_WIDTH } from './landscape.ts';
+import { inWorld, Landscape, RIVER_HALF_WIDTH } from './landscape.ts';
 
 const CRATE_SLOTS = 8;
 
@@ -489,7 +489,14 @@ export class ShipView {
   /** Liegt am Steg; mehrere Schiffe im selben Hafen liegen hintereinander */
   dock(mooring: THREE.Vector3, river: string, riverT: number, slot: number): void {
     const tan = this.land.tangentAt(river, riverT);
-    const offset = (slot % 2 === 1 ? 1 : -1) * Math.ceil(slot / 2) * 7;
+    // Liegeplätze abwechselnd flussauf und flussab; was über den Kartenrand ragen würde, wird übersprungen
+    let offset = 0;
+    for (let k = 0, found = -1; k < 40 && found < slot; k++) {
+      const o = (k % 2 === 1 ? 1 : -1) * Math.ceil(k / 2) * 7;
+      if (!inWorld(mooring.x + tan.x * o, mooring.z + tan.z * o, 4.5)) continue;
+      found++;
+      offset = o;
+    }
     this.group.position.set(mooring.x + tan.x * offset, 0, mooring.z + tan.z * offset);
     this.group.rotation.set(0, Math.atan2(-tan.z, tan.x), 0);
     this.docked = true;
