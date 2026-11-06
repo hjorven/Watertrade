@@ -110,9 +110,30 @@ function bestDeal(state: GameState, map: MapDef, r: RivalState, ship: RivalShip)
   return best;
 }
 
-function sailTo(state: GameState, map: MapDef, ship: RivalShip, dest: string): boolean {
+/**
+ * Dampfer der Konkurrenz bunkern Kohle am Hafenmarkt, genau wie der Spieler.
+ * Gibt es dort keine, zahlen sie den anderthalbfachen Grundpreis beim Kohlenhändler.
+ */
+function rivalBunker(state: GameState, r: RivalState, ship: RivalShip, hours: number): void {
+  const cls = SHIPS[ship.type];
+  if (cls.fuel) r.money -= Math.round(cls.fuel * hours); // Diesel
+  const rate = cls.coal;
+  if (!rate) return;
+  const need = Math.ceil(rate * hours);
+  const base = GOODS.find((g) => g.id === 'kohle')!.base;
+  const m = state.markets[ship.port!]?.kohle;
+  const fromMarket = m ? Math.max(0, Math.min(need, available(m) - 5)) : 0;
+  if (fromMarket > 0) {
+    r.money -= buyCost(base, m!, fromMarket);
+    m!.stock -= fromMarket;
+  }
+  r.money -= Math.round((need - fromMarket) * base * 1.5);
+}
+
+function sailTo(state: GameState, map: MapDef, ship: RivalShip, dest: string, r?: RivalState): boolean {
   const plan = planRoute(state, map, ship.port!, dest, rivalType(state, ship));
   if (!plan.ok) return false;
+  if (r) rivalBunker(state, r, ship, plan.voyage.hours);
   ship.voyage = plan.voyage;
   ship.port = null;
   return true;
@@ -123,7 +144,7 @@ function decide(state: GameState, map: MapDef, r: RivalState, ship: RivalShip): 
   const here = ship.port!;
   if (ship.cargo) {
     // Ladung am Ziel verkaufen, oder hier, wenn das Ziel nicht mehr erreichbar ist
-    if (ship.cargo.dest === here || !sailTo(state, map, ship, ship.cargo.dest)) sellCargo(state, r, ship, here);
+    if (ship.cargo.dest === here || !sailTo(state, map, ship, ship.cargo.dest, r)) sellCargo(state, r, ship, here);
     else return;
   }
   const deal = bestDeal(state, map, r, ship);
@@ -133,7 +154,7 @@ function decide(state: GameState, map: MapDef, r: RivalState, ship: RivalShip): 
     m.stock -= deal.amount;
     r.money -= cost;
     ship.cargo = { good: deal.good, amount: deal.amount, cost, dest: deal.dest };
-    if (sailTo(state, map, ship, deal.dest)) return;
+    if (sailTo(state, map, ship, deal.dest, r)) return;
     // doch nicht losgekommen: Ware zurück
     m.stock += deal.amount;
     r.money += cost;
@@ -144,7 +165,7 @@ function decide(state: GameState, map: MapDef, r: RivalState, ship: RivalShip): 
   if (rand(state) < 0.5) {
     const others = map.towns.filter((t) => t.id !== here);
     const target = rand(state) < 0.4 ? def.home : others[Math.floor(rand(state) * others.length)].id;
-    if (target !== here && sailTo(state, map, ship, target)) return;
+    if (target !== here && sailTo(state, map, ship, target, r)) return;
   }
   ship.idleUntil = state.hour + 18 + Math.floor(rand(state) * 12);
 }

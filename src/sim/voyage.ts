@@ -73,19 +73,25 @@ export interface BunkerPlan {
   problem: string | null;
 }
 
-/** Was ein Dampfer vor dieser Fahrt bunkern muss. Fehlende Kohle wird beim Ablegen am Hafenmarkt gekauft. */
-export function bunkerPlan(state: GameState, ship: Ship, hours: number): BunkerPlan {
+/**
+ * Was ein Dampfer vor dieser Fahrt bunkern muss. Fehlt Kohle, wird beim Ablegen am Hafenmarkt gekauft,
+ * und zwar gleich bis zum vollen Bunker, soweit Geld und Markt reichen, damit auch die Rückfahrt
+ * aus einem Hafen ohne Kohlehandel klappt.
+ */
+export function bunkerPlan(state: GameState, ship: Ship, hours: number, toll = 0): BunkerPlan {
   const cls = shipClass(ship);
   const need = coalNeed(ship, hours);
   if (!cls.coal || need <= 0) return { need: 0, buy: 0, cost: 0, problem: null };
   if (need > (cls.bunker ?? 0)) return { need, buy: 0, cost: 0, problem: `Der Bunker fasst nur ${cls.bunker} t Kohle, die Fahrt braucht ${need} t` };
-  const buy = Math.max(0, Math.ceil(need - (ship.bunker ?? 0)));
-  if (buy === 0) return { need, buy: 0, cost: 0, problem: null };
+  const min = Math.max(0, Math.ceil(need - (ship.bunker ?? 0)));
+  if (min === 0) return { need, buy: 0, cost: 0, problem: null };
   const m = ship.port ? state.markets[ship.port]?.kohle : undefined;
-  if (!m) return { need, buy, cost: 0, problem: `Zu wenig Kohle im Bunker, und hier wird keine verkauft (${buy} t fehlen)` };
-  if (available(m) < buy) return { need, buy, cost: 0, problem: `Der Markt hat nur ${available(m)} t Kohle, es fehlen ${buy} t` };
-  const cost = buyCost(GOOD_BY_ID.get('kohle')!.base, m, buy);
-  return { need, buy, cost, problem: null };
+  if (!m) return { need, buy: min, cost: 0, problem: `Zu wenig Kohle im Bunker, und hier wird keine verkauft (${min} t fehlen)` };
+  if (available(m) < min) return { need, buy: min, cost: 0, problem: `Der Markt hat nur ${available(m)} t Kohle, es fehlen ${min} t` };
+  const base = GOOD_BY_ID.get('kohle')!.base;
+  let buy = Math.max(min, Math.min(Math.floor((cls.bunker ?? 0) - (ship.bunker ?? 0)), available(m)));
+  while (buy > min && toll + buyCost(base, m, buy) > state.money) buy--;
+  return { need, buy, cost: buyCost(base, m, buy), problem: null };
 }
 
 /** Kohle vom Markt in den Bunker kaufen */
@@ -121,7 +127,7 @@ export function departProblem(state: GameState, map: MapDef, shipId: number, to:
   if (!plan.ok) return 'Diese Fahrt ist gerade nicht möglich.';
   const ship = getShip(state, shipId);
   const toll = plan.voyage.toll ?? 0;
-  const coal = bunkerPlan(state, ship, plan.voyage.hours);
+  const coal = bunkerPlan(state, ship, plan.voyage.hours, toll);
   if (coal.problem) return `${coal.problem}.`;
   if (toll + coal.cost > state.money) return coal.cost ? `Zoll und Kohle kosten ${toll + coal.cost} Taler.` : `Der Zoll kostet ${toll} Taler.`;
   return null;
@@ -132,7 +138,7 @@ export function depart(state: GameState, map: MapDef, shipId: number, to: string
   if (!plan || !plan.ok) return null;
   const ship = getShip(state, shipId);
   const toll = plan.voyage.toll ?? 0;
-  const coal = bunkerPlan(state, ship, plan.voyage.hours);
+  const coal = bunkerPlan(state, ship, plan.voyage.hours, toll);
   if (coal.problem || toll + coal.cost > state.money) return null;
   if (coal.buy > 0) bunkerCoal(state, ship, coal.buy);
   state.money -= toll;

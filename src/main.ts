@@ -24,7 +24,9 @@ import {
   buyShip,
   capacityOf,
   depart,
+  departProblem,
   dismantleRaft,
+  fillBunker,
   kontorBuy,
   kontorSell,
   load,
@@ -207,8 +209,9 @@ const hud = new Hud(app, VALLEY, {
   depart(to) {
     const ship = current();
     if (ship?.route?.active) ship.route.active = false;
-    if (!depart(state, VALLEY, selected, to)) {
-      hud.toast('Diese Fahrt ist nicht möglich.', 'warn');
+    const problem = departProblem(state, VALLEY, selected, to);
+    if (problem || !depart(state, VALLEY, selected, to)) {
+      hud.toast(problem ?? 'Diese Fahrt ist nicht möglich.', 'warn');
       sfx('fehler');
     } else sfx('ablegen');
     follow = true;
@@ -290,6 +293,10 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
     case 'kontorSell':
       r = kontorSell(state, town, String(d.good), n('n'));
       ok = 'verkauf';
+      break;
+    case 'bunker':
+      r = fillBunker(state, selected);
+      ok = 'kauf';
       break;
     case 'repair':
       r = repair(state, VALLEY, selected);
@@ -586,7 +593,7 @@ function tutorialHint(): string | null {
     return `Liegt der Verkaufspreis über deinem Einkauf (ø), verkauf mit <b>Verkaufen</b>. Sonst leg ab${dest ? ` nach <b>${townName(dest)}</b>, dort wird ${GOOD_BY_ID.get(aboard)!.name} gebraucht` : ' zu einer Stadt mit <b>Bedarf</b> an der Ware'}.`;
   }
   if (state.stats.rafts < 1)
-    return 'Erster Gewinn! In der <b>Werft</b> kannst du ein Floß bauen. Es treibt nur talwärts und wird am Ziel als Holz verkauft.';
+    return 'Erster Gewinn! In der <b>Werft</b> kannst du aus 20 t Holz ein Floß zimmern. Es treibt nur talwärts, nimmt noch 30 t Ladung mit und wird am Ziel zerlegt und als Holz verkauft.';
   return null;
 }
 

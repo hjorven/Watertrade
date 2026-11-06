@@ -20,7 +20,7 @@ import {
   type TradeResult,
 } from './state.ts';
 import { buy, load, sell, store } from './trade.ts';
-import { depart, planVoyage } from './voyage.ts';
+import { depart, departProblem, planVoyage } from './voyage.ts';
 
 const SHIP_NAMES = ['Anna', 'Greta', 'Hoffnung', 'Lotte', 'Möwe', 'Fortuna', 'Elise', 'Biber', 'Wilhelmine', 'Otter', 'Marie', 'Eintracht'];
 
@@ -264,7 +264,8 @@ export function runRoute(state: GameState, map: MapDef, ship: Ship): string | nu
     return log;
   }
   if (!depart(state, map, ship.id, target)) {
-    r.note = 'wartet: kein Geld für den Zoll';
+    const why = departProblem(state, map, ship.id, target) ?? 'kein Geld für den Zoll';
+    r.note = `wartet: ${why.replace(/\.$/, '')}`;
     r.next = nextIndex;
     r.retryAt = state.hour + 12;
     return log;

@@ -107,9 +107,9 @@ export const SHIPS: Record<string, ShipClass> = {
     capacity: 70,
     canGoUpstream: true,
     price: 2600,
-    coal: 0.8,
+    coal: 0.6,
     bunker: 25,
-    description: 'Schaufelräder und Kohle: schnell gegen jede Strömung, ohne Pferde und Wind. Verbrennt 0,8 t Kohle je Stunde aus dem Bunker. Der Schornstein ist hoch.',
+    description: 'Schaufelräder und Kohle: schnell gegen jede Strömung, ohne Pferde und Wind. Verbrennt 0,6 t Kohle je Stunde aus dem Bunker. Der Schornstein ist hoch.',
   },
   schleppverband: {
     id: 'schleppverband',
@@ -122,9 +122,9 @@ export const SHIPS: Record<string, ShipClass> = {
     capacity: 180,
     canGoUpstream: true,
     price: 4200,
-    coal: 1.4,
-    bunker: 40,
-    description: 'Ein Schlepper zieht zwei Kähne. Riesige Ladung, aber tief und langsam: nur auf dem Hauptstrom sinnvoll. Verbrennt 1,4 t Kohle je Stunde.',
+    coal: 1.0,
+    bunker: 45,
+    description: 'Ein Schlepper zieht zwei Kähne. Riesige Ladung, aber tief und langsam: nur auf dem Hauptstrom sinnvoll. Verbrennt 1 t Kohle je Stunde.',
   },
   // Epoche 3: Motor
   motorschiff: {

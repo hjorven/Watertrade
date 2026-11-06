@@ -5,7 +5,7 @@ import { eventWaterOffset, tickEvents } from './events.ts';
 import { addShip, refreshTavern, runRoute } from './fleet.ts';
 import { tickHouse } from './house.ts';
 import { initialRivals, moveRivals, tickRivals } from './rivals.ts';
-import { EPOCHS, epochOfYear, MIN_FRESH, PERISH } from '../data/ships.ts';
+import { EPOCHS, epochOfYear, MIN_FRESH, PERISH, SHIPS } from '../data/ships.ts';
 import { YEAR_DAYS, year } from './calendar.ts';
 import { addNews, day, shipClass, type GameEvent, type GameState, type NewsItem } from './state.ts';
 import { tickWorks } from './works.ts';
@@ -124,7 +124,8 @@ export function upgradeState(state: GameState, map: MapDef): GameState {
     ship.upgrades ??= [];
     ship.captain ??= null;
     ship.route ??= null;
-    ship.bunker ??= 0;
+    // ältere Spielstände: Dampfer bekommen einen vollen Bunker, damit keiner in einem Hafen ohne Kohle festsitzt
+    ship.bunker ??= SHIPS[ship.type]?.bunker ?? 0;
   }
   if (!Object.keys(s.tavern).length) refreshTavern(s, map);
   if (s.rivalsActive && !s.rivals.length) s.rivals = initialRivals(s);
