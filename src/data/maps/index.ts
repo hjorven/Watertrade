@@ -5,9 +5,10 @@
 import { playableRandomMap, type RandomMapResult } from '../../sim/mapcheck.ts';
 import { randomMapId, seedOfMapId } from './random.ts';
 import { VALLEY, type MapDef } from './valley.ts';
+import { ZWEI_TAELER } from './zwei-taeler.ts';
 
 /** Feste Karten; weitere Karten tragen sich hier mit ihrer Id ein */
-export const MAPS: MapDef[] = [VALLEY];
+export const MAPS: MapDef[] = [VALLEY, ZWEI_TAELER];
 
 const randomCache = new Map<number, RandomMapResult>();
 

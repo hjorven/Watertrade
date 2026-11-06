@@ -7,7 +7,8 @@ import { newAchievements, ACHIEVEMENTS } from './sim/achievements.ts';
 import { OnlineScreens } from './ui/online-screens.ts';
 import { GOOD_BY_ID, GOODS } from './data/goods.ts';
 import { VALLEY } from './data/maps/valley.ts';
-import { mapFor, randomMap, randomMapResult, stateFitsMap } from './data/maps/index.ts';
+import { canalProgress } from './sim/canal.ts';
+import { mapById, mapFor, randomMap, randomMapResult, stateFitsMap } from './data/maps/index.ts';
 import { CHECK_DAYS } from './sim/mapcheck.ts';
 import { mapPreviewSvg } from './ui/mappreview.ts';
 import { projectsOf } from './data/projects.ts';
@@ -95,7 +96,8 @@ function takePending(): SaveGame | null {
 
 // --- Welt (einmal aufgebaut, gilt für jedes Spiel auf dieser Karte) ---
 const stage = new Stage(viewport);
-const land = new Landscape(MAP.rivers);
+const land = new Landscape(MAP.rivers, MAP.bounds);
+if (MAP.bounds) stage.fitWorld(MAP.bounds);
 const towns = MAP.towns.map((def) => placeTown(land, def));
 land.build([
   ...towns.map((t) => ({ pos: t.center, radius: t.radius * 1.4, fields: !!t.def.fields })),
@@ -160,6 +162,11 @@ function setupMapData(): void {
       return { x: q.x, y: q.z };
     },
   });
+}
+/** Baufortschritt des Kanals in der 3D-Welt (nur auf Karten mit Kanal) */
+function showCanal(): void {
+  const build = canalProgress(state, MAP);
+  if (build) land.setCanal(build);
 }
 const placeOf = (id: string) => towns.find((t) => t.def.id === id)!;
 const segOf = (id: string) => MAP.segments.find((s) => s.id === id)!;
@@ -526,7 +533,7 @@ const menu = new Menu(
     startChapter(id) {
       const c = CHAPTERS.find((x) => x.id === id)!;
       startGame(
-        newGame(VALLEY, {
+        newGame(mapById(c.map), {
           startTown: c.startTown,
           money: c.money,
           startShip: c.startShip,
@@ -703,6 +710,7 @@ function startGame(s: GameState, sess: Session): void {
   lastSeason = null;
   hud.setFeatures(featuresFor(session));
   checkGoals(true);
+  showCanal();
   refresh();
   saveSlot('auto');
 }
@@ -978,6 +986,7 @@ function handleEvents(events: GameEvent[]): void {
         if (lastSeason !== null) hud.toast(`${SEASON_NAME[s]}. ${SEASON_HINT[s]}`);
         lastSeason = s;
       }
+      showCanal();
       changed = true;
     }
   }

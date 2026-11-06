@@ -7,6 +7,7 @@ import { available, buyCost, sellRevenue } from './economy.ts';
 import { withWind, type ShipType } from './river.ts';
 import { addNews, rand, wind, type GameState, type NewsItem, type RivalShip, type RivalState } from './state.ts';
 import { planRoute } from './voyage.ts';
+import { connectedTowns } from './works.ts';
 import { houseAvoids, tickRivalry } from './rivalry.ts';
 import { sail } from './navigation.ts';
 import { chargeRival, rivalDocks, rivalFeeFor } from './wasserbau.ts';
@@ -235,11 +236,15 @@ export function tickRivals(state: GameState, map: MapDef): NewsItem[] {
       }
     }
     if (def.builds && r.kontore.length < 3 && r.money > 2500) {
-      const options = map.towns.filter((t) => !r.kontore.includes(t.id));
-      const town = options[Math.floor(rand(state) * options.length)];
-      r.money -= KONTOR_PRICE;
-      r.kontore.push(town.id);
-      news.push(addNews(state, 'konkurrenz', `${def.name} eröffnet ein Kontor in ${town.name}.`));
+      // nur Städte, die die eigenen Schiffe erreichen (Karte mit ungebautem Kanal)
+      const reach = connectedTowns(state, map, r.ships.map((s) => s.port ?? s.voyage?.to ?? '').filter(Boolean));
+      const options = map.towns.filter((t) => !r.kontore.includes(t.id) && reach.has(t.id));
+      if (options.length) {
+        const town = options[Math.floor(rand(state) * options.length)];
+        r.money -= KONTOR_PRICE;
+        r.kontore.push(town.id);
+        news.push(addNews(state, 'konkurrenz', `${def.name} eröffnet ein Kontor in ${town.name}.`));
+      }
     }
     // Ein Haus in Not verkauft ein Schiff
     if (r.money < 0 && r.ships.length > 1) {
