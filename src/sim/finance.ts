@@ -116,7 +116,7 @@ export const ICE_CARGO_CHANCE = 0.4;
 /** Chance je Fahrstunde im Hochwasser, dass Ladung über Bord geht */
 export const FLOOD_CHANCE = 0.005;
 /** Geschätzte Chance je Stunde auf Grundberührung in knappem Wasser (für die Prämie) */
-export const GROUND_RISK = 0.02;
+export const GROUND_RISK = 0.05;
 /** Geschätzter Zustandsverlust einer Grundberührung (für die Prämie) */
 export const GROUND_DAMAGE = 0.03;
 /** Aufschlag der Versicherung auf den erwarteten Schaden */
