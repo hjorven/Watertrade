@@ -120,7 +120,7 @@ function startEvent(state: GameState, map: MapDef, kind: WorldEventKind): WorldE
       e.until = d + randInt(state, 8, 14);
       break;
     case 'zoll': {
-      const segs = map.segments.filter((s) => !state.events.some((x) => x.seg === s.id));
+      const segs = map.segments.filter((s) => !s.requires && !state.events.some((x) => x.seg === s.id));
       if (!segs.length) return null;
       e.seg = pick(state, segs).id;
       e.value = randInt(state, 3, 8) * 10;

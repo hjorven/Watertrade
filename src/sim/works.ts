@@ -7,14 +7,16 @@ const cache = new WeakMap<MapDef, { key: string; segs: SegmentDef[] }>();
 
 export function effectiveSegments(state: GameState, map: MapDef): SegmentDef[] {
   const finished = (state.works ?? []).filter((w) => w.done);
-  if (!finished.length) return map.segments;
+  const gated = map.segments.some((s) => s.requires);
+  if (!finished.length && !gated) return map.segments;
   // Verlandung mindert die zusätzliche Tiefe; im Schlüssel auf Prozent gerundet, damit der Zwischenspeicher hält
   const silt = new Map(finished.map((w) => [w.id, Math.round(Math.min(1, Math.max(0, w.silt ?? 0)) * 100) / 100]));
   const done = finished.map((w) => w.id);
   const key = finished.map((w) => (silt.get(w.id) ? `${w.id}~${silt.get(w.id)}` : w.id)).join(',');
   const hit = cache.get(map);
   if (hit && hit.key === key) return hit.segs;
-  const segs = map.segments.map((seg) => {
+  // Abschnitte wie ein Kanal existieren erst, wenn ihr Bauvorhaben fertig ist
+  const segs = map.segments.filter((seg) => !seg.requires || done.includes(seg.requires)).map((seg) => {
     const s: SegmentDef = { ...seg };
     for (const id of done) {
       const p = PROJECT_BY_ID.get(id);

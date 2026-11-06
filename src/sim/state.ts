@@ -4,6 +4,7 @@ import { windOfDay, withWind, type Conditions, type ShipType } from './river.ts'
 import type { PriceBookPage, PricePoint, TripRecord } from './market-info.ts';
 import type { TownMarket, TownState } from './towns.ts';
 import type { Season } from './calendar.ts';
+import type { CanalState } from './canal.ts';
 
 /** Datentypen des Spielstands und kleine Helfer, die alle Simulationsmodule brauchen */
 
@@ -370,6 +371,8 @@ export interface GameState {
   /** Tag, an dem die aktuelle Epoche begann (fehlt in älteren Spielständen) */
   epochDay?: number;
   works: Work[];
+  /** Großprojekt Kanal (nur auf Karten mit Kanal) */
+  canal?: CanalState;
   /** Brennstoffkosten seit Mitternacht */
   fuelToday: number;
   /** Preisbuch: Stand des letzten Besuchs je Stadt */
