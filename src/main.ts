@@ -403,11 +403,11 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
       ok = 'glocke';
       break;
     case 'canalStart':
-      r = startCanalStage(state, VALLEY);
+      r = startCanalStage(state, MAP);
       ok = 'glocke';
       break;
     case 'canalDeliver':
-      r = deliverToCanal(state, VALLEY, d.kontor ? { kontor: String(d.kontor) } : { ship: n('ship') }, String(d.good), n('n'));
+      r = deliverToCanal(state, MAP, d.kontor ? { kontor: String(d.kontor) } : { ship: n('ship') }, String(d.good), n('n'));
       ok = 'verkauf';
       break;
     case 'accept':
