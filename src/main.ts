@@ -70,7 +70,7 @@ const towns = VALLEY.towns.map((def) => placeTown(land, def));
 land.build([
   ...towns.map((t) => ({ pos: t.center, radius: t.radius * 1.4, fields: !!t.def.fields })),
   // Bauplätze am Ufer frei von Bäumen halten
-  ...towns.flatMap((t) => t.lots.map((l) => ({ pos: l.pos, radius: 0.5, fields: false }))),
+  ...towns.flatMap((t) => [...t.lots, ...t.civic].map((l) => ({ pos: l.pos, radius: 0.5, fields: false }))),
 ]);
 land.buildIce(VALLEY.segments.filter((s) => s.freezes).map((s) => ({ river: s.river, from: s.fromT, to: s.toT })));
 stage.scene.add(land.group);
@@ -909,6 +909,10 @@ function syncEstates(): void {
   for (const [town, k] of Object.entries(state.kontore)) get(town).kontore.push({ color: PLAYER_COLOR, level: k.level });
   for (const r of state.rivals) for (const town of r.kontore) get(town).kontore.push({ color: RIVAL_BY_ID.get(r.id)!.color, level: 1 });
   for (const b of state.betriebe) get(b.town).betriebe.push({ type: b.type, active: b.active });
+  for (const [town, st] of Object.entries(state.standing ?? {})) {
+    const civic = [...st.foundations, ...(st.townhouse ? ['stadthaus'] : [])];
+    if (civic.length) get(town).civic = civic;
+  }
   estates.sync(info);
 }
 

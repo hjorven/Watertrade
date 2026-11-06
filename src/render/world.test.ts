@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { VALLEY } from '../data/maps/valley.ts';
 import { Landscape, RIVER_HALF_WIDTH, WORLD_D, WORLD_W } from './landscape.ts';
-import { buildTown, houseCount, placeTown } from './towns.ts';
+import { civicModel, CIVIC_ORDER } from './civic.ts';
+import { buildTown, CIVIC_COUNT, houseCount, placeTown } from './towns.ts';
 import { TOWN_STYLES } from './townstyles.ts';
 
 const land = new Landscape(VALLEY.rivers);
@@ -53,6 +54,29 @@ describe('Städte', () => {
       expect(box.min.z).toBeGreaterThan(-WORLD_D / 2 - 0.5);
       expect(box.max.z).toBeLessThan(WORLD_D / 2 + 0.5);
     });
+  });
+
+  it('jede Stadt hat Plätze für Stadthaus und Stiftungen, frei von Fluss und Uferplätzen', () => {
+    for (const place of towns) {
+      expect(place.civic.length, place.def.id).toBe(CIVIC_COUNT);
+      for (const c of place.civic) {
+        expect(Math.abs(c.pos.x)).toBeLessThan(WORLD_W / 2 - 3);
+        expect(Math.abs(c.pos.z)).toBeLessThan(WORLD_D / 2 - 3);
+        expect(land.riverDistance(c.pos.x, c.pos.z).d).toBeGreaterThan(RIVER_HALF_WIDTH + 5);
+        for (const l of [...place.lots, ...place.civic]) if (l !== c) expect(l.pos.distanceTo(c.pos)).toBeGreaterThan(5);
+      }
+    }
+  });
+
+  it('Modelle für Stadthaus und Stiftungen lassen sich bauen', () => {
+    for (const kind of CIVIC_ORDER) {
+      const m = civicModel(kind, 0xa8322a)!;
+      const box = new THREE.Box3().setFromObject(m.group);
+      const size = box.getSize(new THREE.Vector3());
+      expect(size.x, kind).toBeLessThan(6);
+      expect(size.z, kind).toBeLessThan(6);
+      expect(size.y, kind).toBeGreaterThan(1);
+    }
   });
 
   it('jede Stadt der Karte hat einen eigenen Stil', () => {

@@ -72,12 +72,12 @@ export function renderRathaus(state: GameState, town: TownDef): string {
     const why = foundationAllowed(state, town.id, f.id);
     return `<div class="yard-row">
       <div><b>${f.name}</b> <small>+${f.standing} Ansehen, Versorgung +${Math.round(f.satisfaction * 100)} %, Unterhalt ${f.upkeep} am Tag</small>
-      <small class="desc">${f.description}</small></div>
+      <small class="desc">${f.description}${why ? ` <b>${why}</b>` : ''}</small></div>
       <button class="btn" data-act="cmd" data-cmd="found" data-id="${f.id}" ${why ? `disabled title="${esc(why)}"` : ''}>${fmt(f.price)} Taler</button></div>`;
   }).join('');
 
   const townhouse = s?.townhouse
-    ? `<p class="note">Dein Stadthaus steht am Ufer. +${TOWNHOUSE.standing} Ansehen, Unterhalt ${TOWNHOUSE.upkeep} am Tag.</p>`
+    ? `<p class="note">Dein Stadthaus steht am Marktplatz. +${TOWNHOUSE.standing} Ansehen, Unterhalt ${TOWNHOUSE.upkeep} am Tag.</p>`
     : button(
         'townhouse',
         'Eigenes Stadthaus bauen',

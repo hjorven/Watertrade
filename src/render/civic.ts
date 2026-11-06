@@ -137,6 +137,20 @@ export function chapelModel(color: number): CivicModel {
 
 export type CivicKind = 'stadthaus' | 'armenhaus' | 'schule' | 'kirche';
 
+/** Feste Reihenfolge der Plätze in der zweiten Reihe, damit nichts umzieht, wenn etwas dazukommt */
+export const CIVIC_ORDER: CivicKind[] = ['stadthaus', 'kirche', 'schule', 'armenhaus'];
+
+/** Noch freier Platz: kleine Grünfläche mit Baum und Bank */
+export function civicGreen(seed: number): CivicModel {
+  const model = empty();
+  const k = new Kit();
+  k.add(cylGeo(1.5, 1.6, 0.06, 10), 0x6f9a48, { y: -0.02 });
+  smallTree(k, seed % 2 ? 0.5 : -0.5, -0.4, 0.8);
+  k.add(boxGeo(1.0, 0.08, 0.3), C.wood, { x: seed % 2 ? -0.4 : 0.4, y: 0.35, z: 0.6 });
+  for (const x of [-0.4, 0.4]) k.add(boxGeo(0.08, 0.35, 0.25), C.woodDark, { x: (seed % 2 ? -0.4 : 0.4) + x, z: 0.6 });
+  return finish(k, model);
+}
+
 export function civicModel(kind: string, color: number): CivicModel | null {
   switch (kind) {
     case 'stadthaus':

@@ -14,6 +14,8 @@ export interface TownPlacement {
   radius: number;
   /** Bauplätze am Ufer: 0–3 Kontore, danach Betriebe */
   lots: Lot[];
+  /** Plätze in zweiter Reihe für Stadthaus und Stiftungen des Spielers (render/civic.ts) */
+  civic: Lot[];
 }
 
 export interface Lot {
@@ -23,8 +25,14 @@ export interface Lot {
 
 /** Kontorplätze nah am Steg, Betriebe weiter das Ufer entlang */
 const LOT_ALONG = [-5.5, 5.5, -11, 11, -17, 17, -23, 23, -29, 29, -35, 35, -41, 41, -47, 47];
-const LOT_COUNT = 10;
+/** 4 Kontore, 6 Betriebe und einer für den Zusatzbauplatz durch hohes Ansehen */
+const LOT_COUNT = 11;
 export const KONTOR_LOTS = 4;
+
+/** Stadthaus, Kirche, Schule, Armenhaus: in Ringen um den Marktplatz */
+export const CIVIC_COUNT = 4;
+const CIVIC_RINGS = [8.5, 11, 13.5, 16];
+const CIVIC_ANGLES = 16;
 
 /** Uferlinie: so weit jenseits der nominellen Flussbreite trifft das Wasser die Böschung */
 const SHORE = 1.05;
@@ -56,7 +64,29 @@ export function placeTown(land: Landscape, def: TownDef): TownPlacement {
     pos.y = land.heightAt(pos.x, pos.z);
     lots.push({ pos, facing: Math.atan2(qn.x, qn.z) + Math.PI });
   }
-  return { def, center, mooring, radius, lots };
+  // Ringe um den Marktplatz: auf festem Grund, nicht am Steilhang, nicht am Kartenrand, mit Abstand zu den Uferplätzen.
+  // Die Front zeigt zum Platz.
+  const civic: Lot[] = [];
+  for (const ring of CIVIC_RINGS) {
+    for (let i = 0; i < CIVIC_ANGLES && civic.length < CIVIC_COUNT; i++) {
+      // abwechselnd links und rechts vom Weg zum Steg, damit die Bauten sich verteilen
+      const k = Math.ceil(i / 2) * (i % 2 ? 1 : -1);
+      const a = Math.atan2(-n.z, -n.x) + Math.PI / 2 + (k * 2 * Math.PI) / CIVIC_ANGLES;
+      const pos = new THREE.Vector3(center.x + Math.cos(a) * ring, 0, center.z + Math.sin(a) * ring);
+      if (!inWorld(pos.x, pos.z, 4.5)) continue;
+      if (land.riverDistance(pos.x, pos.z).d < RIVER_HALF_WIDTH + 6) continue;
+      if (land.heightAt(pos.x, pos.z) > 8.5) continue;
+      if ([...lots, ...civic].some((l) => Math.hypot(l.pos.x - pos.x, l.pos.z - pos.z) < 6)) continue;
+      pos.y = land.heightAt(pos.x, pos.z);
+      civic.push({ pos, facing: Math.atan2(center.x - pos.x, center.z - pos.z) });
+    }
+  }
+  return { def, center, mooring, radius, lots, civic };
+}
+
+/** Uferplätze und Plätze der zweiten Reihe, die Häuser, Gassen und Wahrzeichen freilassen */
+function allLots(place: TownPlacement): Lot[] {
+  return [...place.lots, ...place.civic];
 }
 
 /** Häuser einer Stadt; wächst Haus für Haus von innen nach außen */
@@ -296,7 +326,7 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
   const freeAt = (x: number, z: number, r: number) => {
     if (!inWorld(x, z, r + 1)) return false;
     if (!onLand(x, z, 2.4 + r * 0.6)) return false;
-    if (place.lots.some((l) => Math.hypot(l.pos.x - x, l.pos.z - z) < 3.6 + r)) return false;
+    if (allLots(place).some((l) => Math.hypot(l.pos.x - x, l.pos.z - z) < 3.6 + r)) return false;
     if (reserved.some((s) => Math.hypot(s.x - x, s.z - z) < s.r + r)) return false;
     if (roads.some((rd) => distToRoad(x, z, rd) < rd.half + r * 0.75)) return false;
     return land.heightAt(x, z) < 9.5;
@@ -349,7 +379,7 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
     onLand(p.x, p.z, 2) &&
     inWorld(p.x, p.z, 1) &&
     land.heightAt(p.x, p.z) < 9 &&
-    !place.lots.some((l) => Math.hypot(l.pos.x - p.x, l.pos.z - p.z) < 3.2) &&
+    !allLots(place).some((l) => Math.hypot(l.pos.x - p.x, l.pos.z - p.z) < 3.2) &&
     !reserved.some((q) => Math.hypot(q.x - p.x, q.z - p.z) < q.r + 0.3);
   const addLane = (pts: THREE.Vector3[]) => {
     // in zusammenhängende Stücke zerlegen, die frei liegen
@@ -418,7 +448,7 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
     if (!onLand(x, z, 2.2 + foot * 0.5)) continue;
     if (land.heightAt(x, z) > 9) continue; // nicht an den Steilhang
     if (spots.some((p) => Math.hypot(p.x - x, p.z - z) < (foot + houseModel(p.type).radius * p.s) * 0.55)) continue;
-    if (place.lots.some((l) => Math.hypot(l.pos.x - x, l.pos.z - z) < 3.4 + foot * 0.8)) continue; // Bauplätze freihalten
+    if (allLots(place).some((l) => Math.hypot(l.pos.x - x, l.pos.z - z) < 3.4 + foot * 0.8)) continue; // Bauplätze freihalten
     if (reserved.some((q) => Math.hypot(q.x - x, q.z - z) < q.r + foot * 0.85)) continue;
     let nearRoad: Road | null = null;
     let roadDist = Infinity;

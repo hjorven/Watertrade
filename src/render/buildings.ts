@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Lot, TownPlacement } from './towns.ts';
-import { KONTOR_LOTS } from './towns.ts';
+import { CIVIC_COUNT, KONTOR_LOTS } from './towns.ts';
+import { civicGreen, civicModel, CIVIC_ORDER } from './civic.ts';
 
 /** Kontore und eigene Betriebe als kleine Modelle auf den Uferplätzen der Städte */
 
@@ -372,6 +373,8 @@ export interface EstateInfo {
   /** Besitzer der Kontore in der Stadt, in fester Reihenfolge: Spieler zuerst */
   kontore: { color: number; level: number }[];
   betriebe: { type: string; active: boolean }[];
+  /** Stadthaus und Stiftungen des Spielers (Ids aus render/civic.ts) */
+  civic?: string[];
 }
 
 /** Alle Gebäude des Spielers und der Konkurrenz; baut eine Stadt nur neu auf, wenn sich etwas geändert hat */
@@ -410,6 +413,13 @@ export class Estates {
       e.betriebe.forEach((x, i) => {
         const lot = place.lots[KONTOR_LOTS + i];
         if (lot) put(betriebModel(x.type, color), lot, x.active);
+      });
+      // zweite Reihe: jede Art hat ihren festen Platz, freie Plätze bleiben eine kleine Grünfläche
+      CIVIC_ORDER.slice(0, CIVIC_COUNT).forEach((kind, i) => {
+        const lot = place.civic[i];
+        if (!lot) return;
+        const b = e.civic?.includes(kind) ? civicModel(kind, color) : null;
+        put(b ?? civicGreen(i), lot, true);
       });
       this.root.add(group);
       this.towns.set(town, { key, group, items });
