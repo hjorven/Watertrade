@@ -200,6 +200,8 @@ export const CANAL_SEGMENT: SegmentDef = {
 export const ZWEI_TAELER: MapDef = {
   id: 'zwei-taeler',
   name: 'Zwei Täler und ein Kanal',
+  // Start an der künftigen Kanalbaustelle
+  start: 'altenfurt',
   bounds: { minX: -112, maxX: 112, minZ: -210, maxZ: 72 },
   rivers: [...VALLEY.rivers, ...NORTH_RIVERS],
   towns: [...VALLEY.towns, ...NORTH_TOWNS],

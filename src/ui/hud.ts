@@ -2,6 +2,7 @@ import { BUILDING_BY_ID, BUILDINGS, betriebUpkeep, KONTOR_CAPACITY, KONTOR_PRICE
 import { CAPTAIN_RANKS, captainRank, traitText } from '../data/captains.ts';
 import { fairWage, LOYALTY_POACH, LOYALTY_WARN } from '../sim/captains.ts';
 import { renderCanal } from './canal-panel.ts';
+import { canalDone } from '../sim/canal.ts';
 import { GOOD_BY_ID, GOODS } from '../data/goods.ts';
 import type { MapDef, TownDef } from '../data/maps/valley.ts';
 import { RIVAL_BY_ID } from '../data/rivals.ts';
@@ -233,7 +234,8 @@ const flows = (r: Record<string, number>) =>
 
 export interface MapData {
   viewBox: string;
-  rivers: { path: string; width: number }[];
+  /** canal: Kanal, vor der Fertigstellung nur als geplante Trasse gezeichnet */
+  rivers: { path: string; width: number; canal?: boolean }[];
   towns: Record<string, { x: number; y: number }>;
   segMid: Record<string, { x: number; y: number }>;
   shipPos(ship: { port: string | null; voyage: Voyage | null }): { x: number; y: number } | null;
@@ -1293,7 +1295,9 @@ export class Hud {
   private mapHtml(state: GameState): string {
     const d = this.mapData;
     if (!d) return '';
-    const rivers = d.rivers.map((r) => `<path d="${r.path}" class="m-river" style="stroke-width:${r.width}"/>`).join('');
+    const rivers = d.rivers
+      .map((r) => `<path d="${r.path}" class="m-river${r.canal && !canalDone(state) ? ' m-canal-plan' : ''}" style="stroke-width:${r.width}"/>`)
+      .join('');
     const segs = effectiveSegments(state, this.map);
     const townPts = Object.values(d.towns);
     const legend: string[] = [];
