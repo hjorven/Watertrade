@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { TownDef } from '../data/maps/m1.ts';
+import type { SegmentDef, TownDef } from '../data/maps/valley.ts';
 import { Landscape, mulberry32, RIVER_HALF_WIDTH } from './landscape.ts';
 
 export interface TownPlacement {
@@ -10,11 +10,12 @@ export interface TownPlacement {
 }
 
 export function placeTown(land: Landscape, def: TownDef): TownPlacement {
-  const p = land.curve.getPointAt(def.riverT);
-  const n = land.normalAt(def.riverT).multiplyScalar(def.side);
+  const p = land.pointAt(def.river, def.riverT);
+  const n = land.normalAt(def.river, def.riverT).multiplyScalar(def.side);
+  const hw = land.halfWidth(def.river);
   const radius = 5 + def.houses * 0.42;
-  const center = p.clone().addScaledVector(n, RIVER_HALF_WIDTH + 3 + radius);
-  const mooring = p.clone().addScaledVector(n, RIVER_HALF_WIDTH - 1.3);
+  const center = p.clone().addScaledVector(n, hw + 3 + radius);
+  const mooring = p.clone().addScaledVector(n, Math.max(0.6, hw - 1.3));
   return { def, center, mooring, radius };
 }
 
@@ -118,5 +119,41 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
   shed.castShadow = true;
   g.add(shed);
 
+  return g;
+}
+
+/** Alte Steinbrücke mit zwei Bögen über einen Abschnitt mit Brückenhöhe */
+export function buildBridge(land: Landscape, seg: SegmentDef): THREE.Group {
+  const g = new THREE.Group();
+  const t = seg.fromT + (seg.toT - seg.fromT) * 0.3;
+  const p = land.pointAt(seg.river, t);
+  const tan = land.tangentAt(seg.river, t);
+  const hw = land.halfWidth(seg.river);
+  const span = hw * 2 + 7;
+  const stone = new THREE.MeshStandardMaterial({ color: 0xb8a588, roughness: 0.95, flatShading: true });
+
+  // Bauhöhe optisch etwa 1 m = 0,5 Einheiten
+  const deckY = (seg.bridgeHeight ?? 4) * 0.5 + 0.4;
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(span, 0.5, 2.4), stone);
+  deck.position.y = deckY;
+  g.add(deck);
+  for (const side of [-1, 1]) {
+    const parapet = new THREE.Mesh(new THREE.BoxGeometry(span, 0.4, 0.25), stone);
+    parapet.position.set(0, deckY + 0.45, side * 1.1);
+    g.add(parapet);
+  }
+  // Pfeiler in der Mitte und an den Ufern
+  for (const x of [-hw - 1.2, 0, hw + 1.2]) {
+    const pier = new THREE.Mesh(new THREE.BoxGeometry(1.1, deckY + 2, 2.6), stone);
+    pier.position.set(x, deckY / 2 - 1, 0);
+    g.add(pier);
+  }
+  g.traverse((o) => {
+    o.castShadow = true;
+    o.receiveShadow = true;
+  });
+  g.position.set(p.x, 0, p.z);
+  // Brücke quer zum Fluss: lokale x-Achse entlang der Ufernormalen
+  g.rotation.y = Math.atan2(-tan.z, tan.x) + Math.PI / 2;
   return g;
 }

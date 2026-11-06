@@ -1,7 +1,11 @@
+/** Preisspanne relativ zum Grundpreis. Der Plan hatte 0.3 bis 3, das machte jeden Handel zur Goldgrube. */
+export const MIN_FACTOR = 0.5;
+export const MAX_FACTOR = 2;
+
 /** Preis abhängig vom Lager: knapp = teuer, voll = billig */
 export function price(base: number, stock: number, target: number): number {
   const ratio = target / Math.max(1, stock);
-  const factor = Math.min(3, Math.max(0.3, ratio));
+  const factor = Math.min(MAX_FACTOR, Math.max(MIN_FACTOR, ratio));
   return Math.max(1, Math.round(base * factor));
 }
 
@@ -10,9 +14,13 @@ export const SELL_FACTOR = 0.9;
 
 export interface MarketEntry {
   good: string;
-  stock: number; // aktueller Bestand
+  stock: number; // aktueller Bestand in Tonnen (mit Nachkommastellen durch Tagesproduktion)
   target: number; // Bezugsgröße der Preisformel
-  rest: number; // Bestand, zu dem der Markt ohne Handel zurückkehrt (Produktion/Verbrauch)
+}
+
+/** Ganze Tonnen, die gehandelt werden können */
+export function available(m: MarketEntry): number {
+  return Math.floor(m.stock);
 }
 
 /** Preis, den der Spieler für die nächste Einheit zahlt */
@@ -42,12 +50,4 @@ export function sellRevenue(base: number, m: MarketEntry, amount: number): numbe
     sum += Math.floor(price(base, m.stock + i, m.target) * SELL_FACTOR);
   }
   return sum;
-}
-
-/** Ein Tag Produktion und Verbrauch: Der Bestand bewegt sich um 15 % Richtung Ruhebestand, mindestens 1 */
-export function dailyTick(m: MarketEntry): void {
-  const diff = m.rest - m.stock;
-  if (diff === 0) return;
-  const step = Math.sign(diff) * Math.max(1, Math.round(Math.abs(diff) * 0.15));
-  m.stock = Math.max(0, Math.abs(step) > Math.abs(diff) ? m.rest : m.stock + step);
 }

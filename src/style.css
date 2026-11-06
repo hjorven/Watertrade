@@ -441,3 +441,147 @@ body {
     font-size: 30px;
   }
 }
+
+/* --- M2: Flotte, Ziele, Werft --- */
+.speed {
+  display: flex;
+  gap: 3px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+.btn.on {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.fleet {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.fleet:empty {
+  display: none;
+}
+
+.chip {
+  font: inherit;
+  text-align: left;
+  background: var(--paper-dark);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 3px 8px;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.chip b {
+  display: block;
+  font-size: 13px;
+}
+
+.chip small {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.chip.on {
+  border-color: var(--stamp);
+  box-shadow: inset 0 0 0 1px var(--stamp);
+  background: var(--paper);
+}
+
+.ledger h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-soft);
+  margin: 14px 0 6px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 3px;
+}
+
+.market tr.muted {
+  opacity: 0.55;
+}
+
+.market .num small {
+  display: block;
+}
+
+.dests {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 4px;
+}
+
+.btn.dest {
+  text-align: left;
+  padding: 5px 8px;
+}
+
+.btn.dest b {
+  display: block;
+}
+
+.btn.dest small {
+  font-size: 11px;
+  color: inherit;
+  opacity: 0.8;
+}
+
+.btn.dest:disabled {
+  opacity: 0.5;
+}
+
+.yard-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--line);
+  font-size: 14px;
+}
+
+.yard-row small {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.yard-row .desc {
+  display: block;
+  margin-top: 2px;
+}
+
+.yard-row .btn {
+  white-space: nowrap;
+}
+
+.route {
+  margin: 6px 0;
+  padding-left: 20px;
+  font-size: 13px;
+}
+
+.route li.done {
+  color: var(--ink-soft);
+  text-decoration: line-through;
+}
+
+.route li.now {
+  font-weight: 700;
+}
+
+.route small {
+  color: var(--ink-soft);
+  font-weight: 400;
+}
+
+@media (max-width: 720px) {
+  .hide-narrow {
+    display: none !important;
+  }
+}

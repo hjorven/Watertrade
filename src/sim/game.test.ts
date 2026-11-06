@@ -1,57 +1,168 @@
 import { describe, expect, it } from 'vitest';
-import { MAP_M1 } from '../data/maps/m1.ts';
-import { SHIPS } from '../data/ships.ts';
-import { advance, buy, cargoLoad, day, depart, newGame, sell } from './game.ts';
+import { GOODS } from '../data/goods.ts';
+import { VALLEY } from '../data/maps/valley.ts';
+import { runBalance } from './balance.ts';
+import {
+  advance,
+  buy,
+  buyShip,
+  cargoLoad,
+  day,
+  depart,
+  dismantleRaft,
+  newGame,
+  planVoyage,
+  sell,
+  voyagePosition,
+} from './game.ts';
+import { STOCK_CAP, tickTown, tradedGoods } from './towns.ts';
 
-const start = () => newGame(MAP_M1, SHIPS.treidelkahn, 'oberau');
+const start = () => newGame(VALLEY, 'oberau');
 
-describe('Spielablauf M1', () => {
-  it('Holz talwärts bringen ist profitabel', () => {
-    const s = start();
-    const b = buy(s, 'holz', 20);
-    expect(b.ok).toBe(true);
-
-    const v = depart(s, MAP_M1, 'niedermuend')!;
-    expect(v.downstream).toBe(true);
-    const events = advance(s, v.hours);
-    expect(events.some((e) => e.type === 'arrived')).toBe(true);
-    expect(s.port).toBe('niedermuend');
-
-    const r = sell(s, 'holz', 20);
-    expect(r.profit!).toBeGreaterThan(0);
-    expect(r.firstProfit).toBe(true);
-    expect(s.money).toBeGreaterThan(300);
+describe('Karte', () => {
+  it('jede Ware wird irgendwo erzeugt und irgendwo gebraucht', () => {
+    for (const g of GOODS) {
+      const made = VALLEY.towns.some((t) => g.id in t.produces || t.industries.some((i) => g.id in i.outputs));
+      const used = VALLEY.towns.some((t) => g.id in t.consumes || t.industries.some((i) => g.id in i.inputs));
+      expect(made, `${g.name} wird nirgends erzeugt`).toBe(true);
+      expect(used, `${g.name} wird nirgends gebraucht`).toBe(true);
+    }
   });
 
-  it('bergwärts dauert länger als talwärts', () => {
+  it('Abschnitte verbinden bekannte Städte', () => {
+    const ids = new Set(VALLEY.towns.map((t) => t.id));
+    for (const s of VALLEY.segments) {
+      expect(ids.has(s.from) && ids.has(s.to)).toBe(true);
+    }
+  });
+
+  it('Märkte bleiben über ein Jahr in gültigen Grenzen', () => {
     const s = start();
-    const down = depart(s, MAP_M1, 'niedermuend')!;
-    advance(s, down.hours);
-    const up = depart(s, MAP_M1, 'oberau')!;
-    expect(up.downstream).toBe(false);
-    expect(up.hours).toBeGreaterThan(down.hours * 2);
+    advance(s, VALLEY, 24 * 365);
+    for (const town of VALLEY.towns) {
+      for (const g of tradedGoods(town)) {
+        const m = s.markets[town.id][g];
+        expect(Number.isFinite(m.stock)).toBe(true);
+        expect(m.stock).toBeGreaterThanOrEqual(0);
+        expect(m.stock).toBeLessThanOrEqual(town.target * STOCK_CAP + 1e-9);
+      }
+    }
+  });
+
+  it('Betriebe verarbeiten nur, was da ist', () => {
+    const muehl = VALLEY.towns.find((t) => t.id === 'muehlheim')!;
+    const s = start();
+    const m = s.markets.muehlheim;
+    m.getreide.stock = 0;
+    m.mehl.stock = m.mehl.target;
+    // Produktion 12 reicht für eine volle Mühle (4 -> 3 Mehl), danach gleicht das Umland 8 % aus
+    tickTown(muehl, m);
+    expect(m.mehl.stock).toBeCloseTo(m.mehl.target + 3 * 0.92);
+
+    // ohne Getreide steht die Mühle still
+    const empty = { ...muehl, produces: {} };
+    m.getreide.stock = 0;
+    m.mehl.stock = m.mehl.target;
+    tickTown(empty, m);
+    expect(m.mehl.stock).toBeCloseTo(m.mehl.target);
+  });
+});
+
+describe('Routen', () => {
+  it('Segelkahn passt nicht unter die Brücke bei Kesselbrück', () => {
+    const s = start();
+    const r = buyShip(s, VALLEY, 'niedermuend', 'segelkahn');
+    expect(r.ok).toBe(false); // zu wenig Geld
+    s.money = 5000;
+    const ship = buyShip(s, VALLEY, 'niedermuend', 'segelkahn').ship!;
+    const plan = planVoyage(s, VALLEY, ship.id, 'oberau')!;
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.reasons.map((x) => x.reason)).toContain('bruecke');
+    expect(planVoyage(s, VALLEY, ship.id, 'muehlheim')!.ok).toBe(true);
+  });
+
+  it('nur flache Boote kommen zur Erzgrube', () => {
+    const s = start();
+    const kahn = s.ships[0];
+    const plan = planVoyage(s, VALLEY, kahn.id, 'erzgrube')!;
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.reasons[0].reason).toBe('tiefgang');
+
+    s.money = 5000;
+    const plaette = buyShip(s, VALLEY, 'muehlheim', 'plaette').ship!;
+    const p2 = planVoyage(s, VALLEY, plaette.id, 'erzgrube')!;
+    expect(p2.ok).toBe(true);
+    if (p2.ok) expect(p2.voyage.legs.map((l) => l.seg)).toEqual(['muehl-alten', 'glas-alten', 'grube-glas']);
+  });
+
+  it('Fahrt über mehrere Abschnitte, Position wandert mit', () => {
+    const s = start();
+    const ship = s.ships[0];
+    const v = depart(s, VALLEY, ship.id, 'niedermuend')!;
+    expect(v.legs).toHaveLength(5);
+    expect(v.legs.every((l) => l.downstream)).toBe(true);
+    advance(s, VALLEY, v.legs[0].hours + 0.1);
+    expect(voyagePosition(ship.voyage!).index).toBe(1);
+    const events = advance(s, VALLEY, v.hours);
+    expect(events.some((e) => e.type === 'arrived')).toBe(true);
+    expect(ship.port).toBe('niedermuend');
+  });
+});
+
+describe('Handel', () => {
+  it('Holz talwärts nach Niedermünd bringt Gewinn', () => {
+    const s = start();
+    const ship = s.ships[0];
+    expect(buy(s, ship.id, 'holz', 30).ok).toBe(true);
+    const v = depart(s, VALLEY, ship.id, 'niedermuend')!;
+    advance(s, VALLEY, v.hours);
+    const r = sell(s, ship.id, 'holz', 30);
+    expect(r.profit!).toBeGreaterThan(0);
+    expect(r.firstProfit).toBe(true);
   });
 
   it('Laderaum und Geld begrenzen den Kauf', () => {
     const s = start();
-    buy(s, 'holz', 1000);
-    expect(cargoLoad(s)).toBeLessThanOrEqual(SHIPS.treidelkahn.capacity);
+    const ship = s.ships[0];
+    buy(s, ship.id, 'holz', 1000);
+    expect(cargoLoad(ship)).toBeLessThanOrEqual(40);
     expect(s.money).toBeGreaterThanOrEqual(0);
   });
 
-  it('unterwegs kein Handel', () => {
+  it('Waren, die eine Stadt nicht handelt, lassen sich dort nicht kaufen', () => {
     const s = start();
-    depart(s, MAP_M1, 'niedermuend');
-    expect(buy(s, 'holz', 1).ok).toBe(false);
+    expect(buy(s, s.ships[0].id, 'erz', 5).ok).toBe(false);
   });
 
-  it('Märkte erholen sich über die Tage', () => {
+  it('Floß treibt talwärts und wird am Ziel zu Holz', () => {
     const s = start();
-    buy(s, 'holz', 40);
-    const after = s.markets.oberau.holz.stock;
-    const events = advance(s, 24 * 5);
-    expect(events.filter((e) => e.type === 'newDay')).toHaveLength(5);
-    expect(day(s)).toBe(6);
-    expect(s.markets.oberau.holz.stock).toBeGreaterThan(after);
+    const raft = buyShip(s, VALLEY, 'oberau', 'floss').ship!;
+    const plan = planVoyage(s, VALLEY, raft.id, 'kesselbrueck')!;
+    expect(plan.ok).toBe(true);
+    const v = depart(s, VALLEY, raft.id, 'kesselbrueck')!;
+    advance(s, VALLEY, v.hours);
+    expect(planVoyage(s, VALLEY, raft.id, 'oberau')!.ok).toBe(false);
+    const before = s.money;
+    const r = dismantleRaft(s, raft.id);
+    expect(r.ok).toBe(true);
+    expect(s.ships.find((x) => x.id === raft.id)).toBeUndefined();
+    expect(s.money).toBeGreaterThanOrEqual(before);
+  });
+
+  it('Tage vergehen und Städte arbeiten', () => {
+    const s = start();
+    const events = advance(s, VALLEY, 24 * 3);
+    expect(events.filter((e) => e.type === 'newDay')).toHaveLength(3);
+    expect(day(s)).toBe(4);
+  });
+});
+
+describe('Balance', () => {
+  it('ein einfacher Händler wird reich, aber nicht absurd schnell', () => {
+    const r = runBalance(VALLEY, 60);
+    console.log(`Balance 60 Tage: ${r.money} Taler, ${r.trips} Fahrten, Verlauf alle 10 Tage: ${r.moneyByDay.filter((_, i) => i % 10 === 9).join(', ')}`);
+    expect(r.trips).toBeGreaterThan(5);
+    expect(r.money).toBeGreaterThan(1500);
+    expect(r.money).toBeLessThan(100000);
   });
 });
