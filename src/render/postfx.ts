@@ -48,6 +48,10 @@ const gradeShader = {
     saturation: { value: 1.12 },
     vignette: { value: 0.28 },
     warmth: { value: 0.0 },
+    // Farbstimmung der Epoche (epochmood.ts)
+    moodSaturation: { value: 1.0 },
+    contrast: { value: 1.0 },
+    tint: { value: new THREE.Vector3() },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -60,12 +64,17 @@ const gradeShader = {
     uniform float saturation;
     uniform float vignette;
     uniform float warmth;
+    uniform float moodSaturation;
+    uniform float contrast;
+    uniform vec3 tint;
     varying vec2 vUv;
     void main() {
       vec4 c = texture2D(tDiffuse, vUv);
       float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
-      c.rgb = mix(vec3(l), c.rgb, saturation);
-      c.rgb += vec3(0.04, 0.015, -0.03) * warmth;
+      c.rgb = mix(vec3(l), c.rgb, saturation * moodSaturation);
+      // Kontrast im linearen Licht um ein mittleres Grau
+      c.rgb = 0.18 * pow(max(c.rgb, vec3(0.0)) / 0.18, vec3(contrast));
+      c.rgb += vec3(0.04, 0.015, -0.03) * warmth + tint;
       vec2 p = vUv - 0.5;
       c.rgb *= 1.0 - dot(p, p) * vignette * 1.6;
       gl_FragColor = c;
@@ -115,6 +124,13 @@ export class PostFx {
 
   setWarmth(w: number): void {
     this.grade.uniforms.warmth.value = w;
+  }
+
+  /** Farbstimmung der Epoche: Sättigungsfaktor, Kontrast, Farbverschiebung */
+  setMood(saturation: number, contrast: number, tint: THREE.Vector3): void {
+    this.grade.uniforms.moodSaturation.value = saturation;
+    this.grade.uniforms.contrast.value = contrast;
+    this.grade.uniforms.tint.value.copy(tint);
   }
 
   render(): void {

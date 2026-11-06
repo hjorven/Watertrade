@@ -8,6 +8,7 @@ import { dayInSeason, season, SEASON_NAME, year } from '../sim/calendar.ts';
 import { MAX_ACCEPTED, PENALTY } from '../sim/contracts.ts';
 import { buyPrice, sellPrice } from '../sim/economy.ts';
 import { describeEvent, EVENT_TITLE } from '../sim/events.ts';
+import { epochProgress, epochProgressText } from '../sim/epochs.ts';
 import { hasYard, repairCost, timberPlan, upgradeCost } from '../sim/fleet.ts';
 import {
   bunkerPlan,
@@ -306,7 +307,7 @@ export class Hud {
       this.top,
       `
       <span><small>Kasse</small><b>${fmt(state.money)} Taler</b></span>
-      <span title="${EPOCHS[state.epoch - 1].name}"><small>${SEASON_NAME[season(day(state))]} · Jahr ${year(day(state))}</small><b>${dayInSeason(day(state))}. Tag, ${clock(state.hour)}</b></span>
+      <span title="${epochProgressText(state)}"><small>${SEASON_NAME[season(day(state))]} · Jahr ${year(day(state))}</small><b>${dayInSeason(day(state))}. Tag, ${clock(state.hour)}</b></span>
       <span class="river-stat" title="Pegel und Wind bestimmen, welche Schiffe wie schnell fahren"><small>Fluss</small><b>${state.waterLevel >= 0 ? '+' : '−'}${Math.abs(state.waterLevel).toFixed(1).replace('.', ',')} m${state.ice ? ', Eis' : ''} · Wind ${windText(w)}</b></span>${events}`,
     );
     this.newsKey = state.news[0] ? `${state.news[0].day}|${state.news[0].text}` : '';
@@ -438,7 +439,8 @@ export class Hud {
         }
         const v = plan.voyage;
         const dir = v.legs.every((l) => l.downstream) ? 'talwärts' : v.legs.every((l) => !l.downstream) ? 'bergwärts' : 'tal- und bergwärts';
-        const toll = v.toll ? `, Zoll ${v.toll}` : '';
+        const tollOnly = (v.toll ?? 0) - (v.towFee ?? 0);
+        const toll = (tollOnly > 0 ? `, Zoll ${tollOnly}` : '') + (v.towFee ? `, Treidelgeld ${v.towFee}` : '');
         const coal = bunkerPlan(state, ship, v.hours, v.toll ?? 0);
         if (coal.problem) return `<button class="btn dest" disabled title="${coal.problem}"><b>${t.name}</b><small>${coal.buy ? `${coal.buy} t Kohle fehlen` : 'Bunker zu klein'}</small></button>`;
         const coalText = coal.need ? `, Kohle ${String(coal.need).replace('.', ',')} t${coal.buy ? `, bunkert ${coal.buy} t für ${coal.cost} Taler` : ''}` : '';
@@ -611,7 +613,7 @@ export class Hud {
           })
           .join('')}${later
           .map((id) => `<div class="yard-row muted"><div><b>${SHIPS[id].name}</b> <small>kommt in der Epoche „${EPOCHS[SHIPS[id].epoch - 1].name}“</small></div></div>`)
-          .join('')}</div>`
+          .join('')}</div>${later.length ? epochNote(state) : ''}`
       : '';
     return `${this.portHead(town, 'Werft')}${state_}
       ${ship.type === 'floss' ? '' : `<button class="btn wide ${cost > 0 ? 'primary' : ''}" data-act="cmd" data-cmd="repair" ${cost > 0 && state.money >= cost ? '' : 'disabled'}>Überholen<small>${cost > 0 ? `${fmt(cost)} Taler` : 'nicht nötig'}</small></button>`}
@@ -748,7 +750,7 @@ export class Hud {
         <p>${how} ${speed.toFixed(1).replace('.', ',')} km/h über Grund, Strömung ${String(seg.current).replace('.', ',')} km/h.</p>
       </div>
       <div class="progress"><div style="width:${pct}%"></div></div>
-      <p class="note">${fmtHours(v.elapsed)} von ${fmtHours(v.hours)}${v.toll ? ` · Zoll bezahlt: ${v.toll} Taler` : ''}</p>
+      <p class="note">${fmtHours(v.elapsed)} von ${fmtHours(v.hours)}${v.toll ? ` · ${v.towFee ? (v.towFee < v.toll ? 'Zoll und Treidelgeld' : 'Treidelgeld') : 'Zoll'} bezahlt: ${v.toll} Taler` : ''}</p>
       <ol class="route">${route}</ol>
       <p class="note">Ladung: ${cargo || 'leer'} · Zustand ${Math.round(ship.condition * 100)} %${cls.coal ? ` · Bunker ${Math.floor(ship.bunker ?? 0)} t Kohle` : ''}</p>
       ${captain}`;
@@ -995,4 +997,13 @@ export class Hud {
     setTimeout(() => el.classList.add('out'), 2600);
     setTimeout(() => el.remove(), 3400);
   }
+}
+
+/** Hinweis in der Werft, was die nächste Epoche bringt (nur freies Spiel) */
+function epochNote(state: GameState): string {
+  if (!state.epochAuto) return '';
+  const p = epochProgress(state);
+  if (!p.next) return '';
+  const parts = p.conditions.map((c) => `${c.label} (${Math.min(c.value, c.target)}/${c.target})`);
+  return `<p class="note">Die Zeit „${p.next.name}“ beginnt, sobald alles erfüllt ist: ${parts.join(', ')}. Spätestens im Jahr ${p.next.latestYear}.</p>`;
 }

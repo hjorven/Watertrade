@@ -3,6 +3,7 @@ import { GOOD_BY_ID } from '../data/goods.ts';
 import { available, buyCost } from './economy.ts';
 import { explainBlock, findRoute, segmentDepth, travelTime, type BlockReason, type ShipType } from './river.ts';
 import { effectiveSegments } from './works.ts';
+import { towFee } from './epochs.ts';
 import { conditions, effectiveDraft, effectiveType, getShip, hasUpgrade, shipClass, type GameState, type Leg, type Ship, type Voyage } from './state.ts';
 
 export type VoyagePlan = { ok: true; voyage: Voyage } | { ok: false; reasons: { seg: SegmentDef; reason: BlockReason }[] };
@@ -43,7 +44,11 @@ export function planRoute(
     node = next;
   }
   const hours = legs.reduce((s, l) => s + l.hours, 0);
-  return { ok: true, voyage: { from, to, legs, hours, elapsed: 0, toll } };
+  // ab der Motorzeit kostet Treideln bergauf Treidelgeld; es wird wie Zoll beim Ablegen bezahlt
+  const fee = towFee(state, type.propulsion, legs.reduce((s, l) => s + (l.downstream ? 0 : l.hours), 0));
+  const voyage: Voyage = { from, to, legs, hours, elapsed: 0, toll: toll + fee };
+  if (fee > 0) voyage.towFee = fee;
+  return { ok: true, voyage };
 }
 
 export function planVoyage(state: GameState, map: MapDef, shipId: number, to: string): VoyagePlan | null {
@@ -51,7 +56,8 @@ export function planVoyage(state: GameState, map: MapDef, shipId: number, to: st
   if (!ship.port || ship.port === to) return null;
   const boost = ship.captain?.trait === 'treidelmeister' && ship.type !== 'segelkahn' ? 1.2 : 1;
   const plan = planRoute(state, map, ship.port, to, effectiveType(state, ship), boost);
-  if (plan.ok && ship.captain?.trait === 'schmuggler') plan.voyage.toll = 0;
+  // der Schmuggler umgeht Zollstellen, das Treidelgeld zahlt aber auch er
+  if (plan.ok && ship.captain?.trait === 'schmuggler') plan.voyage.toll = plan.voyage.towFee ?? 0;
   return plan;
 }
 

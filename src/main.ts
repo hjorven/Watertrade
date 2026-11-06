@@ -8,6 +8,7 @@ import { GOOD_BY_ID, GOODS } from './data/goods.ts';
 import { VALLEY } from './data/maps/valley.ts';
 import { Landscape } from './render/landscape.ts';
 import { Stage } from './render/scene.ts';
+import { BASE_FOG, easeEpoch, moodAt } from './render/epochmood.ts';
 import { ambient, getVolume, isMuted, mute, playSfx, setMusic, setVolume, unlockAudioOnGesture, type SfxName } from './audio/index.ts';
 import { RIVAL_BY_ID } from './data/rivals.ts';
 import { SHIPS } from './data/ships.ts';
@@ -529,6 +530,7 @@ function startGame(s: GameState, sess: Session): void {
   rivalViews.clear();
   setMusic(epochMusic(s.epoch));
   state = s;
+  moodEpoch = s.epoch; // beim Laden sofort die richtige Stimmung, ohne Überblenden
   session = { ...sess, startHour: sess.startHour ?? s.hour };
   selected = state.ships[0]?.id ?? -1;
   follow = true;
@@ -922,6 +924,9 @@ const SUN: Record<Season, number> = { fruehling: 0xfff0d0, sommer: 0xffe2b0, her
 const WARMTH: Record<Season, number> = { fruehling: 0.2, sommer: 0.5, herbst: 0.9, winter: -0.6 };
 const tmpA = new THREE.Color();
 const tmpB = new THREE.Color();
+// Farbstimmung je Epoche, gleitend überblendet (epochmood.ts)
+let moodEpoch = 1;
+const mood = moodAt(1);
 
 function updateSeasonVisuals(): void {
   const dayFloat = state.hour / 24 + 1;
@@ -945,11 +950,19 @@ function updateSeasonVisuals(): void {
   }
   land.setIce(ice, drift);
 
-  const sky = tmpA.setHex(SKY[s]).lerp(tmpB.setHex(SKY[next]), f);
+  moodAt(moodEpoch, mood);
+  const sky = tmpA.setHex(SKY[s]).lerp(tmpB.setHex(SKY[next]), f).lerp(mood.sky, mood.skyMix);
   (stage.scene.background as THREE.Color).copy(sky);
   stage.scene.fog?.color.copy(sky);
-  stage.sun.color.setHex(SUN[s]).lerp(tmpB.setHex(SUN[next]), f);
+  if (stage.scene.fog instanceof THREE.Fog) {
+    stage.scene.fog.near = BASE_FOG.near * mood.fog;
+    stage.scene.fog.far = BASE_FOG.far * mood.fog;
+  }
+  stage.sun.color.setHex(SUN[s]).lerp(tmpB.setHex(SUN[next]), f).lerp(mood.sun, mood.sunMix);
+  stage.hemi.color.copy(mood.hemiSky);
+  stage.hemi.groundColor.copy(mood.hemiGround);
   stage.postfx.setWarmth(WARMTH[s] + (WARMTH[next] - WARMTH[s]) * f);
+  stage.postfx.setMood(mood.saturation, mood.contrast, mood.tint);
 }
 
 const smooth = (x: number) => x * x * (3 - 2 * x);
@@ -1049,6 +1062,7 @@ function frame(): void {
   if (rivalDocked) syncViews();
   estates.update(dt, wind(state));
 
+  moodEpoch = easeEpoch(moodEpoch, state.epoch, dt);
   updateSeasonVisuals();
   land.update(dt, 0.012 * (1 + Math.max(0, state.waterLevel) * 0.35));
 

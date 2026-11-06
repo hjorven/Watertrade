@@ -39,6 +39,8 @@ export interface Voyage {
   hours: number;
   elapsed: number;
   toll?: number;
+  /** davon Treidelgeld (ab der Motorzeit bergauf für Treidelschiffe) */
+  towFee?: number;
 }
 
 export interface Captain {
@@ -200,8 +202,10 @@ export interface GameState {
   ledger: Ledger;
   /** Technische Epoche: 1 Treidelzeit, 2 Dampf, 3 Motor */
   epoch: number;
-  /** Epoche folgt den Spieljahren (freies Spiel) */
+  /** Epoche folgt dem Fortschritt im Tal, spätestens den Spieljahren (freies Spiel) */
   epochAuto: boolean;
+  /** Tag, an dem die aktuelle Epoche begann (fehlt in älteren Spielständen) */
+  epochDay?: number;
   works: Work[];
   /** Brennstoffkosten seit Mitternacht */
   fuelToday: number;

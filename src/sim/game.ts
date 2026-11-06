@@ -6,6 +6,7 @@ import { addShip, refreshTavern, runRoute } from './fleet.ts';
 import { tickHouse } from './house.ts';
 import { initialRivals, moveRivals, tickRivals } from './rivals.ts';
 import { EPOCHS, epochOfYear, MIN_FRESH, PERISH, SHIPS } from '../data/ships.ts';
+import { dueEpoch, TOW_FEE_EPOCH } from './epochs.ts';
 import { YEAR_DAYS, year } from './calendar.ts';
 import { addNews, day, shipClass, type GameEvent, type GameState, type NewsItem } from './state.ts';
 import { tickWorks } from './works.ts';
@@ -87,6 +88,7 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
     state.ice = isIce(day(state));
   }
   if (state.epochAuto) state.epoch = epochOfYear(year(day(state)));
+  state.epochDay = day(state);
   addShip(state, opts.startShip ?? 'treidelkahn', opts.startTown);
   for (const t of opts.extraShips ?? []) addShip(state, t, opts.startTown);
   for (const town of opts.kontore ?? []) state.kontore[town] = { level: 1, stock: {} };
@@ -114,6 +116,8 @@ export function upgradeState(state: GameState, map: MapDef): GameState {
     s.epochAuto = true;
     s.epoch = epochOfYear(year(day(s)));
   }
+  // ältere Spielstände: die Epoche begann spätestens mit ihrem Jahr
+  s.epochDay ??= Math.min(day(s), (EPOCHS[s.epoch - 1].from - 1) * YEAR_DAYS + 1);
   if (s.rivalsActive === undefined) {
     s.rivalsActive = true;
     s.rivals = [];
@@ -173,11 +177,13 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     tickHouse(state);
     pushNews(events, tickWorks(state, map), true);
     if (state.epochAuto) {
-      const e = epochOfYear(year(d));
+      const e = dueEpoch(state);
       if (e > state.epoch) {
         state.epoch = e;
+        state.epochDay = d;
         const name = EPOCHS.find((x) => x.number === e)!.name;
         pushNews(events, [addNews(state, 'ereignis', `Eine neue Zeit beginnt: ${name}. Die Werften bauen neue Schiffe.`)], true);
+        if (e >= TOW_FEE_EPOCH) pushNews(events, [addNews(state, 'ereignis', 'Die Treidelpfade verfallen. Wer bergauf treidelt, zahlt jetzt Treidelgeld.')], true);
         events.push({ type: 'epoch', epoch: e });
       }
     }
