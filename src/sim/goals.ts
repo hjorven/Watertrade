@@ -1,5 +1,7 @@
 import type { Goal } from '../data/campaign.ts';
 import type { GameState } from './game.ts';
+import { playerWorth } from './house.ts';
+import { rivalWorth } from './rivals.ts';
 import { levelOf } from './towns.ts';
 
 /** Fortschritt eines Ziels: aktueller Wert und Zielwert */
@@ -19,6 +21,28 @@ export function goalProgress(state: GameState, goal: Goal): { value: number; tar
       return { value: state.stats.delivered[goal.town]?.[goal.good] ?? 0, target: goal.amount };
     case 'rafts':
       return { value: state.stats.rafts, target: goal.count };
+    case 'kontore':
+      return { value: Object.keys(state.kontore).length, target: goal.count };
+    case 'betriebe':
+      return { value: state.betriebe.filter((b) => b.active).length, target: goal.count };
+    case 'contracts':
+      return { value: state.stats.contracts, target: goal.count };
+    case 'worth':
+      return { value: playerWorth(state), target: goal.amount };
+    case 'rank': {
+      const mine = playerWorth(state);
+      const place = 1 + state.rivals.filter((r) => rivalWorth(r) > mine).length;
+      // umgedreht, damit "Wert >= Ziel" auch hier "erfüllt" heißt
+      return { value: place <= goal.place ? 1 : 0, target: 1 };
+    }
+    case 'project':
+      return { value: state.works.some((w) => w.id === goal.id && w.done) ? 1 : 0, target: 1 };
+    case 'routes':
+      return { value: state.ships.filter((s) => s.route?.active && s.captain).length, target: goal.count };
+    case 'allTowns': {
+      const n = Object.values(state.towns).filter((t) => levelOf(t.population) >= goal.level).length;
+      return { value: n, target: Object.keys(state.towns).length };
+    }
   }
 }
 

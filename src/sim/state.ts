@@ -142,6 +142,13 @@ export interface Ledger {
   wages: number;
   upkeep: number;
   production: number; // Wert der eigenen Erzeugung zum Marktpreis
+  fuel?: number; // Kohle und Diesel
+}
+
+export interface Work {
+  id: string; // Projekt aus data/projects.ts
+  started: number; // Tag
+  done: boolean;
 }
 
 export interface GameState {
@@ -175,6 +182,13 @@ export interface GameState {
   nextId: number;
   rng: number;
   ledger: Ledger;
+  /** Technische Epoche: 1 Treidelzeit, 2 Dampf, 3 Motor */
+  epoch: number;
+  /** Epoche folgt den Spieljahren (freies Spiel) */
+  epochAuto: boolean;
+  works: Work[];
+  /** Brennstoffkosten seit Mitternacht */
+  fuelToday: number;
 }
 
 export function shipClass(ship: { type: string }): ShipClass {
@@ -276,4 +290,5 @@ export type GameEvent =
   | { type: 'arrived'; ship: number; town: string; auto?: boolean }
   | { type: 'newDay'; day: number }
   | { type: 'townLevel'; town: string; level: number; up: boolean; newGoods: string[] }
-  | { type: 'news'; item: NewsItem; important: boolean };
+  | { type: 'news'; item: NewsItem; important: boolean }
+  | { type: 'epoch'; epoch: number };

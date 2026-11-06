@@ -179,9 +179,10 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
 }
 
 /** Alte Steinbrücke mit zwei Bögen über einen Abschnitt mit Brückenhöhe */
-export function buildBridge(land: Landscape, seg: SegmentDef): THREE.Group {
+export function buildBridge(land: Landscape, seg: SegmentDef, modern = false): THREE.Group {
   const g = new THREE.Group();
   const t = seg.fromT + (seg.toT - seg.fromT) * 0.3;
+  if (modern) return modernBridge(land, seg, t);
   const p = land.pointAt(seg.river, t);
   const tan = land.tangentAt(seg.river, t);
   const hw = land.halfWidth(seg.river);
@@ -210,6 +211,50 @@ export function buildBridge(land: Landscape, seg: SegmentDef): THREE.Group {
   });
   g.position.set(p.x, 0, p.z);
   // Brücke quer zum Fluss: lokale x-Achse entlang der Ufernormalen
+  g.rotation.y = Math.atan2(-tan.z, tan.x) + Math.PI / 2;
+  return g;
+}
+
+/** Hohe Bogenbrücke aus Eisen auf Steinpfeilern, ersetzt die alte Steinbrücke */
+function modernBridge(land: Landscape, seg: SegmentDef, t: number): THREE.Group {
+  const g = new THREE.Group();
+  const p = land.pointAt(seg.river, t);
+  const tan = land.tangentAt(seg.river, t);
+  const hw = land.halfWidth(seg.river);
+  const span = hw * 2 + 9;
+  const stone = new THREE.MeshStandardMaterial({ color: 0xb8a588, roughness: 0.95, flatShading: true });
+  const iron = new THREE.MeshStandardMaterial({ color: 0x3e4a52, roughness: 0.6, metalness: 0.3 });
+  const deckY = (seg.bridgeHeight ?? 11) * 0.5 + 0.4;
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(span, 0.35, 2.2), iron);
+  deck.position.y = deckY;
+  g.add(deck);
+  // zwei Bögen als Fachwerk aus kurzen Stäben
+  for (const side of [-1, 1]) {
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i <= 16; i++) {
+      const x = -span / 2 + 1 + ((span - 2) * i) / 16;
+      const k = x / (span / 2 - 1);
+      pts.push(new THREE.Vector3(x, deckY + 0.2 + (1 - k * k) * 2.4, side * 1));
+    }
+    const arc = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.09, 5), iron);
+    g.add(arc);
+    for (let i = 1; i < 16; i += 2) {
+      const h = pts[i].y - deckY;
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.06, h, 0.06), iron);
+      post.position.set(pts[i].x, deckY + h / 2, side * 1);
+      g.add(post);
+    }
+  }
+  for (const x of [-hw - 2, hw + 2]) {
+    const pier = new THREE.Mesh(new THREE.BoxGeometry(1.6, deckY + 2, 2.8), stone);
+    pier.position.set(x, deckY / 2 - 1, 0);
+    g.add(pier);
+  }
+  g.traverse((o) => {
+    o.castShadow = true;
+    o.receiveShadow = true;
+  });
+  g.position.set(p.x, 0, p.z);
   g.rotation.y = Math.atan2(-tan.z, tan.x) + Math.PI / 2;
   return g;
 }

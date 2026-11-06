@@ -30,6 +30,39 @@ interface Model {
   crates: THREE.Mesh[];
   mastTop: THREE.Object3D | null;
   sail: THREE.Mesh | null;
+  /** Schaufelräder, drehen sich in Fahrt */
+  wheels?: THREE.Object3D[];
+  /** Schornsteinmündung für Rauch */
+  chimney?: THREE.Object3D;
+}
+
+/** Schaufelrad: Ring mit Schaufeln, dreht um die Querachse */
+function paddleWheel(): THREE.Group {
+  const g = new THREE.Group();
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.04, 5, 14), mat(0x3a2a1a));
+  g.add(ring);
+  for (let i = 0; i < 8; i++) {
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.4, 0.22), mat(0x7a3a2a));
+    const a = (i / 8) * Math.PI * 2;
+    blade.position.set(Math.cos(a) * 0.3, Math.sin(a) * 0.3, 0);
+    blade.rotation.z = a;
+    g.add(blade);
+  }
+  return g;
+}
+
+function funnel(root: THREE.Group, x: number, height: number, color: number): THREE.Object3D {
+  const f = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, height, 10), mat(color));
+  f.position.set(x, 0.4 + height / 2, 0);
+  f.castShadow = true;
+  root.add(f);
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.14, 10), mat(0x1e1e1e));
+  band.position.set(x, 0.4 + height - 0.1, 0);
+  root.add(band);
+  const top = new THREE.Object3D();
+  top.position.set(x, 0.4 + height + 0.05, 0);
+  root.add(top);
+  return top;
 }
 
 function crateGrid(root: THREE.Group, x0: number, dx: number, y: number): THREE.Mesh[] {
@@ -122,6 +155,99 @@ function buildModel(type: ShipClass): Model {
     return { root, crates: crateGrid(root, -1.0, 0.42, 0.42), mastTop: null, sail };
   }
 
+  if (type.id === 'raddampfer') {
+    // weißer Aufbau, rote Wasserlinie, Schaufelräder an beiden Seiten
+    const hull = new THREE.Mesh(hullGeometry(5, 1.4, 0.6, 0.22), mat(0x2b2b30, { flatShading: true }));
+    hull.castShadow = true;
+    root.add(hull);
+    const water = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.1, 1.42), mat(0x9a2a22));
+    water.position.set(-0.2, -0.05, 0);
+    root.add(water);
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(4.3, 0.05, 1.2), deckMat);
+    deck.position.y = 0.33;
+    root.add(deck);
+    const saloon = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.5, 1), mat(0xf2ede2));
+    saloon.position.set(-1.2, 0.6, 0);
+    saloon.castShadow = true;
+    root.add(saloon);
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.35, 0.8), mat(0xf2ede2));
+    bridge.position.set(-0.9, 1.02, 0);
+    root.add(bridge);
+    const wheels: THREE.Object3D[] = [];
+    for (const side of [-1, 1]) {
+      const w = paddleWheel();
+      w.position.set(0.2, 0.25, side * 0.82);
+      root.add(w);
+      wheels.push(w);
+      const box = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.26, 12, 1, false, 0, Math.PI), mat(0xf2ede2));
+      box.rotation.x = Math.PI / 2;
+      box.position.set(0.2, 0.3, side * 0.84);
+      root.add(box);
+    }
+    const chimney = funnel(root, 0.2, 1.7, 0xc9a23a);
+    return { root, crates: crateGrid(root, 1.0, 0.3, 0.36), mastTop: null, sail: null, wheels, chimney };
+  }
+
+  if (type.id === 'schleppverband') {
+    // Schlepper vorn, zwei Leichter dahinter an der Leine
+    const tug = new THREE.Mesh(hullGeometry(2, 1.0, 0.6, 0.3), mat(0x2f3a2f, { flatShading: true }));
+    tug.position.x = 2.4;
+    tug.castShadow = true;
+    root.add(tug);
+    const house = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.7), mat(0xe8e0cc));
+    house.position.set(2.2, 0.55, 0);
+    root.add(house);
+    const chimney = funnel(root, 2.6, 1.1, 0x2a2a2a);
+    for (const x of [0.3, -2.2]) {
+      const barge = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.55, 1.1), wood);
+      barge.position.set(x, 0.05, 0);
+      barge.castShadow = true;
+      root.add(barge);
+      const rim = new THREE.Mesh(new THREE.BoxGeometry(2.25, 0.08, 1.15), dark);
+      rim.position.set(x, 0.34, 0);
+      root.add(rim);
+    }
+    const line = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.03, 0.03), dark);
+    line.position.set(0.1, 0.36, 0);
+    root.add(line);
+    return { root, crates: crateGrid(root, -2.9, 0.44, 0.3), mastTop: null, sail: null, chimney };
+  }
+
+  if (type.id === 'motorschiff' || type.id === 'kuehlschiff') {
+    const cool = type.id === 'kuehlschiff';
+    const hull = new THREE.Mesh(hullGeometry(5.2, 1.3, 0.6, 0.18), mat(cool ? 0xe8ecef : 0x2c4a6a, { flatShading: true }));
+    hull.castShadow = true;
+    root.add(hull);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.08, 1.32), mat(cool ? 0x3a7aa8 : 0xd8d2c0));
+    stripe.position.set(-0.2, 0.22, 0);
+    root.add(stripe);
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.05, 1.12), mat(0x8a8a82));
+    deck.position.y = 0.32;
+    root.add(deck);
+    // Steuerhaus achtern mit Fensterband
+    const wheelhouse = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 1), mat(0xf4f1ea));
+    wheelhouse.position.set(-2, 0.65, 0);
+    wheelhouse.castShadow = true;
+    root.add(wheelhouse);
+    const glass = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.16, 1.02), mat(0x2a3a44));
+    glass.position.set(-2, 0.82, 0);
+    root.add(glass);
+    if (cool) {
+      // Kühlraum: weißer Kasten mit Lüftern
+      const hold = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.55, 1), mat(0xf6f8fa));
+      hold.position.set(0.2, 0.6, 0);
+      hold.castShadow = true;
+      root.add(hold);
+      for (const x of [-0.6, 0.2, 1.0]) {
+        const fan = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.1, 8), mat(0x6a7a86));
+        fan.position.set(x, 0.92, 0);
+        root.add(fan);
+      }
+    }
+    const chimney = funnel(root, -2.3, 0.6, cool ? 0x3a7aa8 : 0xb03a2a);
+    return { root, crates: crateGrid(root, cool ? 1.6 : -0.9, cool ? 0.18 : 0.42, 0.32), mastTop: null, sail: null, chimney };
+  }
+
   // Treidelkahn
   const hull = new THREE.Mesh(hullGeometry(3.7, 1.24, 0.55), wood);
   hull.castShadow = true;
@@ -182,6 +308,8 @@ export class ShipView {
   docked = false;
 
   private readonly pennant: THREE.Mesh;
+  private readonly puffs: THREE.Mesh[] = [];
+  private sailing = false;
 
   /** shipId < 0: Schiff der Konkurrenz, nicht anwählbar */
   constructor(land: Landscape, type: ShipClass, shipId: number, flagColor = 0xa8322a) {
@@ -202,6 +330,17 @@ export class ShipView {
     this.pennant.geometry.computeVertexNormals();
     this.pennant.position.set(-1.75, 1.58, 0);
     this.model.root.add(pole, this.pennant);
+
+    // Rauch aus dem Schornstein: ein paar Wölkchen, die aufsteigen und vergehen
+    if (this.model.chimney) {
+      const puffMat = new THREE.MeshStandardMaterial({ color: type.propulsion === 'steam' ? 0x4a4642 : 0x9a9690, transparent: true, opacity: 0.5, flatShading: true });
+      for (let i = 0; i < 6; i++) {
+        const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(0.18, 0), puffMat);
+        puff.userData.phase = i / 6;
+        this.model.root.add(puff);
+        this.puffs.push(puff);
+      }
+    }
 
     const wakeGeo = new THREE.BufferGeometry();
     wakeGeo.setAttribute('position', new THREE.Float32BufferAttribute([2.2, 0, 0, -5, 0, -2.2, -5, 0, 2.2], 3));
@@ -276,6 +415,7 @@ export class ShipView {
     this.group.position.set(mooring.x + tan.x * offset, 0, mooring.z + tan.z * offset);
     this.group.rotation.set(0, Math.atan2(-tan.z, tan.x), 0);
     this.docked = true;
+    this.sailing = false;
     this.wake.visible = false;
     if (this.horse) this.horse.visible = false;
     if (this.towLine) this.towLine.visible = false;
@@ -295,6 +435,7 @@ export class ShipView {
     const heading = Math.atan2(-tan.z, tan.x) + (downstream ? 0 : Math.PI);
     this.group.rotation.set(0, heading, 0);
     this.docked = false;
+    this.sailing = true;
     this.wake.visible = this.type.propulsion !== 'drift';
     if (this.model.sail) this.model.sail.scale.set(1, 1, 1);
 
@@ -321,6 +462,16 @@ export class ShipView {
     this.model.root.rotation.x = Math.sin(this.time * 1.3) * 0.02;
     this.marker.rotation.y += dt * 0.6;
     this.pennant.rotation.y = Math.sin(this.time * 3.1) * 0.35;
+    for (const w of this.model.wheels ?? []) if (this.sailing) w.rotation.z -= dt * 4;
+    const c = this.model.chimney;
+    if (c) {
+      for (const p of this.puffs) {
+        const a = (this.time * (this.sailing ? 0.6 : 0.25) + (p.userData.phase as number)) % 1;
+        p.position.set(c.position.x - a * (this.sailing ? 1.6 : 0.3), c.position.y + a * 1.4, c.position.z);
+        p.scale.setScalar(0.6 + a * 2);
+        p.visible = this.sailing || a < 0.5;
+      }
+    }
     if (this.towLine?.visible && this.horse && this.model.mastTop) {
       this.group.updateMatrixWorld();
       const a = new THREE.Vector3();

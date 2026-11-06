@@ -25,7 +25,7 @@ export function effectiveCurrent(seg: Segment, c: number | Conditions): number {
   return seg.current * (1 + Math.max(0, level) * 0.35);
 }
 
-export type Propulsion = 'drift' | 'tow' | 'sail';
+export type Propulsion = 'drift' | 'tow' | 'sail' | 'steam' | 'motor';
 
 export interface ShipType {
   id: string;

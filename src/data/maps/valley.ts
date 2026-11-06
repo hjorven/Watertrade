@@ -129,7 +129,7 @@ export const VALLEY: MapDef = {
         { name: 'Mühle', inputs: { getreide: 4 }, outputs: { mehl: 3 } },
         { name: 'Brauerei', inputs: { getreide: 2 }, outputs: { bier: 2 } },
       ],
-      shipyard: ['plaette', 'treidelkahn'],
+      shipyard: ['plaette', 'treidelkahn', 'raddampfer', 'motorschiff'],
     },
     {
       id: 'altenfurt',
@@ -182,7 +182,7 @@ export const VALLEY: MapDef = {
         { name: 'Bäckerei', inputs: { mehl: 3 }, outputs: { brot: 4 } },
         { name: 'Apotheke', inputs: { glas: 0.5, salz: 1 }, outputs: { arznei: 1 } },
       ],
-      shipyard: ['plaette', 'treidelkahn', 'segelkahn'],
+      shipyard: ['plaette', 'treidelkahn', 'segelkahn', 'raddampfer', 'schleppverband', 'motorschiff', 'kuehlschiff'],
     },
     {
       id: 'erzgrube',
