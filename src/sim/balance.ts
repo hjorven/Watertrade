@@ -9,7 +9,7 @@ import type { MapDef } from '../data/maps/valley.ts';
 import { buyCost, price, sellRevenue } from './economy.ts';
 import { hasYard, repair } from './fleet.ts';
 import { advance, buy, cargoLoad, day, depart, kontorBuy, kontorSell, newGame, planVoyage, sell, shipClass, type GameState } from './game.ts';
-import { betriebeIn, buildBetrieb, buildingAllowed, buildKontor, dailyUpkeep, playerWorth } from './house.ts';
+import { betriebeIn, buildBetrieb, buildingAllowed, buildKontor, dailyUpkeep, playerWorth, sellBetrieb } from './house.ts';
 import { rivalWorth } from './rivals.ts';
 
 export interface BalanceReport {
@@ -151,6 +151,13 @@ function localPrice(state: GameState, town: string): PriceOf {
 
 /** Ein Tag Hausverwaltung für den Bot: Rohware kaufen, Erzeugnisse verkaufen, neu bauen */
 function manageHouse(state: GameState, map: MapDef, opts: GrowthOptions): void {
+  // in der Klemme verkauft ein vernünftiger Spieler den schwächsten Betrieb, statt pleitezugehen
+  while (state.money < 0 && state.betriebe.length) {
+    const worst = state.betriebe
+      .map((b) => ({ b, m: dailyMargin(BUILDINGS.find((x) => x.id === b.type)!, localPrice(state, b.town)) }))
+      .sort((a, c) => a.m - c.m)[0];
+    sellBetrieb(state, worst.b.id);
+  }
   for (const b of state.betriebe) {
     const t = BUILDINGS.find((x) => x.id === b.type)!;
     // ein vernünftiger Spieler lässt Betriebe ruhen, die gerade Verlust machen oder für die das Geld fehlt
