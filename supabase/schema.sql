@@ -609,6 +609,17 @@ $$;
 -- 6. Liga-Funktionen neu
 ------------------------------------------------------------------------------
 
+-- FIX: Grenzen wie MIN_FACTOR/MAX_FACTOR in src/sim/economy.ts (0,5 bis 2,0).
+-- Vorher 0,3 bis 3,0, dadurch zeigte der Client andere Preise als der Server berechnete.
+create or replace function public.league_price(p_base integer, p_stock integer, p_target integer)
+returns integer
+language sql
+immutable
+set search_path = ''
+as $$
+  select greatest(1, round(p_base * least(2.0, greatest(0.5, p_target::numeric / greatest(1, p_stock)))))::integer;
+$$;
+
 -- Reisen: Dauer hängt vom Schiff ab und verlängert sich bei Hochwasser
 create or replace function public.league_travel(p_town text)
 returns public.league_players

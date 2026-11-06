@@ -6,7 +6,7 @@
 --   psql -d liga -c "insert into auth.users values ('11111111-1111-1111-1111-111111111111')"
 --   psql -d liga -f supabase/tests/liga_saisons_test.sql
 -- Der Block endet absichtlich mit einer Ausnahme "ERGEBNIS ...", damit alle Änderungen zurückgerollt werden.
--- Erwartet: kauf5 brot=277, verkauf5 mit zoll=204, plaette gold=720 wealth=860, reise dauer=30 s,
+-- Erwartet: kauf5 brot=260, verkauf5 mit zoll=195, plaette gold=720 wealth=860, reise dauer=30 s,
 -- rate: zu viele aktionen, halle=1/1/999/1, spieler=0, maerkte abweichend=0, drei Cron-Jobs.
 do $t$
 declare

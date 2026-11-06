@@ -9,6 +9,7 @@ import {
   toEvent,
   toPlayer,
 } from './index.ts';
+import { MAX_FACTOR, MIN_FACTOR } from '../sim/economy.ts';
 import {
   LEAGUE_ACTIONS_PER_MINUTE,
   LEAGUE_CAPACITY,
@@ -87,6 +88,8 @@ describe('Liga-Schiffe', () => {
       expect(m!.slice(1, 5).map(Number)).toEqual([s.price, s.capacity, s.travelSeconds, s.floodSeconds]);
     }
     expect(MIGRATION).toContain(`if v_count > ${LEAGUE_ACTIONS_PER_MINUTE} then`);
+    // Preisformel wie src/sim/economy.ts, sonst zeigt der Client andere Preise als der Server rechnet
+    expect(MIGRATION).toContain(`least(${MAX_FACTOR.toFixed(1)}, greatest(${MIN_FACTOR}, p_target::numeric`);
     expect(MIGRATION).toContain("when e.kind = 'zollstreit' then case when p_buy then 115 else 85 end");
     expect(MIGRATION).toContain("when e.kind = 'markttag'   then case when p_buy then 100 else 120 end");
   });
@@ -117,9 +120,9 @@ describe('Liga-Ereignisse', () => {
   });
 
   it('rundet wie der Server: Kauf auf, Verkauf ab', () => {
-    // Werte aus dem Datenbanktest: 241 Taler Erlös bei Zollstreit ergeben 204
-    expect(leagueSellTotal(241, 85)).toBe(204);
-    expect(leagueBuyTotal(277, 115)).toBe(319);
+    // Werte aus dem Datenbanktest: 230 Taler Erlös bei Zollstreit ergeben 195
+    expect(leagueSellTotal(230, 85)).toBe(195);
+    expect(leagueBuyTotal(53, 115)).toBe(61);
     expect(leagueBuyTotal(20, 115)).toBe(23);
     expect(leagueBuyTotal(100, 100)).toBe(100);
     expect(leagueSellTotal(100, 120)).toBe(120);
