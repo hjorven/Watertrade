@@ -2,6 +2,7 @@ import type { Goal } from '../data/campaign.ts';
 import type { GameState } from './game.ts';
 import { playerWorth } from './house.ts';
 import { rivalWorth } from './rivals.ts';
+import { steamDays } from './steam.ts';
 import { levelOf } from './towns.ts';
 
 /** Fortschritt eines Ziels: aktueller Wert und Zielwert */
@@ -19,6 +20,8 @@ export function goalProgress(state: GameState, goal: Goal): { value: number; tar
       return { value: levelOf(state.towns[goal.town].population), target: goal.level };
     case 'supply':
       return { value: Math.round(state.towns[goal.town].satisfaction * 100), target: goal.percent };
+    case 'steamDays':
+      return { value: steamDays(state), target: goal.days };
     case 'deliver':
       return { value: state.stats.delivered[goal.town]?.[goal.good] ?? 0, target: goal.amount };
     case 'rafts':

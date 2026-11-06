@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { CHAPTERS } from '../data/campaign.ts';
 import { VALLEY } from '../data/maps/valley.ts';
 import { chapterOneHint } from '../ui/tutorial.ts';
-import { runChapterOne } from './balance.ts';
-import { advance, buy, buyShip, depart, dismantleRaft, newGame, sell } from './game.ts';
+import { runChapterOne, runSteamChapter } from './balance.ts';
+import { addShip, advance, buy, buyShip, depart, dismantleRaft, fillBunker, newGame, sell } from './game.ts';
+import { bunkerPlan, planVoyage } from './voyage.ts';
+import { STEAM_MIN_HOURS, steamDays } from './steam.ts';
 import { goalProgress } from './goals.ts';
 import { bestRaftPlan } from './rafting.ts';
 
@@ -93,4 +95,73 @@ describe('Kapitel 1: Floßbau', () => {
     expect(m).toBeGreaterThanOrEqual(20);
     expect(m).toBeLessThanOrEqual(120);
   });
+});
+
+const k4 = CHAPTERS.find((c) => c.id === 'k4')!;
+const startK4 = () =>
+  newGame(VALLEY, { startTown: k4.startTown, money: k4.money, startShip: 'raddampfer', rivals: false, epoch: 2, startYear: 6, kontore: ['niedermuend'], works: k4.works });
+
+describe('Kapitel 4: Dampfer mit Kohle versorgen', () => {
+  it('ein Dampfer auf langer Fahrt bringt Dampfertage, kurze Hafentage nicht', () => {
+    const s = startK4();
+    const ship = s.ships[0];
+    advance(s, VALLEY, 48);
+    expect(steamDays(s)).toBe(0);
+    const v = depart(s, VALLEY, ship.id, 'muehlheim')!;
+    expect(v.hours).toBeGreaterThan(STEAM_MIN_HOURS);
+    advance(s, VALLEY, v.hours + 24);
+    expect(steamDays(s)).toBeGreaterThanOrEqual(1);
+    expect(steamDays(s)).toBeLessThanOrEqual(Math.ceil(v.hours / 24) + 1);
+  });
+
+  it('Kahn und Plätte zählen nicht', () => {
+    const s = startK4();
+    const kahn = addShip(s, 'treidelkahn', 'niedermuend');
+    const v = depart(s, VALLEY, kahn.id, 'weidenhof')!;
+    advance(s, VALLEY, v.hours + 24);
+    expect(steamDays(s)).toBe(0);
+  });
+
+  it('Dampfer bunkern zuerst eigene Kohle aus dem Kontor', () => {
+    const s = startK4();
+    const ship = s.ships[0];
+    ship.bunker = 0;
+    s.kontore.niedermuend.stock.kohle = { amount: 10, cost: 120 };
+    const hours = (planVoyage(s, VALLEY, ship.id, 'muehlheim') as { voyage: { hours: number } }).voyage.hours;
+    const plan = bunkerPlan(s, ship, hours);
+    expect(plan.fromKontor).toBe(10);
+    const money = s.money;
+    const marketBefore = s.markets.niedermuend.kohle.stock;
+    depart(s, VALLEY, ship.id, 'muehlheim');
+    expect(s.kontore.niedermuend.stock.kohle).toBeUndefined();
+    // der Rest kam vom Markt
+    expect(s.markets.niedermuend.kohle.stock).toBeCloseTo(marketBefore - plan.buy);
+    expect(money - s.money).toBe(plan.cost);
+  });
+
+  it('ohne Markt reicht Kontorkohle zum Ablegen', () => {
+    const s = startK4();
+    const ship = s.ships[0];
+    ship.port = 'muehlheim';
+    ship.bunker = 0;
+    s.kontore.muehlheim = { level: 1, stock: { kohle: { amount: 25, cost: 300 } } };
+    expect(s.markets.muehlheim.kohle).toBeUndefined();
+    const r = fillBunker(s, ship.id);
+    expect(r.ok).toBe(true);
+    expect(ship.bunker).toBe(25);
+    expect(r.taler).toBe(0);
+    expect(depart(s, VALLEY, ship.id, 'niedermuend')).not.toBeNull();
+  });
+
+  it('die Kapitelziele fragen Dampfer, Schleuse, Dampfertage und Vermögen ab', () => {
+    expect(k4.goals.map((g) => g.type)).toEqual(['ships', 'project', 'steamDays', 'worth']);
+    expect(k4.goals.some((g) => g.type === 'deliver')).toBe(false);
+  });
+
+  it('Bot: Kapitel 4 ist im Median in unter 400 Tagen geschafft, die Dampfertage nicht vor dem 150. Tag', () => {
+    const runs = [1, 2, 5].map((seed) => runSteamChapter(VALLEY, k4, 400, seed));
+    const steam = runs.map((r) => r.goalDays[2] ?? Infinity);
+    expect(median(steam)).toBeGreaterThanOrEqual(150);
+    expect(median(runs.map((r) => r.doneOn ?? Infinity))).toBeLessThan(400);
+  }, 60000);
 });

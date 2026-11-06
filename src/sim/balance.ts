@@ -11,7 +11,10 @@ import { MIN_FRESH, PERISH, SHIPS } from '../data/ships.ts';
 import { hasYard, repair, timberPlan } from './fleet.ts';
 import { bestRaftPlan } from './rafting.ts';
 import { goalDone } from './goals.ts';
-import { advance, buy, buyShip, cargoLoad, day, depart, dismantleRaft, kontorBuy, kontorSell, newGame, planVoyage, sell, shipClass, type GameState } from './game.ts';
+import { PROJECT_BY_ID } from '../data/projects.ts';
+import { startProject } from './works.ts';
+import { steamDays } from './steam.ts';
+import { advance, buy, bunkerPlan, buyShip, cargoLoad, day, depart, dismantleRaft, kontorBuy, kontorSell, newGame, planVoyage, sell, shipClass, type GameState } from './game.ts';
 import { betriebeIn, buildBetrieb, buildingAllowed, buildKontor, dailyUpkeep, playerWorth, sellBetrieb } from './house.ts';
 import { rivalWorth } from './rivals.ts';
 import { netFlow } from './towns.ts';
@@ -24,16 +27,23 @@ export interface BalanceReport {
 }
 
 /** Bester Handel für ein Schiff im Hafen: Ware, Ziel und erwarteter Gewinn pro Stunde */
-function bestTrade(state: GameState, map: MapDef, shipId: number) {
+function bestTrade(state: GameState, map: MapDef, shipId: number, allow: (town: string) => boolean = () => true) {
   const ship = state.ships.find((s) => s.id === shipId)!;
   const here = state.markets[ship.port!];
   const cap = shipClass(ship).capacity;
   let best: { good: string; to: string; amount: number; perHour: number } | null = null;
   for (const town of map.towns) {
-    if (town.id === ship.port) continue;
+    if (town.id === ship.port || !allow(town.id)) continue;
     const plan = planVoyage(state, map, shipId, town.id);
     if (!plan || !plan.ok) continue;
     const there = state.markets[town.id];
+    // Dampfer: Kohle für die Fahrt mitrechnen (Kontorkohle kostet nichts mehr, Marktkohle zum Marktpreis)
+    const coal = bunkerPlan(state, ship, plan.voyage.hours, plan.voyage.toll ?? 0);
+    if (coal.problem) continue;
+    // verbrannte Kohle zum Preis, den Nachkaufen kostet (auch wenn sie schon im Bunker liegt)
+    const coalMarket = state.markets[ship.port!].kohle;
+    const paid = Math.max(0, coal.need - coal.fromKontor);
+    const coalCost = paid * (coalMarket ? price(GOOD_BY_ID.get('kohle')!.base, coalMarket.stock, coalMarket.target) : GOOD_BY_ID.get('kohle')!.base);
     for (const [goodId, m] of Object.entries(here)) {
       const dest = there[goodId];
       if (!dest) continue;
@@ -43,9 +53,10 @@ function bestTrade(state: GameState, map: MapDef, shipId: number) {
       for (let amount = 5; amount <= max; amount += 5) {
         const cost = buyCost(base, m, amount);
         if (cost > state.money) break;
+        if (cost + coal.cost > state.money) break;
         // verderbliche Ware kommt ohne Kühlraum mit weniger Wert an
         const fresh = shipClass(ship).fresh ? 1 : Math.max(MIN_FRESH, 1 - ((PERISH[goodId] ?? 0) * plan.voyage.hours) / 24);
-        const perHour = (sellRevenue(base, dest, amount, SELL_FACTOR * fresh) - cost) / plan.voyage.hours;
+        const perHour = (sellRevenue(base, dest, amount, SELL_FACTOR * fresh) - cost - coalCost) / plan.voyage.hours;
         if (!best || perHour > best.perHour) best = { good: goodId, to: town.id, amount, perHour };
       }
     }
@@ -143,6 +154,8 @@ export interface GrowthReport {
 export interface GrowthOptions {
   /** Kontore und Betriebe bauen (die "Kontor vollstopfen"-Strategie) */
   build?: boolean;
+  /** Waren, die im Kontor bleiben (z. B. Kohle für die eigenen Dampfer) */
+  keep?: string[];
   seed?: number;
 }
 
@@ -176,7 +189,7 @@ function manageHouse(state: GameState, map: MapDef, opts: GrowthOptions): void {
   }
   for (const [town, k] of Object.entries(state.kontore)) {
     const inputs = new Set(betriebeIn(state, town).flatMap((b) => Object.keys(BUILDINGS.find((x) => x.id === b.type)!.inputs)));
-    for (const [g, slot] of Object.entries(k.stock)) if (!inputs.has(g) && slot.amount >= 1) kontorSell(state, town, g, Math.floor(slot.amount));
+    for (const [g, slot] of Object.entries(k.stock)) if (!inputs.has(g) && !opts.keep?.includes(g) && slot.amount >= 1) kontorSell(state, town, g, Math.floor(slot.amount));
   }
   if (!opts.build) return;
   // Rücklage: 15 Tage Löhne und Unterhalt, sonst geht der Bot in einer Flaute pleite
@@ -354,4 +367,82 @@ export function runChapterOne(map: MapDef, chapter: Chapter, maxDays: number, se
   }
   const doneOn = goalDays.every((d) => d !== null) ? Math.max(...(goalDays as number[])) : null;
   return { goalDays, doneOn };
+}
+
+/**
+ * Kapitel 4 wie ein Spieler, der die Ziele der Reihe nach angeht: erst mit Kahn und Plätte Geld verdienen
+ * und lohnende Betriebe bauen, dann die Schleuse, dann Raddampfer bis zur Zielzahl. Sind alle Dampfer da,
+ * fahren sie auch bei kleinem Verlust, damit die Dampfertage zusammenkommen.
+ * Kohle bunkern sie wie im Spiel beim Ablegen, zuerst aus dem eigenen Kontor.
+ */
+export function runSteamChapter(map: MapDef, chapter: Chapter, maxDays: number, seed = 1): ChapterRun & { coalPrice: number[] } {
+  const state = newGame(map, {
+    startTown: chapter.startTown,
+    money: chapter.money,
+    startShip: chapter.startShip,
+    allowedShips: chapter.allowedShips,
+    rivals: chapter.rivals ?? false,
+    epoch: chapter.epoch,
+    startYear: chapter.startYear,
+    extraShips: chapter.extraShips,
+    kontore: chapter.kontore,
+    works: chapter.works,
+    seed,
+  });
+  const goal = chapter.goals.find((g) => g.type === 'steamDays');
+  const fleet = chapter.goals.find((g) => g.type === 'ships' && g.shipType === 'raddampfer');
+  const want = fleet?.type === 'ships' ? fleet.count : 0;
+  const startDay = day(state);
+  const goalDays: (number | null)[] = chapter.goals.map(() => null);
+  const coalPrice: number[] = [];
+  let lastDay = startDay;
+  while (day(state) - startDay < maxDays) {
+    const lock = chapter.goals.find((g) => g.type === 'project');
+    const lockId = lock?.type === 'project' ? lock.id : null;
+    const lockStarted = !lockId || state.works.some((w) => w.id === lockId);
+    if (!lockStarted && state.money > (PROJECT_BY_ID.get(lockId!)?.cost ?? 0) + 4000) startProject(state, lockId!);
+    // eigene Kohle: Kontor mit zwei Meilern in der Kohlenstadt, sobald die Schleuse gebaut wird
+    const pit = map.towns.find((t) => buildingAllowed(map, t.id, 'koehlerei'));
+    if (lockStarted && pit && betriebeIn(state, pit.id).filter((b) => b.type === 'koehlerei').length < 2 && state.money > 4000) {
+      if (!state.kontore[pit.id]) buildKontor(state, pit.id);
+      buildBetrieb(state, map, pit.id, 'koehlerei');
+    }
+    const steamers = state.ships.filter((s) => s.type === 'raddampfer').length;
+    const yard = state.ships.find((s) => s.port && map.towns.find((t) => t.id === s.port)?.shipyard.includes('raddampfer'));
+    if (lockStarted && steamers < want && yard && state.money > SHIPS.raddampfer.price + 4000) buyShip(state, map, yard.port!, 'raddampfer');
+    const fleetReady = steamers >= want;
+    for (const ship of state.ships) {
+      if (!ship.port) continue;
+      for (const good of Object.keys(ship.cargo)) sell(state, ship.id, good, Infinity);
+      if (ship.condition < 0.6 && hasYard(map, ship.port)) repair(state, map, ship.id);
+      // Dampfer fahren nur Häfen mit Kohle an (Markt oder eigenes Kontor), sonst bleiben sie liegen
+      const coalOk = (town: string) => !shipClass(ship).coal || !!state.markets[town].kohle || (state.kontore[town]?.stock.kohle?.amount ?? 0) > 20;
+      const minGain = fleetReady && shipClass(ship).coal ? -10 : 0;
+      const t = bestTrade(state, map, ship.id, coalOk);
+      if (t && t.perHour > minGain) {
+        buy(state, ship.id, t.good, t.amount);
+        while (cargoLoad(ship) > 0 && !depart(state, map, ship.id, t.to)) sell(state, ship.id, t.good, 5);
+      } else if (fleetReady && shipClass(ship).coal && steamDays(state) < (goal?.type === 'steamDays' ? goal.days : 0)) {
+        // für die Dampfertage leer zum nächsten Hafen mit Kohle weiterfahren
+        const next = map.towns
+          .filter((x) => x.id !== ship.port && coalOk(x.id))
+          .map((x) => ({ id: x.id, plan: planVoyage(state, map, ship.id, x.id) }))
+          .filter((x) => x.plan?.ok)
+          .sort((a, b) => (a.plan as { voyage: { hours: number } }).voyage.hours - (b.plan as { voyage: { hours: number } }).voyage.hours)[0];
+        if (next) depart(state, map, ship.id, next.id);
+      }
+    }
+    advance(state, map, 1);
+    const d = day(state);
+    if (d !== lastDay) {
+      lastDay = d;
+      manageHouse(state, map, { build: !lockStarted, keep: ['kohle'] });
+      const m = state.markets.niedermuend.kohle;
+      coalPrice.push(m ? price(GOOD_BY_ID.get('kohle')!.base, m.stock, m.target) : 0);
+      if ((globalThis as any).DBG && (d - startDay) % 25 === 0) console.log('D', d - startDay, Math.round(state.money), Math.round(playerWorth(state)), state.ships.map((s) => `${s.type}@${s.port ?? '~'}`).join(' '), state.stats.steamDays ?? 0, state.betriebe.map((b) => b.town + ':' + b.type).join(','));
+      if (trackGoals(state, chapter, startDay, goalDays)) break;
+    }
+  }
+  const doneOn = goalDays.every((d) => d !== null) ? Math.max(...(goalDays as number[])) : null;
+  return { goalDays, doneOn, coalPrice };
 }

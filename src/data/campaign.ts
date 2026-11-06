@@ -5,6 +5,8 @@ export type Goal =
   | { type: 'townLevel'; town: string; level: number; text: string }
   /** Versorgung einer Stadt in Prozent (die Leiste im Stadtfenster) */
   | { type: 'supply'; town: string; percent: number; text: string }
+  /** Dampfertage: je Tag und eigenem Kohledampfer, der mindestens 4 Stunden gefahren ist, einer */
+  | { type: 'steamDays'; days: number; text: string }
   | { type: 'deliver'; town: string; good: string; amount: number; text: string }
   | { type: 'rafts'; count: number; text: string }
   | { type: 'kontore'; count: number; text: string }
@@ -121,7 +123,7 @@ export const CHAPTERS: Chapter[] = [
     title: 'Dampf auf dem Strom',
     intro: [
       'Niedermünd, Jahr 6. Ein Schiff ohne Pferde und ohne Segel kommt den Strom herauf, gegen die Strömung, schwarzer Rauch über dem Schornstein. Die Treidler am Ufer schauen ihm stumm nach.',
-      'Dampfer brauchen Kohle und tiefes Wasser. Der Erzbach ist für sie zu seicht, die Kohle liegt aber genau dort. Bau Schleusen, und die Kohle kommt zu dir.',
+      'Dampfer sind schnell, aber hungrig: Jeder verbrennt in einer Stunde mehr als ein Kohlenträger am Tag schleppt. Kohle gibt es im Tal nur in Erzgrube, und der Erzbach ist für Dampfer zu seicht. Bau Schleusen, lass eigene Meiler brennen und lagere Kohle im Kontor. Dampfer bunkern dort zuerst die eigene Kohle.',
     ],
     outro: 'Kohle fährt den Erzbach hinunter, Dampfer den Strom hinauf. Das Tal ist schneller geworden.',
     startTown: 'niedermuend',
@@ -135,9 +137,9 @@ export const CHAPTERS: Chapter[] = [
     kontore: ['niedermuend'],
     works: ['bruecke-kessel'],
     goals: [
-      { type: 'ships', count: 2, shipType: 'raddampfer', text: 'Stell zwei Raddampfer in Dienst' },
+      { type: 'ships', count: 3, shipType: 'raddampfer', text: 'Stell drei Raddampfer in Dienst' },
       { type: 'project', id: 'schleuse-erzbach', text: 'Bau die Schleusentreppe am Erzbach' },
-      { type: 'deliver', town: 'niedermuend', good: 'kohle', amount: 300, text: 'Bring 300 t Kohle nach Niedermünd' },
+      { type: 'steamDays', days: 90, text: 'Halte deine Dampfer 90 Dampfertage unter Dampf, etwa drei Dampfer 30 Tage lang' },
       { type: 'worth', amount: 50000, text: 'Bring dein Haus auf 50.000 Taler Vermögen' },
     ],
   },
