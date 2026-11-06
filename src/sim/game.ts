@@ -9,7 +9,7 @@ import { initialRivals, moveRivals, tickRivals } from './rivals.ts';
 import { weakenHouse } from './rivalry.ts';
 import { EPOCHS, epochOfYear, MIN_FRESH, PERISH, SHIPS } from '../data/ships.ts';
 import { YEAR_DAYS, year } from './calendar.ts';
-import { addNews, day, shipClass, type GameEvent, type GameState, type NewsItem } from './state.ts';
+import { addNews, day, shipClass, withStream, type GameEvent, type GameState, type NewsItem } from './state.ts';
 import { tickWorks } from './works.ts';
 import { observe, tickMarketInfo, tripArrive, tripSail } from './market-info.ts';
 import { initialMarket, initialTown, tickTown } from './towns.ts';
@@ -43,6 +43,10 @@ export interface NewGameOptions {
   startYear?: number;
   /** KI-Haus, das geschwächt startet (Kapitel mit Übernahme-Ziel) */
   weakHouse?: string;
+  /** Tage nach Jahresbeginn, an dem das Spiel startet (z. B. 30 = erster Sommertag) */
+  startDay?: number;
+  /** Tagesmarkt: getrennte Zufallsströme je System aus diesem Startwert (siehe withStream) */
+  fairSeed?: number;
 }
 
 export const START_MONEY = 500;
@@ -82,14 +86,16 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
     contracts: [],
     nextId: 1,
     rng: opts.seed ?? 20260601,
+    ...(opts.fairSeed !== undefined ? { fairSeed: opts.fairSeed } : {}),
     ledger: { day: 0, wages: 0, upkeep: 0, production: 0 },
     epoch: opts.epoch ?? 1,
     epochAuto: opts.epoch === undefined,
     works: (opts.works ?? []).map((id) => ({ id, started: 0, done: true })),
     fuelToday: 0,
   };
-  if (opts.startYear && opts.startYear > 1) {
-    state.hour += (opts.startYear - 1) * YEAR_DAYS * 24;
+  const startDays = Math.max(0, (opts.startYear ?? 1) - 1) * YEAR_DAYS + Math.max(0, Math.floor(opts.startDay ?? 0));
+  if (startDays > 0) {
+    state.hour += startDays * 24;
     state.waterLevel = waterLevel(state.hour / 24 + 1);
     state.ice = isIce(day(state));
   }
@@ -97,8 +103,8 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
   addShip(state, opts.startShip ?? 'treidelkahn', opts.startTown);
   for (const t of opts.extraShips ?? []) addShip(state, t, opts.startTown);
   for (const town of opts.kontore ?? []) state.kontore[town] = { level: 1, stock: {} };
-  refreshTavern(state, map);
-  if (state.rivalsActive) state.rivals = initialRivals(state);
+  withStream(state, 'kneipe', 0, () => refreshTavern(state, map));
+  if (state.rivalsActive) state.rivals = withStream(state, 'konkurrenz-start', 0, () => initialRivals(state));
   state.priceBook = {};
   state.priceHistory = {};
   observe(state, opts.startTown);
@@ -207,10 +213,10 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
         events.push({ type: 'epoch', epoch: e });
       }
     }
-    pushNews(events, tickEvents(state, map), true);
-    pushNews(events, tickContracts(state, map), false);
-    if (state.rivalsActive) pushNews(events, tickRivals(state, map), false);
-    if (d % TAVERN_DAYS === 0) refreshTavern(state, map);
+    pushNews(events, withStream(state, 'ereignisse', d, () => tickEvents(state, map)), true);
+    pushNews(events, withStream(state, 'auftraege', d, () => tickContracts(state, map)), false);
+    if (state.rivalsActive) pushNews(events, withStream(state, 'konkurrenz', d, () => tickRivals(state, map)), false);
+    if (d % TAVERN_DAYS === 0) withStream(state, 'kneipe', d, () => refreshTavern(state, map));
     pushNews(events, tickMarketInfo(state, map), false);
     state.ice = isIce(d);
     events.push({ type: 'newDay', day: d });
@@ -249,7 +255,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     }
     if (ship.route?.active && ship.port && !ship.voyage) runRoute(state, map, ship);
   }
-  if (state.rivalsActive) moveRivals(state, map, hours);
+  if (state.rivalsActive) withStream(state, 'konkurrenz-fahrt', Math.floor(state.hour), () => moveRivals(state, map, hours));
 }
 
 export function anySailing(state: GameState): boolean {

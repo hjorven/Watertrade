@@ -1,7 +1,8 @@
 import './style.css';
 import * as THREE from 'three';
 import { CHAPTERS, type Chapter } from './data/campaign.ts';
-import { CHALLENGES, DAILY_DAYS, dailySetup } from './data/challenges.ts';
+import { CHALLENGES, DAILY_DAYS } from './data/challenges.ts';
+import { newDailyGame } from './sim/daily.ts';
 import { newAchievements, ACHIEVEMENTS } from './sim/achievements.ts';
 import { OnlineScreens } from './ui/online-screens.ts';
 import { GOOD_BY_ID, GOODS } from './data/goods.ts';
@@ -146,13 +147,16 @@ interface Progress {
   unlocked: string[];
   /** bestandene Herausforderungen: Id -> wenigste Tage */
   challenges?: Record<string, number>;
-  /** bestes lokales Tagesmarkt-Ergebnis je Kalendertag */
+  /** gewertetes lokales Tagesmarkt-Ergebnis je Kalendertag (erster Versuch) */
   daily?: Record<string, number>;
+  /** Kalendertage, an denen der gewertete Versuch schon begonnen wurde */
+  dailyTried?: string[];
 }
 const settings = loadJson<Settings>('settings', { tiltShift: true });
 const progress = loadJson<Progress>('progress', { unlocked: ['k1'] });
 progress.challenges ??= {};
 progress.daily ??= {};
+progress.dailyTried ??= [];
 const achieved = loadJson<Record<string, string>>('achievements', {});
 // Anmeldelink aus der Adresse übernehmen, falls jemand über die E-Mail zurückkommt.
 // Supabase wird nur dann sofort geladen, sonst erst beim ersten Online-Bildschirm.
@@ -175,6 +179,8 @@ interface Session {
   /** Spielstunde beim Start, für Zeitlimits */
   startHour?: number;
   dailyDay?: string;
+  /** Tagesmarkt: gewerteter Versuch (sonst Übungsrunde) */
+  dailyScored?: boolean;
 }
 
 let state: GameState = newGame(VALLEY, 'oberau');
@@ -529,12 +535,13 @@ const menu = new Menu(
 );
 
 const screens = new OnlineScreens(menu, VALLEY, {
-  startDaily(day, seed) {
-    const setup = dailySetup(seed);
-    startGame(
-      newGame(VALLEY, { startTown: setup.startTown, money: setup.money, startYear: setup.startYear, seed, rivals: true }),
-      { mode: 'tagesmarkt', completed: new Set(), finished: false, dailyDay: day },
-    );
+  startDaily(day, seed, scored) {
+    if (scored && !progress.dailyTried!.includes(day)) {
+      // nur die letzten Tage merken, damit die Liste nicht wächst
+      progress.dailyTried = [...progress.dailyTried!, day].slice(-14);
+      saveJson('progress', progress);
+    }
+    startGame(newDailyGame(VALLEY, day, seed), { mode: 'tagesmarkt', completed: new Set(), finished: false, dailyDay: day, dailyScored: scored });
   },
   currentSave: () => (inGame && canSave() ? makeSave() : null),
   inGame: () => inGame,
@@ -544,7 +551,7 @@ const screens = new OnlineScreens(menu, VALLEY, {
   unlock,
   achievements: () => achieved,
   challenges: () => progress.challenges!,
-  dailyBest: (day) => progress.daily![day] ?? null,
+  dailyLocal: (day) => ({ tried: progress.dailyTried!.includes(day), worth: progress.daily![day] ?? null }),
   toast: (text, kind) => hud.toast(text, kind),
   sfx: (name) => sfx(name),
 });
@@ -646,7 +653,7 @@ function summary(s: SaveGame): string {
       : s.mode === 'herausforderung'
         ? `Herausforderung ${CHALLENGES.find((c) => c.id === s.chapter)?.title ?? ''}`
         : s.mode === 'tagesmarkt'
-          ? `Tagesmarkt ${s.dailyDay ?? ''}`
+          ? `Tagesmarkt ${s.dailyDay ?? ''}${s.dailyScored ? '' : ' (Übung)'}`
           : 'Freies Spiel';
   return `${what}, ${dateText(day)}, ${s.state.money} Taler`;
 }
@@ -660,6 +667,7 @@ function makeSave(): SaveGame {
     completedGoals: [...session.completed],
     startHour: session.startHour,
     dailyDay: session.dailyDay,
+    dailyScored: session.dailyScored,
     state,
   };
 }
@@ -701,6 +709,7 @@ function startSave(save: SaveGame): boolean {
       (save.mode === 'herausforderung' && !!chapter?.deadlineDays && daysPlayed >= chapter.deadlineDays),
     startHour: save.startHour,
     dailyDay: save.dailyDay,
+    dailyScored: save.dailyScored === true,
   });
   return true;
 }
@@ -789,7 +798,7 @@ function checkDaily(): void {
   const played = daysPlayed();
   const worth = Math.round(playerWorth(state));
   if (played < DAILY_DAYS) {
-    hud.renderGoals(`Tagesmarkt · Tag ${played + 1} von ${DAILY_DAYS}`, [
+    hud.renderGoals(`Tagesmarkt${session.dailyScored ? '' : ' (Übung)'} · Tag ${played + 1} von ${DAILY_DAYS}`, [
       { text: `Vermögen ${fmtNum(worth)} Taler`, done: false, progress: `Kasse, Schiffe, Kontore und Ladung` },
       { text: `Noch ${DAILY_DAYS - played} Tage bis zur Abrechnung`, done: false, progress: '' },
     ]);
@@ -799,11 +808,12 @@ function checkDaily(): void {
   running = false;
   hud.renderGoals(null, []);
   const day = session.dailyDay ?? '';
-  if (!progress.daily![day] || worth > progress.daily![day]) progress.daily![day] = worth;
+  // Gewertet ist nur der erste Versuch des Tages, Übungsrunden ändern das Ergebnis nicht
+  if (session.dailyScored && progress.daily![day] === undefined) progress.daily![day] = worth;
   saveJson('progress', progress);
   saveSlot('auto');
   sfx('stempel');
-  void screens.finishDaily(day, worth);
+  void screens.finishDaily(day, worth, !!session.dailyScored);
 }
 
 // --- Ereignisse ---
