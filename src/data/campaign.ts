@@ -145,7 +145,7 @@ export const CHAPTERS: Chapter[] = [
     goals: [
       { type: 'ships', count: 3, shipType: 'raddampfer', text: 'Stell drei Raddampfer in Dienst' },
       { type: 'project', id: 'schleuse-erzbach', text: 'Bau die Schleusentreppe am Erzbach' },
-      { type: 'steamDays', days: 90, text: 'Sammle 90 Dampfertage, etwa drei Dampfer 30 Tage lang (ein Dampfertag: mindestens 4 Fahrstunden an einem Tag)' },
+      { type: 'steamDays', days: 135, text: 'Sammle 135 Dampfertage, etwa drei Dampfer 45 Tage lang (ein Dampfertag: mindestens 4 Fahrstunden an einem Tag)' },
       { type: 'worth', amount: 50000, text: 'Bring dein Haus auf 50.000 Taler Vermögen' },
     ],
   },

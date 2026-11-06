@@ -123,22 +123,34 @@ export function netFlow(def: TownDef, good: string, town?: TownState): number {
   return net;
 }
 
-/** Marktgröße wächst mit der Stadt, aber langsamer als die Einwohnerzahl */
-export function marketTarget(def: TownDef, town: TownState): number {
-  return Math.round(def.target * Math.sqrt(town.population / def.population));
+/**
+ * Markttiefe je Epoche (Index = Epoche): Eisenbahnanschluss, Lagerhäuser und Fabriken machen die Märkte
+ * der Dampf- und Motorzeit tiefer. Ohne das verdient ein schnelles Schiff kaum mehr als ein Treidelkahn,
+ * weil der Markt jede Fahrt nach wenigen Tonnen sättigt und das Schiff dann nur wartet.
+ */
+export const MARKET_DEPTH = [1, 1, 1.4, 1.8];
+
+export function marketDepth(epoch = 1): number {
+  return MARKET_DEPTH[Math.min(MARKET_DEPTH.length - 1, Math.max(1, epoch))];
+}
+
+/** Marktgröße wächst mit der Stadt, aber langsamer als die Einwohnerzahl, und mit der Epoche */
+export function marketTarget(def: TownDef, town: TownState, epoch = 1): number {
+  return Math.round(def.target * Math.sqrt(town.population / def.population) * marketDepth(epoch));
 }
 
 export function initialTown(def: TownDef): TownState {
   return { population: def.population, satisfaction: GROWTH_THRESHOLD };
 }
 
-export function initialMarket(def: TownDef, town: TownState = initialTown(def)): TownMarket {
+export function initialMarket(def: TownDef, town: TownState = initialTown(def), epoch = 1): TownMarket {
   const m: TownMarket = {};
+  const target = Math.round(def.target * marketDepth(epoch));
   const goods = new Set([...tradedGoods(def), ...Object.keys(needs(def, town))]);
   for (const good of goods) {
     const net = netFlow(def, good, town);
     const factor = net > 0 ? 1.6 : net < 0 ? 0.7 : 1;
-    m[good] = { good, stock: def.target * factor, target: def.target };
+    m[good] = { good, stock: target * factor, target };
   }
   return m;
 }
@@ -162,6 +174,8 @@ export interface TownTickOptions {
   growth?: number;
   /** Faktor auf das Schrumpfen (Armenhaus) */
   shrink?: number;
+  /** Epoche: spätere Epochen haben tiefere Märkte (MARKET_DEPTH) */
+  epoch?: number;
 }
 
 /**
@@ -174,19 +188,21 @@ export interface TownTickOptions {
  */
 export function tickTown(def: TownDef, market: TownMarket, town: TownState, opts: TownTickOptions = {}): TownTickResult {
   const result: TownTickResult = { newGoods: [] };
-  const target = marketTarget(def, town);
+  const target = marketTarget(def, town, opts.epoch);
   for (const m of Object.values(market)) m.target = target;
   const cap = target * STOCK_CAP;
   const workforce = 0.6 + 0.4 * (town.population / def.population);
+  // spätere Epochen: mehr Umschlag in gleichem Verhältnis zum tieferen Markt, die Preise bleiben gleich
+  const depth = marketDepth(opts.epoch);
 
   for (const [good, amount] of Object.entries(def.produces)) {
     const m = market[good];
-    m.stock = Math.min(cap, m.stock + amount * workforce);
+    m.stock = Math.min(cap, m.stock + amount * workforce * depth);
   }
 
   for (const ind of openIndustries(def, town)) {
     // Anteil eines vollen Arbeitstags, den die Eingangswaren erlauben
-    let share = 1;
+    let share = depth;
     for (const [good, need] of Object.entries(ind.inputs)) share = Math.min(share, market[good].stock / need);
     for (const [good, out] of Object.entries(ind.outputs)) {
       const room = (cap - market[good].stock) / out;
@@ -206,7 +222,7 @@ export function tickTown(def: TownDef, market: TownMarket, town: TownState, opts
     satSum += Math.min(1, ratio);
     satN++;
     const appetite = Math.min(1.5, Math.max(0, ratio));
-    m.stock = Math.max(0, m.stock - amount * appetite);
+    m.stock = Math.max(0, m.stock - amount * appetite * depth);
   }
 
   // Das Umland deckt den Bedarf nur zum Teil: ohne Händler bleiben Bedarfswaren knapp

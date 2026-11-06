@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BUILDING_BY_ID, BUILDINGS } from '../data/buildings.ts';
 import { CHAPTERS, type Chapter } from '../data/campaign.ts';
 import { VALLEY } from '../data/maps/valley.ts';
-import { SHIPS } from '../data/ships.ts';
+import { EPOCHS, SHIPS } from '../data/ships.ts';
 import {
   dailyMargin,
   K2_MIN_DAYS,
@@ -12,7 +12,9 @@ import {
   rivalPeak,
   runGrowth,
 } from './balance.ts';
-import { waterLevel } from './calendar.ts';
+import { waterLevel, YEAR_DAYS } from './calendar.ts';
+import { price } from './economy.ts';
+import { marketDepth } from './towns.ts';
 import { advance, buyShip, depart, dismantleRaft, hoursToArrival, newGame } from './game.ts';
 import { blockReason, type ShipType } from './river.ts';
 import { TIGHT_DEPTH, WEAR_PER_HOUR, wearFactor } from './voyage.ts';
@@ -132,6 +134,33 @@ describe('Balance: Dampf und Motor', () => {
       expect(gain('motorschiff', seed), `Motorschiff, Seed ${seed}`).toBeGreaterThan(kahn * 0.5);
     }
   }, 60000);
+});
+
+describe('Balance: tiefere Märkte in späteren Epochen', () => {
+  it('Dampf- und Motorzeit haben tiefere Märkte bei gleichen Preisen', () => {
+    expect(marketDepth(1)).toBe(1);
+    expect(marketDepth(2)).toBeGreaterThan(1);
+    expect(marketDepth(3)).toBeGreaterThan(marketDepth(2));
+    const a = newGame(VALLEY, { startTown: 'niedermuend', epoch: 1, rivals: false });
+    const c = newGame(VALLEY, { startTown: 'niedermuend', epoch: 3, rivals: false });
+    const m1 = a.markets.niedermuend.getreide;
+    const m3 = c.markets.niedermuend.getreide;
+    expect(m3.target).toBe(Math.round(m1.target * marketDepth(3)));
+    expect(price(10, m3.stock, m3.target)).toBe(price(10, m1.stock, m1.target));
+  });
+
+  it('beim Epochenwechsel wachsen die Lager mit, die Preise springen nicht', () => {
+    const s = newGame(VALLEY, { startTown: 'niedermuend', rivals: false });
+    // kurz vor Beginn der Dampfzeit
+    s.hour = ((EPOCHS[1].from - 1) * YEAR_DAYS - 1) * 24 + 8;
+    expect(s.epoch).toBe(1);
+    const m = s.markets.niedermuend.getreide;
+    const before = price(10, m.stock, m.target);
+    advance(s, VALLEY, 48);
+    expect(s.epoch).toBe(2);
+    expect(m.target).toBeGreaterThan(VALLEY.towns.find((t) => t.id === 'niedermuend')!.target);
+    expect(Math.abs(price(10, m.stock, m.target) - before)).toBeLessThanOrEqual(2);
+  });
 });
 
 describe('Balance: Erzbach im Sommer', () => {
