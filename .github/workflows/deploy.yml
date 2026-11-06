@@ -26,8 +26,10 @@ jobs:
       - run: npm test
       - run: npm run build
         env:
-          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
-          VITE_SUPABASE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+          # Publishable Key ist öffentlich (Schutz über Zeilensicherheit), daher als Standardwert hier.
+          # Repo-Variablen SUPABASE_URL/SUPABASE_PUBLISHABLE_KEY überschreiben ihn, falls gesetzt.
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL || 'https://qkcvqzzaxmoktaqsiujv.supabase.co' }}
+          VITE_SUPABASE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_GGtXWtbiTHxS2ussD2egxw_RvzhgPfO' }}
       - if: github.event_name != 'pull_request'
         uses: actions/configure-pages@v5
       - if: github.event_name != 'pull_request'
