@@ -32,6 +32,23 @@ export const EPOCH_GOODS: EpochGood[] = [
   },
 ];
 
+/**
+ * Wo eine Epochenware auf dieser Karte erzeugt und verbraucht wird. Kennt die Karte keine der eingetragenen Städte
+ * (Zufallskarten), liefert die größte Stadt an, und die drei nächstgrößeren verbrauchen.
+ */
+export function epochPlaces(eg: EpochGood, map: MapDef): { produces: Record<string, number>; consumes: Record<string, number> } {
+  const ids = new Set(map.towns.map((t) => t.id));
+  if (Object.keys(eg.produces).some((id) => ids.has(id))) return { produces: eg.produces, consumes: eg.consumes };
+  const big = [...map.towns].sort((a, b) => b.population - a.population || a.id.localeCompare(b.id));
+  const make = Object.values(eg.produces);
+  const use = Object.values(eg.consumes);
+  const produces: Record<string, number> = {};
+  const consumes: Record<string, number> = {};
+  if (big[0] && make.length) produces[big[0].id] = Math.max(...make);
+  big.slice(1, 1 + use.length).slice(0, 3).forEach((t, i) => (consumes[t.id] = use[i]));
+  return { produces, consumes };
+}
+
 /** Ist diese Ware in der aktuellen Epoche schon im Handel? */
 export function goodAvailable(state: GameState, good: string): boolean {
   return (GOOD_BY_ID.get(good)?.epoch ?? 1) <= state.epoch;
@@ -43,9 +60,10 @@ export function tickSupply(state: GameState, map: MapDef): NewsItem[] {
   for (const eg of EPOCH_GOODS) {
     if (state.epoch < eg.epoch) continue;
     let opened = false;
+    const places = epochPlaces(eg, map);
     for (const def of map.towns) {
-      const make = eg.produces[def.id] ?? 0;
-      const use = eg.consumes[def.id] ?? 0;
+      const make = places.produces[def.id] ?? 0;
+      const use = places.consumes[def.id] ?? 0;
       if (!make && !use) continue;
       const market = state.markets[def.id];
       const target = marketTarget(def, state.towns[def.id]);

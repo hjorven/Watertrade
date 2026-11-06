@@ -284,20 +284,20 @@ interface RoleDef {
 
 /** Stadtarten mit Spannweiten nach dem Vorbild des Tals der zwei Flüsse */
 const ROLES: Record<Role, RoleDef> = {
-  wald: { kind: 'Holzfällerdorf', produces: { holz: [12, 16], wolle: [2, 4] }, pop: [320, 420], houses: [10, 12], target: [55, 65], style: 'oberau' },
+  wald: { kind: 'Holzfällerdorf', produces: { holz: [12, 16], wolle: [2, 4], milch: [3, 5] }, pop: [320, 420], houses: [10, 12], target: [55, 65], style: 'oberau' },
   wald2: { kind: 'Waldsiedlung', produces: { holz: [8, 11] }, pop: [300, 380], houses: [9, 11], target: [50, 60], style: 'oberau' },
   grube: { kind: 'Bergwerk', produces: { erz: [8, 11], kohle: [7, 9] }, pop: [280, 340], houses: [8, 10], target: [45, 55], style: 'erzgrube' },
   kohle: { kind: 'Köhlerdorf', produces: { kohle: [6, 8], wolle: [2, 3] }, pop: [280, 340], houses: [8, 10], target: [45, 55], style: 'erzgrube' },
   hafen: { kind: 'Hafenstadt', produces: { salz: [10, 13], fisch: [6, 9] }, pop: [1500, 1900], houses: [22, 26], target: [100, 115], style: 'niedermuend' },
-  korn: { kind: 'Kornstadt', produces: { getreide: [10, 13] }, pop: [600, 800], houses: [14, 16], target: [75, 85], style: 'muehlheim', fields: true },
-  aue: { kind: 'Bauerndorf', produces: { getreide: [6, 9], fisch: [4, 7], wolle: [2, 4] }, pop: [400, 520], houses: [11, 13], target: [65, 75], style: 'weidenhof', fields: true },
+  korn: { kind: 'Kornstadt', produces: { getreide: [10, 13], lehm: [6, 9], wein: [1, 2] }, pop: [600, 800], houses: [14, 16], target: [75, 85], style: 'muehlheim', fields: true },
+  aue: { kind: 'Bauerndorf', produces: { getreide: [6, 9], fisch: [4, 7], wolle: [2, 4], milch: [3, 5], lehm: [4, 6] }, pop: [400, 520], houses: [11, 13], target: [65, 75], style: 'weidenhof', fields: true },
   markt: { kind: 'Marktflecken', produces: {}, pop: [850, 1100], houses: [16, 19], target: [75, 85], style: 'altenfurt' },
   schmiede: { kind: 'Handwerkerstadt', produces: {}, pop: [800, 1000], houses: [15, 17], target: [65, 75], style: 'kesselbrueck' },
-  glas: { kind: 'Glasbläserdorf', produces: { wolle: [2, 4] }, pop: [300, 360], houses: [9, 11], target: [45, 55], style: 'glashuette' },
+  glas: { kind: 'Glasbläserdorf', produces: { wolle: [2, 4], wein: [1, 2] }, pop: [300, 360], houses: [9, 11], target: [45, 55], style: 'glashuette' },
   fischer: { kind: 'Fischerdorf', produces: { fisch: [6, 8] }, pop: [350, 450], houses: [10, 12], target: [55, 65], style: 'weidenhof' },
 };
 
-type IndustryId = 'saegewerk' | 'schmiede' | 'muehle' | 'brauerei' | 'tischlerei' | 'weberei' | 'baeckerei' | 'glasofen' | 'apotheke';
+type IndustryId = 'saegewerk' | 'schmiede' | 'muehle' | 'brauerei' | 'tischlerei' | 'weberei' | 'baeckerei' | 'glasofen' | 'apotheke' | 'ziegelei' | 'kaeserei';
 
 /** Betriebe der Städte mit den Mengen aus dem Tal */
 const INDUSTRIES: Record<IndustryId, Industry> = {
@@ -310,6 +310,8 @@ const INDUSTRIES: Record<IndustryId, Industry> = {
   baeckerei: { name: 'Bäckerei', inputs: { mehl: 2 }, outputs: { brot: 3 } },
   glasofen: { name: 'Glasofen', inputs: { kohle: 2 }, outputs: { glas: 1 } },
   apotheke: { name: 'Apotheke', inputs: { glas: 0.5, salz: 1 }, outputs: { arznei: 1 } },
+  ziegelei: { name: 'Ziegelei', inputs: { lehm: 4, kohle: 1.5 }, outputs: { ziegel: 4 } },
+  kaeserei: { name: 'Käserei', inputs: { milch: 2.5 }, outputs: { kaese: 1 } },
 };
 
 /** Wie gut ein Betrieb zu einer Stadtart passt (0 = nie) */
@@ -323,10 +325,12 @@ const FIT: Record<IndustryId, Partial<Record<Role, number>>> = {
   baeckerei: { aue: 3, hafen: 2, markt: 1, korn: 1, fischer: 1 },
   glasofen: { glas: 6, schmiede: 1, markt: 1, fischer: 1 },
   apotheke: { hafen: 4, markt: 2, schmiede: 1 },
+  ziegelei: { korn: 3, markt: 2, schmiede: 2, aue: 1 },
+  kaeserei: { aue: 3, wald: 2, korn: 1, markt: 1 },
 };
 
 /** Jeder Betrieb kommt mindestens einmal vor, damit alle Warenketten bestehen */
-const REQUIRED: IndustryId[] = ['schmiede', 'glasofen', 'apotheke', 'muehle', 'baeckerei', 'saegewerk', 'tischlerei', 'weberei', 'brauerei'];
+const REQUIRED: IndustryId[] = ['schmiede', 'glasofen', 'apotheke', 'muehle', 'baeckerei', 'saegewerk', 'tischlerei', 'weberei', 'brauerei', 'ziegelei', 'kaeserei'];
 
 /** Bedarf der Bevölkerung je Ware bei rund 700 Einwohnern, mit Gruppe für die Gewichtung nach Stadtgröße */
 const BASKET: Record<string, { amount: number; group: 'essen' | 'handwerk' | 'gehoben' }> = {
@@ -343,11 +347,16 @@ const BASKET: Record<string, { amount: number; group: 'essen' | 'handwerk' | 'ge
   moebel: { amount: 0.6, group: 'gehoben' },
   glas: { amount: 0.6, group: 'gehoben' },
   arznei: { amount: 0.4, group: 'gehoben' },
+  milch: { amount: 1.4, group: 'essen' },
+  ziegel: { amount: 0.9, group: 'handwerk' },
+  kaese: { amount: 0.4, group: 'gehoben' },
+  wein: { amount: 0.5, group: 'gehoben' },
 };
 
 const GOOD_NAMES: Record<string, string> = {
   holz: 'Holz', bretter: 'Bretter', moebel: 'Möbel', getreide: 'Getreide', mehl: 'Mehl', brot: 'Brot', fisch: 'Fisch',
   salz: 'Salz', erz: 'Erz', kohle: 'Kohle', werkzeug: 'Werkzeug', glas: 'Glas', wolle: 'Wolle', stoff: 'Stoff', bier: 'Bier', arznei: 'Arznei',
+  lehm: 'Lehm', ziegel: 'Ziegel', milch: 'Milch', kaese: 'Käse', wein: 'Wein', diesel: 'Diesel',
 };
 
 const FULL_YARD = ['plaette', 'treidelkahn', 'segelkahn', 'raddampfer', 'schleppverband', 'motorschiff', 'kuehlschiff'];

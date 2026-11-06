@@ -7,6 +7,7 @@ import { TOWN_STYLES } from '../render/townstyles.ts';
 import { advance, newGame, upgradeState } from './game.ts';
 import { botCheck, checkMap, playableRandomMap, startOf, structureProblems } from './mapcheck.ts';
 import { deserialize, SAVE_VERSION, serialize } from './save.ts';
+import { BRICK_DELAY_MAX, EPOCH_GOODS, epochPlaces } from './supply.ts';
 import { startProjectWith } from './wasserbau.ts';
 import { effectiveSegments, gaugeCount, litSegments } from './works.ts';
 
@@ -51,7 +52,9 @@ describe('Zufallsflüsse: Generator', () => {
       expect(map.towns.find((t) => t.id === map.start), msg).toBeDefined();
       // jeder Betrieb der Städte kommt vor, damit alle Warenketten bestehen
       const made = new Set(map.towns.flatMap((t) => [...Object.keys(t.produces), ...t.industries.flatMap((i) => Object.keys(i.outputs))]));
-      for (const g of GOODS) expect(made.has(g.id), `${msg}: ${g.name} fehlt`).toBe(true);
+      // Waren einer späteren Epoche (Diesel) kommen über supply.ts in die Märkte, nicht über die Städte
+      for (const g of GOODS.filter((x) => !x.epoch)) expect(made.has(g.id), `${msg}: ${g.name} fehlt`).toBe(true);
+      for (const eg of EPOCH_GOODS) expect(Object.keys(epochPlaces(eg, map).produces).length, `${msg}: ${eg.good}`).toBeGreaterThan(0);
       expect(map.segments.some((s) => s.bridgeHeight !== undefined), msg).toBe(true);
       expect(map.towns.some((t) => t.shipyard.includes('raddampfer')), msg).toBe(true);
       expect(map.towns.some((t) => t.shipyard.includes('floss')), msg).toBe(true);
@@ -163,7 +166,8 @@ describe('Zufallsflüsse: Spielen', () => {
     const s = newGame(map, { startTown: startOf(map), money: 50000, rivals: false });
     const p = map.projects!.find((x) => x.epoch === 1 && x.kind === 'bruecke')!;
     expect(startProjectWith(s, map, p.id).ok).toBe(true);
-    advance(s, map, 24 * (p.days + 1));
+    // fehlen Ziegel, ruht die Baustelle bis zur Hälfte der Bauzeit
+    advance(s, map, 24 * (Math.ceil(p.days * (1 + BRICK_DELAY_MAX)) + 1));
     const seg = effectiveSegments(s, map).find((x) => x.id === p.seg)!;
     expect(seg.bridgeHeight).toBe(11);
     // Projekte des Tals gibt es auf dieser Karte nicht
