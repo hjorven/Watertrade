@@ -1285,6 +1285,13 @@ ul.plain small {
   stroke-linejoin: round;
 }
 
+/* Kanal vor der Fertigstellung: nur die abgesteckte Trasse */
+.paper-map .m-river.m-canal-plan {
+  stroke: #a89a7a;
+  stroke-dasharray: 2 3;
+  stroke-width: 1 !important;
+}
+
 .paper-map .m-town {
   fill: #f6eedb;
   stroke: var(--ink);

@@ -138,7 +138,7 @@ function setupMapData(): void {
   const rivers = MAP.rivers.map((r) => {
     const pts = land.curve(r.id).getSpacedPoints(80);
     all.push(...pts);
-    return { pts, width: r.halfWidth * 0.9 };
+    return { pts, width: r.halfWidth * 0.9, canal: r.canal };
   });
   for (const t of towns) all.push(t.center);
   const minX = Math.min(...all.map((p) => p.x)) - 30;
@@ -148,7 +148,7 @@ function setupMapData(): void {
   const f = (n: number) => n.toFixed(1);
   hud.setMapData({
     viewBox: `${f(minX)} ${f(minZ)} ${f(maxX - minX)} ${f(maxZ - minZ)}`,
-    rivers: rivers.map((r) => ({ path: 'M' + r.pts.map((p) => `${f(p.x)} ${f(p.z)}`).join(' L'), width: r.width })),
+    rivers: rivers.map((r) => ({ path: 'M' + r.pts.map((p) => `${f(p.x)} ${f(p.z)}`).join(' L'), width: r.width, canal: r.canal })),
     towns: Object.fromEntries(towns.map((t) => [t.def.id, { x: t.mooring.x, y: t.mooring.z }])),
     segMid: Object.fromEntries(
       MAP.segments.map((sg) => {
@@ -600,6 +600,10 @@ const menu = new Menu(
     startFree(seed) {
       // ohne Startwert das Tal der zwei Flüsse, sonst eine Zufallskarte
       const map = seed === null ? VALLEY : randomMap(seed);
+      startGame(newGame(map, { startTown: map.start ?? map.towns[0].id, seed: Date.now() % 100000 }), { mode: 'frei', completed: new Set(), finished: false });
+    },
+    startFreeMap(id) {
+      const map = mapById(id);
       startGame(newGame(map, { startTown: map.start ?? map.towns[0].id, seed: Date.now() % 100000 }), { mode: 'frei', completed: new Set(), finished: false });
     },
     mapPreview(seed) {

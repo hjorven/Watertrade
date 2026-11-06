@@ -14,6 +14,8 @@ export interface MenuActions {
   startChapter(id: string): void;
   /** Freies Spiel: null im Tal der zwei Flüsse, sonst auf der Zufallskarte zu diesem Startwert */
   startFree(seed: number | null): void;
+  /** freies Spiel auf einer festen Karte aus dem Kartenregister */
+  startFreeMap(id: string): void;
   /** Vorschau einer Zufallskarte für das Menü (Papierkarte als SVG und eine Zeile zum Prüfergebnis) */
   mapPreview(seed: number): { svg: string; name: string; text: string };
   save(slot: string): void;
@@ -110,6 +112,10 @@ export class Menu {
         case 'freeValley':
           this.close();
           this.actions.startFree(null);
+          break;
+        case 'freeKanal':
+          this.close();
+          this.actions.startFreeMap('zwei-taeler');
           break;
         case 'freeDice':
           this.showFree(randomSeed());
@@ -288,6 +294,7 @@ export class Menu {
       <h2>Welcher Fluss?</h2>
       <div class="menu-buttons">
         <button class="btn wide" data-menu="freeValley">Das Tal der zwei Flüsse<small>Weißstrom und Erzbach, acht Städte, wie in der Kampagne</small></button>
+        <button class="btn wide" data-menu="freeKanal">Zwei Täler und ein Kanal<small>Das Tal und die Schwarzach im Norden, 14 Städte. Verbinde sie mit dem Scheitelkanal.</small></button>
       </div>
       <h3>Zufallsfluss: ${esc(p.name)}</h3>
       ${p.svg}
