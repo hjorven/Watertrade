@@ -9,6 +9,7 @@ import { EPOCHS, epochOfYear, MIN_FRESH, PERISH, SHIPS } from '../data/ships.ts'
 import { YEAR_DAYS, year } from './calendar.ts';
 import { addNews, day, shipClass, type GameEvent, type GameState, type NewsItem } from './state.ts';
 import { tickWorks } from './works.ts';
+import { observe, tickMarketInfo, tripArrive, tripSail } from './market-info.ts';
 import { initialMarket, initialTown, tickTown } from './towns.ts';
 import { wearFactor, wearRate } from './voyage.ts';
 
@@ -92,6 +93,9 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
   for (const town of opts.kontore ?? []) state.kontore[town] = { level: 1, stock: {} };
   refreshTavern(state, map);
   if (state.rivalsActive) state.rivals = initialRivals(state);
+  state.priceBook = {};
+  state.priceHistory = {};
+  observe(state, opts.startTown);
   return state;
 }
 
@@ -110,6 +114,8 @@ export function upgradeState(state: GameState, map: MapDef): GameState {
   s.ledger ??= { day: 0, wages: 0, upkeep: 0, production: 0 };
   s.works ??= [];
   s.fuelToday ??= 0;
+  s.priceBook ??= {};
+  s.priceHistory ??= {};
   if (s.epoch === undefined) {
     s.epochAuto = true;
     s.epoch = epochOfYear(year(day(s)));
@@ -185,6 +191,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     pushNews(events, tickContracts(state, map), false);
     if (state.rivalsActive) pushNews(events, tickRivals(state, map), false);
     if (d % TAVERN_DAYS === 0) refreshTavern(state, map);
+    pushNews(events, tickMarketInfo(state, map), false);
     state.ice = isIce(d);
     events.push({ type: 'newDay', day: d });
   }
@@ -201,6 +208,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
       const fuel = (cls.fuel ?? 0) * dt;
       state.money -= fuel;
       state.fuelToday += fuel;
+      tripSail(ship, dt, fuel);
       if (cls.coal) ship.bunker = Math.max(0, (ship.bunker ?? 0) - cls.coal * dt);
       // ohne Kühlraum verdirbt Fisch, Brot und Bier unterwegs
       if (!cls.fresh) {
@@ -212,6 +220,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
       if (v.elapsed >= v.hours) {
         ship.port = v.to;
         ship.voyage = null;
+        tripArrive(state, ship);
         events.push({ type: 'arrived', ship: ship.id, town: v.to, auto: !!ship.route?.active });
       }
     }

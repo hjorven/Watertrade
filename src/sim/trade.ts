@@ -2,6 +2,7 @@ import { KONTOR_CAPACITY, KONTOR_SELL_FACTOR } from '../data/buildings.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import { available, price, SELL_FACTOR, type MarketEntry } from './economy.ts';
 import { FRESH_GOODS } from '../data/ships.ts';
+import { tripSale } from './market-info.ts';
 import { addToSlot, capacityOf, cargoLoad, fail, getShip, shipClass, type CargoSlot, type GameState, type Ship, type TradeResult } from './state.ts';
 
 /** Händlerblut am Ruder: etwas bessere Preise */
@@ -120,6 +121,7 @@ export function sell(state: GameState, shipId: number, goodId: string, wanted: n
   const fresh = FRESH_GOODS.includes(goodId) ? (shipClass(ship).fresh ?? 0) : 0;
   const r = sellFrom(state, ship.port, ship.cargo, goodId, wanted, { haendler: isHaendler(ship), limit, bonus: fresh });
   if (!r.ok && r.message.startsWith('Kein ')) return fail(r.message.replace('vorrätig', 'an Bord'));
+  if (r.ok) tripSale(ship, r.taler, r.taler - (r.profit ?? 0), r.amount);
   return r;
 }
 
