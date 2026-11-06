@@ -138,9 +138,11 @@ function bestDeal(state: GameState, map: MapDef, r: RivalState, ship: RivalShip)
   return best;
 }
 
-/** Brennstoffkosten je Fahrstunde: Diesel direkt, Kohle zum Grundpreis */
-function fuelPerHour(cls: { fuel?: number; coal?: number }): number {
-  return (cls.fuel ?? 0) + (cls.coal ?? 0) * (GOODS.find((g) => g.id === 'kohle')?.base ?? 12);
+/** Geschätzte Brennstoffkosten je Fahrstunde (Kohle oder Diesel), etwas über dem Grundpreis */
+function fuelPerHour(cls: (typeof SHIPS)[string]): number {
+  const fuel = fuelOf(cls);
+  if (!fuel) return 0;
+  return fuel.rate * (GOODS.find((g) => g.id === fuel.good)?.base ?? 12) * 1.2;
 }
 
 /**
