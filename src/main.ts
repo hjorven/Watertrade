@@ -6,7 +6,7 @@ import { newAchievements, ACHIEVEMENTS } from './sim/achievements.ts';
 import { OnlineScreens } from './ui/online-screens.ts';
 import { GOOD_BY_ID, GOODS } from './data/goods.ts';
 import { VALLEY } from './data/maps/valley.ts';
-import { mapFor, mapIdOf, randomMap, randomMapResult } from './data/maps/index.ts';
+import { mapFor, randomMap, randomMapResult, stateFitsMap } from './data/maps/index.ts';
 import { CHECK_DAYS } from './sim/mapcheck.ts';
 import { mapPreviewSvg } from './ui/mappreview.ts';
 import { projectsOf } from './data/projects.ts';
@@ -74,6 +74,8 @@ const viewport = app.querySelector<HTMLDivElement>('.viewport')!;
 // legt startGame den Spielstand in den sessionStorage und lädt die Seite neu; hier geht es dann weiter.
 const PENDING_KEY = 'flussreich.pending';
 const pending = takePending();
+/** Die Seite wurde für einen übergebenen Spielstand neu geladen: höchstens ein Versuch, ihn zu starten */
+let bootedWithPending = !!pending;
 const MAP = pending ? mapFor(pending.state) : VALLEY;
 
 function takePending(): SaveGame | null {
@@ -319,14 +321,14 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
       ok = 'verkauf';
       break;
     case 'pactOffer':
-      r = offerPact(state, VALLEY, String(d.house), String(d.mine), String(d.theirs));
+      r = offerPact(state, MAP, String(d.house), String(d.mine), String(d.theirs));
       ok = 'erfolg';
       break;
     case 'pactEnd':
       r = endPact(state, String(d.house));
       break;
     case 'buyShares':
-      r = buyShares(state, VALLEY, String(d.house));
+      r = buyShares(state, MAP, String(d.house));
       ok = 'muenzen';
       break;
     case 'sellShares':
@@ -596,8 +598,16 @@ document.body.classList.add('no-game');
 const canSave = () => session.mode !== 'tagesmarkt' && session.mode !== 'herausforderung';
 
 function startGame(s: GameState, sess: Session): void {
-  if (mapIdOf(s) !== MAP.id) {
+  const target = mapFor(s);
+  // nach dem Neuladen ist die Welt schon die richtige; ein zweites Neuladen gibt es nie
+  if (target.id !== MAP.id && !bootedWithPending) {
     reloadWithMap(s, sess);
+    return;
+  }
+  bootedWithPending = false;
+  if (target.id !== MAP.id || !stateFitsMap(s, MAP)) {
+    hud.toast('Dieser Spielstand gehört zu einer Karte, die es hier nicht gibt.', 'warn');
+    menu.showMain();
     return;
   }
   for (const view of [...views.values(), ...rivalViews.values()]) view.removeFrom(stage.scene);
@@ -871,7 +881,7 @@ const SEASON_HINT: Record<Season, string> = {
   fruehling: 'Hochwasser: schnelle Talfahrt, aber hohe Schiffe kommen unter Brücken schlechter durch.',
   sommer: 'Niedrigwasser: tiefe Kähne nur mit halber Ladung, flache Boote sind jetzt Gold wert.',
   herbst: 'Normales Wasser und Erntezeit, die beste Zeit zum Handeln.',
-  winter: 'Bald friert der Erzbach zu. Wer jetzt nicht liefert, muss bis zum Frühjahr warten.',
+  winter: 'Bald frieren die Bäche und der Oberlauf zu. Wer jetzt nicht liefert, muss bis zum Frühjahr warten.',
 };
 
 const epochMusic = (e: number) => (e >= 3 ? 'epoche3' : e === 2 ? 'epoche2' : 'epoche1');
@@ -1188,4 +1198,5 @@ if (new URLSearchParams(location.search).has('debug')) {
 
 refresh();
 if (!pending || !startSave(pending)) menu.showMain();
+bootedWithPending = false;
 requestAnimationFrame(frame);

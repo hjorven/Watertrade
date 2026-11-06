@@ -123,5 +123,10 @@ export function playableRandomMap(seed: number): RandomMapResult {
     if (!best || report.problems.length < best.report.problems.length) best = result;
   }
   if (best) return best;
+  // praktisch nie: kein Kandidat ließ sich auflösen; dann ohne Prüfung den ersten, der sich bauen lässt
+  for (let attempt = MAX_ATTEMPTS; attempt < MAX_ATTEMPTS * 20; attempt++) {
+    const map = generateCandidate(seed, attempt);
+    if (map) return { map, attempts: attempt + 1, report: checkMap(map) };
+  }
   throw new Error(`Keine Karte zum Startwert ${seed}`);
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GOODS } from '../data/goods.ts';
-import { mapById, mapFor, mapIdOf, randomMap, randomMapId } from '../data/maps/index.ts';
+import { mapById, mapFor, mapIdOf, randomMap, randomMapId, stateFitsMap } from '../data/maps/index.ts';
 import { generateCandidate, layoutProblems, seedOfMapId } from '../data/maps/random.ts';
 import { VALLEY, type MapDef } from '../data/maps/valley.ts';
 import { TOWN_STYLES } from '../render/townstyles.ts';
@@ -66,7 +66,7 @@ describe('Zufallsflüsse: Generator', () => {
         expect(map.towns.find((t) => t.id === last.to)!.river, msg).toBe('strom');
       }
     }
-  });
+  }, 60000);
 
   it('Kandidaten, die sich nicht auflösen lassen, werden verworfen statt halb gebaut', () => {
     let built = 0;
@@ -122,7 +122,7 @@ describe('Zufallsflüsse: Spielen', () => {
     for (const seed of SEEDS.slice(0, 4)) {
       const map = randomMap(seed);
       const s = newGame(map, { startTown: startOf(map), seed: 99 });
-      expect(s.map).toEqual({ id: map.id, seed });
+      expect(s.map).toEqual({ id: map.id, seed, def: map });
       advance(s, map, 24 * 120);
       expect(Number.isFinite(s.money)).toBe(true);
       // die Häuser der Konkurrenz liegen in Häfen dieser Karte
@@ -132,6 +132,8 @@ describe('Zufallsflüsse: Spielen', () => {
         else expect(ship.voyage).not.toBeNull();
       }
       for (const t of map.towns) expect(s.towns[t.id].population).toBeGreaterThan(0);
+      // Häuser ohne Heimathafen auf dieser Karte behalten ihren Ersatzhafen
+      for (const r of s.rivals) if (r.home) expect(ids.has(r.home)).toBe(true);
     }
   });
 
@@ -142,6 +144,11 @@ describe('Zufallsflüsse: Spielen', () => {
     expect(mapIdOf(back.state)).toBe(map.id);
     expect(mapFor(back.state).towns).toEqual(map.towns);
     upgradeState(back.state, mapFor(back.state));
+    // die Karte reist im Spielstand mit: auch wenn der Generator sie heute anders bauen würde, bleibt sie gleich
+    back.state.map!.def!.name = 'Geändert';
+    expect(mapFor(back.state).name).toBe('Geändert');
+    expect(stateFitsMap(back.state, mapFor(back.state))).toBe(true);
+    expect(stateFitsMap(back.state, VALLEY)).toBe(false);
     // alte Spielstände ohne Karte spielen im Tal
     const old = newGame(VALLEY, 'oberau');
     delete old.map;

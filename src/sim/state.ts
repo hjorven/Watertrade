@@ -3,6 +3,7 @@ import { PERISH, SHIPS, type ShipClass } from '../data/ships.ts';
 import { windOfDay, withWind, type Conditions, type ShipType } from './river.ts';
 import type { PriceBookPage, PricePoint, TripRecord } from './market-info.ts';
 import type { TownMarket, TownState } from './towns.ts';
+import type { MapDef } from '../data/maps/valley.ts';
 
 /** Datentypen des Spielstands und kleine Helfer, die alle Simulationsmodule brauchen */
 
@@ -152,6 +153,8 @@ export interface RivalState {
   ships: RivalShip[];
   kontore: string[];
   profit: number;
+  /** Heimathafen, wenn der aus data/rivals.ts nicht auf der Karte liegt (Zufallsflüsse) */
+  home?: string;
   /** Verärgerung über den Spieler, 0..100 (siehe rivalry.ts) */
   anger?: number;
   /** Vom Spieler verkaufte Tonnen je Revierware beim letzten Tageswechsel */
@@ -345,8 +348,12 @@ export interface GameState {
   harbors?: Record<string, Harbor>;
   /** Gebühren und Unterhalt des Wasserbaus seit Mitternacht (+ Einnahmen, − Ausgaben) */
   worksToday?: { income: number; cost: number };
-  /** Karte des Spielstands; fehlt bei älteren Ständen und heißt dann: Tal der zwei Flüsse */
-  map?: { id: string; seed?: number };
+  /**
+   * Karte des Spielstands; fehlt bei älteren Ständen und heißt dann: Tal der zwei Flüsse.
+   * Zufallskarten liegen vollständig bei (`def`), damit ein Stand auch nach Änderungen am Generator
+   * oder an der Balance genau seine Karte behält.
+   */
+  map?: { id: string; seed?: number; def?: MapDef };
 }
 
 export function shipClass(ship: { type: string }): ShipClass {

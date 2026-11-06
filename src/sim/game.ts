@@ -89,7 +89,8 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
     fuelToday: 0,
   };
   registerProjects(map);
-  if (map.id) state.map = map.seed === undefined ? { id: map.id } : { id: map.id, seed: map.seed };
+  // Zufallskarten (mit Startwert) reisen vollständig im Spielstand mit
+  if (map.id) state.map = map.seed === undefined ? { id: map.id } : { id: map.id, seed: map.seed, def: map };
   if (opts.startYear && opts.startYear > 1) {
     state.hour += (opts.startYear - 1) * YEAR_DAYS * 24;
     state.waterLevel = waterLevel(state.hour / 24 + 1);

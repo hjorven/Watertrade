@@ -40,9 +40,15 @@ export function mapIdOf(state: { map?: { id: string } }): string {
   return state.map?.id ?? VALLEY.id!;
 }
 
-/** Karte eines Spielstands */
-export function mapFor(state: { map?: { id: string } }): MapDef {
-  return mapById(state.map?.id);
+/** Karte eines Spielstands: die mitgespeicherte Zufallskarte, sonst nach Id */
+export function mapFor(state: { map?: { id: string; def?: MapDef } }): MapDef {
+  return state.map?.def ?? mapById(state.map?.id);
+}
+
+/** Passt ein Spielstand zu einer Karte: jede Stadt und jeder Hafen seiner Schiffe liegt auf ihr */
+export function stateFitsMap(state: { towns: Record<string, unknown>; ships: { port: string | null }[] }, map: MapDef): boolean {
+  const ids = new Set(map.towns.map((t) => t.id));
+  return Object.keys(state.towns).every((id) => ids.has(id)) && map.towns.every((t) => t.id in state.towns) && state.ships.every((s) => s.port === null || ids.has(s.port));
 }
 
 export { randomMapId };
