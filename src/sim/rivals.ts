@@ -63,9 +63,10 @@ function rivalType(state: GameState, ship: RivalShip): ShipType {
   return { ...cls, draft: cls.draft * (0.6 + 0.4 * Math.min(1, load / cls.capacity)) };
 }
 
-/** Vermögen: Geld, Schiffe zum Zeitwert, Kontore */
+/** Vermögen: Geld, Schiffe zum Zeitwert, Ladung zum Einkaufspreis, Kontore */
 export function rivalWorth(r: RivalState): number {
-  const ships = r.ships.reduce((s, x) => s + SHIPS[x.type].price * 0.7, 0);
+  // Ladung zählt mit, sonst wirkt ein Haus nach jedem Einkauf ärmer, als es ist
+  const ships = r.ships.reduce((s, x) => s + SHIPS[x.type].price * 0.7 + (x.cargo?.cost ?? 0), 0);
   return Math.round(r.money + ships + r.kontore.length * KONTOR_PRICE);
 }
 
@@ -79,6 +80,8 @@ function sellCargo(state: GameState, r: RivalState, ship: RivalShip, town: strin
     const revenue = sellRevenue(good.base, m, c.amount, factor);
     m.stock += c.amount;
     r.money += revenue;
+    const sold = (state.stats.rivalSold ??= {});
+    sold[c.good] = (sold[c.good] ?? 0) + c.amount;
     r.profit += revenue - c.cost;
   }
   ship.cargo = null;

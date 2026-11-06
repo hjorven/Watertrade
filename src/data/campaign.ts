@@ -19,7 +19,9 @@ export type Goal =
   | { type: 'allTowns'; level: number; text: string }
   | { type: 'takeover'; count: number; text: string }
   /** Bauabschnitte des Kanals fertig (Karte mit Kanal) */
-  | { type: 'canalStage'; stage: number; text: string };
+  | { type: 'canalStage'; stage: number; text: string }
+  /** Marktanteil: mindestens `percent` Prozent aller verkauften Tonnen einer Ware, dabei wenigstens `min` Tonnen selbst */
+  | { type: 'share'; good: string; percent: number; min: number; text: string };
 
 export interface Chapter {
   id: string;

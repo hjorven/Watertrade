@@ -353,6 +353,8 @@ export interface GameState {
     steamToday?: Record<number, number>;
     /** Dampfertage: je Tag und Kohledampfer mit genug Fahrstunden einer (Kapitel 4) */
     steamDays?: number;
+    /** von der Konkurrenz verkaufte Tonnen je Ware (für Marktanteile in Herausforderungen) */
+    rivalSold?: Record<string, number>;
   };
   kontore: Record<string, Kontor>;
   betriebe: Betrieb[];
@@ -411,6 +413,8 @@ export interface GameState {
   map?: { id: string; seed?: number; def?: MapDef };
   /** Stadtbank und Versicherung (finance.ts), fehlt bis zum ersten Kredit oder Vertrag */
   finance?: Finance;
+  /** Höchstzahl eigener Schiffe (Herausforderung "Ein Schiff"), fehlt = unbegrenzt */
+  shipLimit?: number;
 }
 
 export function shipClass(ship: { type: string }): ShipClass {

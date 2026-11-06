@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { CHAPTERS, type Chapter } from './data/campaign.ts';
 import { CHALLENGES, DAILY_DAYS } from './data/challenges.ts';
 import { newDailyGame } from './sim/daily.ts';
+import { challengeGame } from './sim/challenge.ts';
 import { newAchievements, ACHIEVEMENTS } from './sim/achievements.ts';
 import { OnlineScreens } from './ui/online-screens.ts';
 import { GOOD_BY_ID, GOODS } from './data/goods.ts';
@@ -630,19 +631,7 @@ const menu = new Menu(
     startChallenge(id) {
       const c = CHALLENGES.find((x) => x.id === id)!;
       startGame(
-        newGame(VALLEY, {
-          startTown: c.startTown,
-          money: c.money,
-          startShip: c.startShip,
-          allowedShips: c.allowedShips,
-          rivals: c.rivals ?? false,
-          seed: Date.now() % 100000,
-          epoch: c.epoch ?? 1,
-          startYear: c.startYear,
-          extraShips: c.extraShips,
-          kontore: c.kontore,
-          works: c.works,
-        }),
+        challengeGame(VALLEY, c, Date.now() % 100000),
         { mode: 'herausforderung', chapter: c, completed: new Set(), finished: false },
       );
     },

@@ -58,6 +58,8 @@ export function buyShip(state: GameState, map: MapDef, town: string, type: strin
   if (!def || !cls || !def.shipyard.includes(type)) return { ok: false, message: 'Hier wird dieser Schiffstyp nicht gebaut.' };
   if (cls.epoch > state.epoch) return { ok: false, message: `${cls.name} gibt es erst in einer späteren Epoche.` };
   if (!shipAllowed(state, type)) return { ok: false, message: `${cls.name} gibt es in diesem Kapitel noch nicht.` };
+  if (state.shipLimit !== undefined && state.ships.length >= state.shipLimit)
+    return { ok: false, message: state.shipLimit === 1 ? 'Hier bleibt es bei einem einzigen Schiff.' : `Mehr als ${state.shipLimit} Schiffe sind hier nicht erlaubt.` };
   if (cls.timber) return buildFromTimber(state, town, type, def.name);
   if (state.money < cls.price) return { ok: false, message: `Ein ${cls.name} kostet ${cls.price} Taler.` };
   state.money -= cls.price;
