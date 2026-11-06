@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BUILDING_BY_ID, BUILDINGS } from '../data/buildings.ts';
-import { CHAPTERS } from '../data/campaign.ts';
+import { CHAPTERS, type Chapter } from '../data/campaign.ts';
 import { VALLEY } from '../data/maps/valley.ts';
 import { SHIPS } from '../data/ships.ts';
 import {
@@ -109,6 +109,29 @@ describe('Balance: Schiffe', () => {
     s.waterLevel = -(1.8 - 0.6 - TIGHT_DEPTH / 2);
     expect(wearFactor(s, VALLEY, ship)).toBe(2);
   });
+});
+
+describe('Balance: Dampf und Motor', () => {
+  /** Gewinn in 120 Tagen reinem Handel ab Niedermünd mit nur diesem Schiff (Vermögen am Ende minus Anfang) */
+  const gain = (ship: string, seed: number) => {
+    const chapter = { startTown: 'niedermuend', money: 3000, startShip: ship, epoch: 3, rivals: false, goals: [] } as unknown as Chapter;
+    const start = 3000 + SHIPS[ship].price * 0.7;
+    return runGrowth(VALLEY, chapter, Infinity, 120, { seed }).worth - start;
+  };
+
+  it('eiserne Rümpfe verschleißen langsamer als Holz', () => {
+    for (const id of ['raddampfer', 'schleppverband', 'motorschiff', 'kuehlschiff']) expect(SHIPS[id].wear, id).toBeLessThan(1);
+    expect(SHIPS.treidelkahn.wear ?? 1).toBe(1);
+  });
+
+  it('Raddampfer und Motorschiff verdienen mehr als Brennstoff und Werft kosten', () => {
+    for (const seed of [1, 2]) {
+      const kahn = gain('treidelkahn', seed);
+      // der Markt bremst jedes Schiff gleich, schneller ist ein Dampfer deshalb nicht reicher; aber er muss sich lohnen
+      expect(gain('raddampfer', seed), `Raddampfer, Seed ${seed}`).toBeGreaterThan(kahn * 0.5);
+      expect(gain('motorschiff', seed), `Motorschiff, Seed ${seed}`).toBeGreaterThan(kahn * 0.5);
+    }
+  }, 60000);
 });
 
 describe('Balance: Erzbach im Sommer', () => {
