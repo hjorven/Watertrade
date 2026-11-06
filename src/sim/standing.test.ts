@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { COUNCIL, DAILY_SALE_CAP, FOUNDATION_BY_ID, RANKS, TOWNHOUSE } from '../data/foundations.ts';
 import { VALLEY } from '../data/maps/valley.ts';
 import { acceptContract, deliverContract, tickContracts } from './contracts.ts';
-import { advance, buy, newGame, planVoyage, sell, upgradeState, type GameState } from './game.ts';
+import { advance, buy, kontorBuy, kontorSell, newGame, planVoyage, sell, upgradeState, type GameState } from './game.ts';
 import { betriebSlots, buildKontor, playerWorth } from './house.ts';
 import { deserialize, serialize, SAVE_VERSION } from './save.ts';
 import {
@@ -37,6 +37,39 @@ describe('Ansehen pro Stadt', () => {
     s.markets.altenfurt.salz.stock = 5; // knapp
     sell(s, ship.id, 'salz', 20);
     expect(standing(s, 'altenfurt')).toBeGreaterThan(1);
+  });
+
+  it('selbst leer gekauft und zurückverkauft bringt kein Ansehen', () => {
+    const s = game();
+    const ship = s.ships[0];
+    const m = s.markets.altenfurt.salz;
+    m.stock = 30;
+    const r = buy(s, ship.id, 'salz', 30);
+    expect(r.amount).toBe(30);
+    sell(s, ship.id, 'salz', 30);
+    expect(standing(s, 'altenfurt')).toBe(0);
+    // über Nacht nicht vergessen
+    buy(s, ship.id, 'salz', 30);
+    advance(s, VALLEY, 24);
+    sell(s, ship.id, 'salz', 30);
+    expect(standing(s, 'altenfurt')).toBeLessThan(1);
+  });
+
+  it('Kaufen und sofort Zurückverkaufen bringt nie Gewinn, auch mit Kontor, Händler und hohem Ansehen', () => {
+    const s = game('altenfurt', 200_000);
+    buildKontor(s, 'altenfurt');
+    setRank(s, 'altenfurt', 4);
+    const ship = s.ships[0];
+    ship.captain = { id: 1, name: 'Test', trait: 'haendler', wage: 0, hire: 0 };
+    s.markets.altenfurt.arznei = { good: 'arznei', stock: 80, target: 80 };
+    const start = s.money;
+    for (let i = 0; i < 30; i++) {
+      buy(s, ship.id, 'arznei', 20);
+      sell(s, ship.id, 'arznei', 20);
+      kontorBuy(s, 'altenfurt', 'arznei', 20);
+      kontorSell(s, 'altenfurt', 'arznei', 20);
+    }
+    expect(s.money).toBeLessThan(start);
   });
 
   it('hat eine Tagesgrenze für Verkäufe', () => {
@@ -253,6 +286,30 @@ describe('Städte: Jahreszeit und Schrumpfen', () => {
       reopened = tickTown(d, market, town, { day: 10 }).reopened;
     }
     expect(reopened).toBe(closed);
+  });
+
+  it('eine gewachsene Stadt, die nur eine Stufe verliert, schließt bei mittlerer Versorgung keinen Betrieb', () => {
+    const d = def('kesselbrueck');
+    const s = game('kesselbrueck');
+    const town = s.towns.kesselbrueck;
+    town.population = 2001; // knapp über "Stadt"
+    town.satisfaction = 0.66;
+    const r = tickTown(d, s.markets.kesselbrueck, town, { day: 10 });
+    expect(r.levelDown).toBeDefined();
+    expect(r.closed).toBeUndefined();
+  });
+
+  it('nach der Not wächst eine geschrumpfte Stadt auf ihre Startgröße zurück', () => {
+    const d = def('altenfurt');
+    const s = game();
+    const town = s.towns.altenfurt;
+    town.population = d.population * 0.8;
+    for (let i = 0; i < 120; i++) {
+      town.satisfaction = 0.6;
+      tickTown(d, s.markets.altenfurt, town, { day: 10 });
+    }
+    expect(town.population).toBeGreaterThan(d.population * 0.95);
+    expect(town.population).toBeLessThanOrEqual(d.population);
   });
 
   it('ohne Spieler schrumpft im ersten Jahr keine Stadt unter ihre Startgröße', () => {

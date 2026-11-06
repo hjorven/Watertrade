@@ -42,8 +42,10 @@ export const CRISIS_THRESHOLD = 0.45;
 export const MIN_POP_SHARE = 0.7;
 /** Tage in der Not, bis ein Stadtbetrieb schließt */
 export const CLOSE_DAYS = 12;
-/** Tage guter Versorgung, bis ein geschlossener Betrieb wieder öffnet */
+/** Tage ausreichender Versorgung (über SHRINK_THRESHOLD), bis ein geschlossener Betrieb wieder öffnet */
 export const REOPEN_DAYS = 15;
+/** Rückwachstum je Tag unterhalb der Startgröße, sobald die Not vorbei ist */
+export const RECOVER_RATE = 0.003;
 
 /**
  * Bedarf nach Jahreszeit: Faktor auf Waren, die eine Stadt ohnehin braucht.
@@ -61,9 +63,9 @@ export interface TownState {
   satisfaction: number; // 0..1, wie gut die Bedürfnisse gedeckt sind
   /** geschlossene Stadtbetriebe (Namen aus TownDef.industries) */
   closed?: string[];
-  /** Tage in Folge in der Not */
+  /** Notzähler: +1 je Tag in der Not, -1 je Tag ohne */
   distress?: number;
-  /** Tage in Folge gut versorgt, solange Betriebe geschlossen sind */
+  /** Tage in Folge ausreichend versorgt, solange Betriebe geschlossen sind */
   recovery?: number;
 }
 
@@ -223,7 +225,10 @@ export function tickTown(def: TownDef, market: TownMarket, town: TownState, opts
   // unter die Startgröße nur in der Not, und nicht beliebig weit
   const crisis = s < CRISIS_THRESHOLD;
   const floor = crisis ? def.population * MIN_POP_SHARE : Math.min(town.population, def.population);
-  town.population = Math.min(MAX_POPULATION, Math.max(floor, town.population * (1 + growth)));
+  let pop = Math.min(MAX_POPULATION, Math.max(floor, town.population * (1 + growth)));
+  // nach der Not wächst eine geschrumpfte Stadt langsam auf ihre Startgröße zurück
+  if (!crisis && town.population < def.population) pop = Math.min(def.population, Math.max(pop, town.population * (1 + RECOVER_RATE)));
+  town.population = pop;
   const after = levelOf(town.population);
   if (after > before) {
     result.levelUp = after;
@@ -246,7 +251,9 @@ export function tickTown(def: TownDef, market: TownMarket, town: TownState, opts
 function tickIndustries(def: TownDef, town: TownState, result: TownTickResult, crisis: boolean): void {
   const open = openIndustries(def, town);
   town.distress = crisis ? (town.distress ?? 0) + 1 : Math.max(0, (town.distress ?? 0) - 1);
-  if (open.length && (town.distress >= CLOSE_DAYS || result.levelDown !== undefined)) {
+  // Stufenverlust schließt nur, wenn die Stadt dabei wirklich schlecht versorgt ist
+  const neglected = result.levelDown !== undefined && town.satisfaction < SHRINK_THRESHOLD;
+  if (open.length && (town.distress >= CLOSE_DAYS || neglected)) {
     const ind = open[open.length - 1];
     (town.closed ??= []).push(ind.name);
     town.distress = 0;
@@ -255,7 +262,7 @@ function tickIndustries(def: TownDef, town: TownState, result: TownTickResult, c
     return;
   }
   if (!town.closed?.length) return;
-  town.recovery = town.satisfaction >= GROWTH_THRESHOLD ? (town.recovery ?? 0) + 1 : 0;
+  town.recovery = town.satisfaction >= SHRINK_THRESHOLD ? (town.recovery ?? 0) + 1 : 0;
   if (town.recovery >= REOPEN_DAYS) {
     result.reopened = town.closed.pop();
     town.recovery = 0;

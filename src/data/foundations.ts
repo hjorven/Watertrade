@@ -96,6 +96,11 @@ export const DAILY_SALE_CAP = 4;
 export const SCARCE_GAIN = 0.08;
 /** Unterhalb dieses Anteils am Zielbestand gilt eine Bedarfsware als knapp */
 export const SCARCE_SHARE = 0.5;
+/** Anteil der zuletzt gekauften Tonnen, der über Nacht als "eigene Ware" vergessen wird */
+export const BOUGHT_FADE = 0.2;
+/** Zurückverkaufte eigene Ware bringt höchstens so viel wie der günstigste Einkauf hier, abzüglich 2 % */
+export const ROUNDTRIP_MARGIN = 0.98;
+
 /** Erfüllter Auftrag: fest plus je 10 t */
 export const CONTRACT_GAIN = { base: 3, per10t: 1, max: 9 };
 /** Verpasste Frist */

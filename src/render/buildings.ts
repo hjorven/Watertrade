@@ -377,6 +377,17 @@ export interface EstateInfo {
   civic?: string[];
 }
 
+/** Geometrien eines abgerissenen Stadtteils freigeben; Materialien sind geteilt und bleiben, geteilte Fahnentücher auch */
+function disposeGeometries(group: THREE.Object3D): void {
+  const seen = new Set<THREE.BufferGeometry>();
+  group.traverse((o) => {
+    if (o instanceof THREE.Mesh && !o.userData.shared && !seen.has(o.geometry)) {
+      seen.add(o.geometry);
+      o.geometry.dispose();
+    }
+  });
+}
+
 /** Alle Gebäude des Spielers und der Konkurrenz; baut eine Stadt nur neu auf, wenn sich etwas geändert hat */
 export class Estates {
   private readonly root = new THREE.Group();
@@ -397,7 +408,10 @@ export class Estates {
       const key = JSON.stringify(e);
       const cur = this.towns.get(town);
       if (cur?.key === key) continue;
-      if (cur) this.root.remove(cur.group);
+      if (cur) {
+        this.root.remove(cur.group);
+        disposeGeometries(cur.group);
+      }
       dirty = true;
       const group = new THREE.Group();
       const items: { b: Built; active: boolean }[] = [];

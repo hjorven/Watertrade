@@ -37,7 +37,7 @@ import { extraSlots } from '../sim/standing.ts';
 import { closedLine, renderRathaus, seasonLine, standingLine } from './standing-panel.ts';
 import { rivalWorth } from '../sim/rivals.ts';
 import { BLOCK_TEXT, segmentDepth } from '../sim/river.ts';
-import { GROWTH_THRESHOLD, LEVELS, levelOf, netFlow, nextLevelNeeds, CRISIS_THRESHOLD } from '../sim/towns.ts';
+import { GROWTH_THRESHOLD, LEVELS, levelOf, netFlow, nextLevelNeeds, CRISIS_THRESHOLD, MIN_POP_SHARE } from '../sim/towns.ts';
 
 /** Frische verderblicher Ware als kurzer Hinweis, etwa "Frische 82 %" */
 function freshText(slot: { fresh?: number } | undefined): string {
@@ -711,12 +711,14 @@ export class Hud {
     const next = LEVELS[level + 1];
     const wants = nextLevelNeeds(town, t).map((g) => GOOD_BY_ID.get(g)!.name);
     const sat = Math.round(t.satisfaction * 100);
-    const shrinking = t.satisfaction < CRISIS_THRESHOLD || t.population > town.population + 0.5;
+    const shrinking =
+      (t.satisfaction < CRISIS_THRESHOLD && t.population > town.population * MIN_POP_SHARE + 0.5) ||
+      (t.satisfaction < GROWTH_THRESHOLD && t.population > town.population + 0.5);
     const trend = t.satisfaction > GROWTH_THRESHOLD ? 'wächst' : shrinking ? 'schrumpft' : 'stagniert';
     const ev = state.events.filter((e) => e.town === town.id).map((e) => `<b class="event">${describeEvent(this.map, e)}</b>`);
     return `<div class="town-info">
       <span><b>${LEVELS[level].name}</b> · ${Math.round(t.population)} Einwohner · ${trend}</span>
-      ${standingLine(state, town)}
+      ${this.features.tabs.includes('rathaus') ? standingLine(state, town) : ''}
       <div class="meter" title="Versorgung ${sat} %"><div style="width:${sat}%"></div><i style="left:${GROWTH_THRESHOLD * 100}%"></i></div>
       ${ev.join('')}
       ${closedLine(state, town)}

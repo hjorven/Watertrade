@@ -15,13 +15,19 @@ export interface CivicModel {
   cloths: THREE.Mesh[];
 }
 
-/** Fahne in Hausfarbe; das Tuch bleibt ein eigenes Mesh, damit es im Wind schwingt */
+const clothGeo = new THREE.PlaneGeometry(0.7, 0.4, 5, 1).translate(0.35, 0, 0);
+const clothMats = new Map<number, THREE.MeshStandardMaterial>();
+const clothMat = (color: number) => {
+  let m = clothMats.get(color);
+  if (!m) clothMats.set(color, (m = new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide, roughness: 0.9 })));
+  return m;
+};
+
+/** Fahne in Hausfarbe; das Tuch bleibt ein eigenes Mesh, damit es im Wind schwingt (Geometrie und Material geteilt) */
 function banner(k: Kit, model: CivicModel, color: number, x: number, y: number, z: number, h: number): void {
   k.add(boxGeo(0.06, h, 0.06), C.woodDark, { x, y, z });
-  const cloth = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.7, 0.4, 5, 1).translate(0.35, 0, 0),
-    new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide, roughness: 0.9 }),
-  );
+  const cloth = new THREE.Mesh(clothGeo, clothMat(color));
+  cloth.userData.shared = true;
   cloth.position.set(x + 0.03, y + h - 0.25, z);
   cloth.castShadow = true;
   model.group.add(cloth);

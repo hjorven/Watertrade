@@ -179,8 +179,12 @@ export interface TownStanding {
   foundations: string[];
   townhouse: boolean;
   council: boolean;
-  /** zuletzt gemeldeter Rang, für die Nachricht beim Aufstieg */
+  /** aktueller Rang */
   rank: number;
+  /** höchster je gemeldeter Rang, damit ein Auf und Ab an der Grenze nicht immer neue Meldungen bringt */
+  best?: number;
+  /** vom Spieler hier zuletzt gekaufte Tonnen je Ware (verblasst täglich); gegen Kauf-und-Rückverkauf */
+  bought?: Record<string, number>;
 }
 
 export interface GameState {

@@ -63,6 +63,13 @@ describe('Städte', () => {
         expect(Math.abs(c.pos.x)).toBeLessThan(WORLD_W / 2 - 3);
         expect(Math.abs(c.pos.z)).toBeLessThan(WORLD_D / 2 - 3);
         expect(land.riverDistance(c.pos.x, c.pos.z).d).toBeGreaterThan(RIVER_HALF_WIDTH + 5);
+        // nicht auf den Hauptstraßen durch die Mitte
+        const n = land.normalAt(place.def.river, place.def.riverT).multiplyScalar(place.def.side);
+        const t = land.tangentAt(place.def.river, place.def.riverT);
+        const dx = c.pos.x - place.center.x;
+        const dz = c.pos.z - place.center.z;
+        expect(Math.abs(dx * n.x + dz * n.z), place.def.id).toBeGreaterThan(2.5);
+        expect(Math.abs(dx * t.x + dz * t.z), place.def.id).toBeGreaterThan(2.5);
         for (const l of [...place.lots, ...place.civic]) if (l !== c) expect(l.pos.distanceTo(c.pos)).toBeGreaterThan(5);
       }
     }

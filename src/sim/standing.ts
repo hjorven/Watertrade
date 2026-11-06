@@ -18,6 +18,8 @@ import {
   SCARCE_SHARE,
   SCHOOL_GROWTH,
   STANDING_DECAY,
+  BOUGHT_FADE,
+  ROUNDTRIP_MARGIN,
   TOWNHOUSE,
   type FoundationId,
 } from '../data/foundations.ts';
@@ -104,13 +106,44 @@ export function noteSale(state: GameState, town: string, good: string, amount: n
   if (amount <= 0 || !state.towns[town]) return 0;
   const fest = festIn(state, town) && (good === 'bier' || good === 'brot');
   const limit = target * (fest ? 1 : SCARCE_SHARE);
-  const scarce = Math.max(0, Math.min(amount, limit - stockBefore));
+  // Wer die Knappheit selbst erzeugt hat (hier leer gekauft), bekommt für das Zurückverkaufen nichts
+  const own = recentlyBought(state, town, good);
+  const scarce = Math.max(0, Math.min(amount, limit - stockBefore) - own);
   if (scarce <= 0) return 0;
   const s = standingOf(state, town);
   const gain = Math.min(scarce * SCARCE_GAIN * (fest ? 2 : 1), Math.max(0, DAILY_SALE_CAP - s.today));
   s.today += gain;
   gainStanding(state, town, gain);
   return gain;
+}
+
+/** Tonnen dieser Ware, die der Spieler hier zuletzt selbst gekauft hat */
+export function recentlyBought(state: GameState, town: string, good: string): number {
+  return state.standing?.[town]?.bought?.[good] ?? 0;
+}
+
+/** Einkauf am Markt merken */
+export function noteBuy(state: GameState, town: string, good: string, amount: number): void {
+  if (amount <= 0) return;
+  const b = (standingOf(state, town).bought ??= {});
+  b[good] = (b[good] ?? 0) + amount;
+}
+
+/** Verkauf zieht von der gemerkten eigenen Ware ab */
+export function consumeBought(state: GameState, town: string, good: string, amount: number): void {
+  const b = state.standing?.[town]?.bought;
+  if (!b?.[good]) return;
+  b[good] = Math.max(0, b[good] - amount);
+  if (b[good] < 0.5) delete b[good];
+}
+
+/**
+ * Höchster Verkaufsfaktor für Ware, die hier gerade erst gekauft wurde: knapp unter dem günstigsten
+ * möglichen Einkauf (Händlerblut und Ansehen eingerechnet). So bringt Kaufen und sofort Zurückverkaufen
+ * nie Gewinn, auch nicht mit Kontor und Händler.
+ */
+export function roundtripCap(state: GameState, town: string, haendlerRebate: number): number {
+  return (1 - haendlerRebate) * (1 - buyDiscount(state, town)) * ROUNDTRIP_MARGIN;
 }
 
 /** Erfüllter Auftrag */
@@ -170,11 +203,18 @@ export function tickStanding(state: GameState, map: MapDef): NewsItem[] {
   for (const [town, s] of Object.entries(state.standing)) {
     s.earned = Math.max(0, s.earned * (1 - STANDING_DECAY));
     s.today = 0;
-    const r = rankIndex(standing(state, town));
-    if (r > s.rank) {
-      const name = map.towns.find((t) => t.id === town)?.name ?? town;
-      news.push(addNews(state, 'stadt', `${name} nennt dich jetzt "${RANKS[r].name}": ${RANKS[r].unlocks}.`));
+    if (s.bought) {
+      for (const g of Object.keys(s.bought)) {
+        s.bought[g] *= 1 - BOUGHT_FADE;
+        if (s.bought[g] < 0.5) delete s.bought[g];
+      }
     }
+    const r = rankIndex(standing(state, town));
+    const name = map.towns.find((t) => t.id === town)?.name ?? town;
+    // Aufstieg nur beim ersten Erreichen melden, Abstieg einmal, wenn der Vorteil wegfällt
+    if (r > (s.best ?? s.rank)) news.push(addNews(state, 'stadt', `${name} nennt dich jetzt "${RANKS[r].name}": ${RANKS[r].unlocks}.`));
+    else if (r < s.rank) news.push(addNews(state, 'stadt', `Dein Ansehen in ${name} verblasst: nur noch "${RANKS[r].name}".`));
+    s.best = Math.max(s.best ?? s.rank, r);
     s.rank = r;
   }
   return news;

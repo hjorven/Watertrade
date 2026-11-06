@@ -22,7 +22,8 @@ export function standingLine(state: GameState, town: TownDef): string {
   const s = state.standing?.[town.id];
   if (s?.townhouse) extra.push('Stadthaus');
   if (s?.council) extra.push('Ratssitz');
-  return `<small class="standing-line">Ansehen: <b>${RANKS[r].name}</b> (${Math.round(pts)})${extra.length ? ` · ${extra.join(', ')}` : ''}</small>`;
+  const discount = RANKS[r].discount ? ` · ${Math.round(RANKS[r].discount * 100)} % Nachlass beim Einkauf` : '';
+  return `<small class="standing-line">Ansehen: <b>${RANKS[r].name}</b> (${Math.round(pts)})${discount}${extra.length ? ` · ${extra.join(', ')}` : ''}</small>`;
 }
 
 /** Was die Stadt in dieser Jahreszeit stärker oder schwächer verlangt, nur Waren, die sie braucht */
@@ -47,7 +48,7 @@ export function seasonLine(state: GameState, town: TownDef): string {
 export function closedLine(state: GameState, town: TownDef): string {
   const closed = state.towns[town.id].closed ?? [];
   if (!closed.length) return '';
-  return `<b class="event">Geschlossen: ${closed.join(', ')}. Gut versorgt öffnet die Stadt sie wieder.</b>`;
+  return `<b class="event">Geschlossen: ${closed.join(', ')}. Ausreichend versorgt öffnet die Stadt sie nach einigen Wochen wieder.</b>`;
 }
 
 function button(cmd: string, label: string, sub: string, why: string | null, extra = ''): string {

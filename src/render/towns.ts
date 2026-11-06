@@ -31,8 +31,10 @@ export const KONTOR_LOTS = 4;
 
 /** Stadthaus, Kirche, Schule, Armenhaus: in Ringen um den Marktplatz */
 export const CIVIC_COUNT = 4;
-const CIVIC_RINGS = [8.5, 11, 13.5, 16];
+const CIVIC_RINGS = [8.5, 11, 13.5, 16, 18.5];
 const CIVIC_ANGLES = 16;
+/** Abstand der Plätze zur Mitte der Hauptstraßen */
+const CIVIC_ROAD_GAP = 2.6;
 
 /** Uferlinie: so weit jenseits der nominellen Flussbreite trifft das Wasser die Böschung */
 const SHORE = 1.05;
@@ -66,14 +68,24 @@ export function placeTown(land: Landscape, def: TownDef): TownPlacement {
   }
   // Ringe um den Marktplatz: auf festem Grund, nicht am Steilhang, nicht am Kartenrand, mit Abstand zu den Uferplätzen.
   // Die Front zeigt zum Platz.
+  const tangent = land.tangentAt(def.river, def.riverT);
   const civic: Lot[] = [];
   for (const ring of CIVIC_RINGS) {
     for (let i = 0; i < CIVIC_ANGLES && civic.length < CIVIC_COUNT; i++) {
       // abwechselnd links und rechts vom Weg zum Steg, damit die Bauten sich verteilen
       const k = Math.ceil(i / 2) * (i % 2 ? 1 : -1);
-      const a = Math.atan2(-n.z, -n.x) + Math.PI / 2 + (k * 2 * Math.PI) / CIVIC_ANGLES;
+      // um einen halben Schritt versetzt, damit kein Platz auf einer Hauptachse liegt
+      const a = Math.atan2(-n.z, -n.x) + Math.PI / 2 + ((k + 0.5) * 2 * Math.PI) / CIVIC_ANGLES;
       const pos = new THREE.Vector3(center.x + Math.cos(a) * ring, 0, center.z + Math.sin(a) * ring);
       if (!inWorld(pos.x, pos.z, 4.5)) continue;
+      // nicht auf die Straßen: Weg zum Steg (v = 0), Querstraße (u = 0), Uferstraße hinter den Kontoren
+      const du = (pos.x - center.x) * n.x + (pos.z - center.z) * n.z;
+      const dv = (pos.x - center.x) * tangent.x + (pos.z - center.z) * tangent.z;
+      if (Math.abs(du) < CIVIC_ROAD_GAP || Math.abs(dv) < CIVIC_ROAD_GAP) continue;
+      if (radius > 10 && Math.abs(du - (SHORE + 4.8 - radius)) < CIVIC_ROAD_GAP) continue;
+      // nicht schräg am Hang: Ecken des Bauplatzes etwa auf einer Höhe
+      const h0 = land.heightAt(pos.x, pos.z);
+      if ([[1.8, 0], [-1.8, 0], [0, 1.8], [0, -1.8]].some(([x, z]) => Math.abs(land.heightAt(pos.x + x, pos.z + z) - h0) > 1.2)) continue;
       if (land.riverDistance(pos.x, pos.z).d < RIVER_HALF_WIDTH + 6) continue;
       if (land.heightAt(pos.x, pos.z) > 8.5) continue;
       if ([...lots, ...civic].some((l) => Math.hypot(l.pos.x - pos.x, l.pos.z - pos.z) < 6)) continue;

@@ -70,7 +70,11 @@ const towns = VALLEY.towns.map((def) => placeTown(land, def));
 land.build([
   ...towns.map((t) => ({ pos: t.center, radius: t.radius * 1.4, fields: !!t.def.fields })),
   // Bauplätze am Ufer frei von Bäumen halten
-  ...towns.flatMap((t) => [...t.lots, ...t.civic].map((l) => ({ pos: l.pos, radius: 0.5, fields: false }))),
+  ...towns.flatMap((t) => [
+    ...t.lots.map((l) => ({ pos: l.pos, radius: 0.5, fields: false })),
+    // Plätze für Stadthaus und Stiftungen sind breiter
+    ...t.civic.map((l) => ({ pos: l.pos, radius: 2.5, fields: false })),
+  ]),
 ]);
 land.buildIce(VALLEY.segments.filter((s) => s.freezes).map((s) => ({ river: s.river, from: s.fromT, to: s.toT })));
 stage.scene.add(land.group);
