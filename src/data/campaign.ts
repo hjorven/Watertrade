@@ -12,7 +12,8 @@ export type Goal =
   | { type: 'rank'; place: number; text: string }
   | { type: 'project'; id: string; text: string }
   | { type: 'routes'; count: number; text: string }
-  | { type: 'allTowns'; level: number; text: string };
+  | { type: 'allTowns'; level: number; text: string }
+  | { type: 'takeover'; count: number; text: string };
 
 export interface Chapter {
   id: string;
@@ -34,6 +35,8 @@ export interface Chapter {
   extraShips?: string[];
   kontore?: string[];
   works?: string[];
+  /** Dieses KI-Haus startet geschwächt und verkauft Anteile (Übernahme als Kapitelziel) */
+  weakHouse?: string;
 }
 
 export const CHAPTERS: Chapter[] = [
