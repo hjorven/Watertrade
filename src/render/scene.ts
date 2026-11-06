@@ -76,6 +76,8 @@ export class Stage {
     };
     window.addEventListener('resize', resize);
     resize();
+    // Nur im Dev-Server: Zugriff für Screenshot-Skripte
+    if (import.meta.env.DEV) (globalThis as { __stage?: Stage }).__stage = this;
   }
 
   addLabel(text: string, position: THREE.Vector3, className = 'town-label'): HTMLDivElement {
