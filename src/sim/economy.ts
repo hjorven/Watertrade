@@ -44,10 +44,10 @@ export function buyCost(base: number, m: MarketEntry, amount: number): number {
 }
 
 /** Erlös für den Verkauf von `amount` Einheiten, große Verkäufe drücken den Preis */
-export function sellRevenue(base: number, m: MarketEntry, amount: number): number {
+export function sellRevenue(base: number, m: MarketEntry, amount: number, factor = SELL_FACTOR): number {
   let sum = 0;
   for (let i = 1; i <= amount; i++) {
-    sum += Math.floor(price(base, m.stock + i, m.target) * SELL_FACTOR);
+    sum += Math.floor(price(base, m.stock + i, m.target) * factor);
   }
   return sum;
 }

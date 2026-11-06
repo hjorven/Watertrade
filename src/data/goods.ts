@@ -21,6 +21,7 @@ export const GOODS: Good[] = [
   { id: 'wolle', name: 'Wolle', base: 15, color: 0xf0ece0 },
   { id: 'stoff', name: 'Stoff', base: 40, color: 0x9c3b3b },
   { id: 'bier', name: 'Bier', base: 30, color: 0xc7862e },
+  { id: 'arznei', name: 'Arznei', base: 55, color: 0x6a8f5a },
 ];
 
 export const GOOD_BY_ID = new Map(GOODS.map((g) => [g.id, g]));

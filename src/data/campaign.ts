@@ -18,6 +18,8 @@ export interface Chapter {
   allowedShips: string[];
   goals: Goal[];
   deadlineDays?: number;
+  /** Konkurrierende Handelshäuser am Fluss */
+  rivals?: boolean;
 }
 
 export const CHAPTERS: Chapter[] = [

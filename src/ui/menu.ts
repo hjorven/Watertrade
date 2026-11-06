@@ -14,6 +14,7 @@ export interface MenuActions {
   save(slot: string): void;
   load(slot: string): void;
   setTiltShift(on: boolean): void;
+  setSound(on: boolean): void;
   resume(): void;
 }
 
@@ -21,6 +22,7 @@ export interface MenuInfo {
   slots: SlotInfo[];
   unlockedChapters: string[];
   tiltShift: boolean;
+  sound: boolean;
   inGame: boolean;
 }
 
@@ -79,6 +81,11 @@ export class Menu {
           if (this.info().inGame) this.showGameMenu();
           else this.showMain();
           break;
+        case 'sound':
+          this.actions.setSound(!this.info().sound);
+          if (this.info().inGame) this.showGameMenu();
+          else this.showMain();
+          break;
         case 'main':
           this.showMain();
           break;
@@ -125,7 +132,7 @@ export class Menu {
         <button class="btn wide" data-menu="free">Freies Spiel<small>Ohne Ziele, alle Schiffe der ersten Epoche</small></button>
         ${info.slots.some((s) => s.slot !== 'auto') ? `<button class="btn wide" data-menu="loadlist">Spielstand laden</button>` : ''}
       </div>
-      <p class="fine"><button class="link" data-menu="tilt">Tilt-Shift-Effekt: ${info.tiltShift ? 'an' : 'aus'}</button></p>`);
+      <p class="fine"><button class="link" data-menu="tilt">Tilt-Shift-Effekt: ${info.tiltShift ? 'an' : 'aus'}</button> · <button class="link" data-menu="sound">Ton: ${info.sound ? 'an' : 'aus'}</button></p>`);
   }
 
   showCampaign(): void {
@@ -188,7 +195,7 @@ export class Menu {
         ${slots.length ? '<button class="btn wide" data-menu="loadlist">Spielstand laden</button>' : ''}
         <button class="btn wide" data-menu="main">Hauptmenü</button>
       </div>
-      <p class="fine">Das Spiel speichert außerdem jeden Tag automatisch. <button class="link" data-menu="tilt">Tilt-Shift: ${info.tiltShift ? 'an' : 'aus'}</button></p>`);
+      <p class="fine">Das Spiel speichert außerdem jeden Tag automatisch. <button class="link" data-menu="tilt">Tilt-Shift: ${info.tiltShift ? 'an' : 'aus'}</button> · <button class="link" data-menu="sound">Ton: ${info.sound ? 'an' : 'aus'}</button></p>`);
   }
 
   showLoad(): void {

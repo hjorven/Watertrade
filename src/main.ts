@@ -5,23 +5,40 @@ import { GOOD_BY_ID, GOODS } from './data/goods.ts';
 import { VALLEY } from './data/maps/valley.ts';
 import { Landscape } from './render/landscape.ts';
 import { Stage } from './render/scene.ts';
+import { ambient, isMuted, mute, playSfx, setMusic, unlockAudioOnGesture, type SfxName } from './audio/index.ts';
+import { RIVAL_BY_ID } from './data/rivals.ts';
+import { SHIPS } from './data/ships.ts';
+import { Estates, PLAYER_COLOR, type EstateInfo } from './render/buildings.ts';
 import { ShipView } from './render/ships.ts';
 import { buildBridge, buildTown, placeTown, type TownView } from './render/towns.ts';
 import { dateText, dayInSeason, dayOfYear, season, SEASON_NAME, SEASONS, type Season } from './sim/calendar.ts';
+import { acceptContract, deliverContract } from './sim/contracts.ts';
+import { dismissCaptain, hireCaptain, repair, upgrade } from './sim/fleet.ts';
 import {
   advance,
   buy,
   buyShip,
+  capacityOf,
   depart,
   dismantleRaft,
+  kontorBuy,
+  kontorSell,
+  load,
   newGame,
   sell,
   shipClass,
+  store,
+  upgradeState,
   voyagePosition,
+  wind,
   type GameEvent,
   type GameState,
+  type OrderKind,
   type Ship,
+  type TradeResult,
+  type Voyage,
 } from './sim/game.ts';
+import { buildBetrieb, buildKontor, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
 import { goalDone, goalProgress } from './sim/goals.ts';
 import { deserialize, SAVE_VERSION, serialize, type SaveGame } from './sim/save.ts';
 import { LEVELS, levelOf } from './sim/towns.ts';
@@ -40,7 +57,11 @@ const viewport = app.querySelector<HTMLDivElement>('.viewport')!;
 const stage = new Stage(viewport);
 const land = new Landscape(VALLEY.rivers);
 const towns = VALLEY.towns.map((def) => placeTown(land, def));
-land.build(towns.map((t) => ({ pos: t.center, radius: t.radius * 1.4, fields: !!t.def.fields })));
+land.build([
+  ...towns.map((t) => ({ pos: t.center, radius: t.radius * 1.4, fields: !!t.def.fields })),
+  // Bauplätze am Ufer frei von Bäumen halten
+  ...towns.flatMap((t) => t.lots.map((l) => ({ pos: l.pos, radius: 0.5, fields: false }))),
+]);
 land.buildIce(VALLEY.segments.filter((s) => s.freezes).map((s) => ({ river: s.river, from: s.fromT, to: s.toT })));
 stage.scene.add(land.group);
 const townViews = new Map<string, TownView>();
@@ -52,6 +73,7 @@ towns.forEach((t, i) => {
   townLabels.set(t.def.id, stage.addLabel(t.def.name, t.center.clone().setY(land.heightAt(t.center.x, t.center.z) + 6)));
 });
 for (const seg of VALLEY.segments) if (seg.bridgeHeight !== undefined) stage.scene.add(buildBridge(land, seg));
+const estates = new Estates(stage.scene, towns);
 const placeOf = (id: string) => towns.find((t) => t.def.id === id)!;
 const segOf = (id: string) => VALLEY.segments.find((s) => s.id === id)!;
 const townName = (id: string) => placeOf(id).def.name;
@@ -59,6 +81,7 @@ const townName = (id: string) => placeOf(id).def.name;
 // --- Einstellungen und Fortschritt ---
 interface Settings {
   tiltShift: boolean;
+  sound?: boolean;
 }
 interface Progress {
   unlocked: string[];
@@ -66,6 +89,10 @@ interface Progress {
 const settings = loadJson<Settings>('settings', { tiltShift: true });
 const progress = loadJson<Progress>('progress', { unlocked: ['k1'] });
 stage.postfx.enabled = settings.tiltShift;
+unlockAudioOnGesture();
+mute(settings.sound === false);
+setMusic('ruhig');
+const sfx = (name: SfxName) => playSfx(name);
 
 // --- Spielsitzung ---
 interface Session {
@@ -82,6 +109,13 @@ let running = false; // läuft die Zeit
 let follow = true;
 let timeScale = 1;
 const views = new Map<number, ShipView>();
+const rivalViews = new Map<number, ShipView>();
+
+/** Rückmeldung mit passendem Geräusch */
+function feedback(r: TradeResult, ok: SfxName = 'klick'): void {
+  hud.tradeFeedback(r);
+  sfx(r.ok ? ok : 'fehler');
+}
 
 const current = (): Ship | undefined => state.ships.find((s) => s.id === selected);
 
@@ -92,15 +126,21 @@ const hud = new Hud(app, VALLEY, {
     refresh();
   },
   buy(good, n) {
-    hud.tradeFeedback(buy(state, selected, good, n));
+    feedback(buy(state, selected, good, n), 'kauf');
     refresh();
   },
   sell(good, n) {
-    hud.tradeFeedback(sell(state, selected, good, n));
+    const r = sell(state, selected, good, n);
+    feedback(r, r.profit !== undefined && r.profit > 0 ? 'muenzen' : 'verkauf');
     refresh();
   },
   depart(to) {
-    if (!depart(state, VALLEY, selected, to)) hud.toast('Diese Fahrt ist nicht möglich.', 'warn');
+    const ship = current();
+    if (ship?.route?.active) ship.route.active = false;
+    if (!depart(state, VALLEY, selected, to)) {
+      hud.toast('Diese Fahrt ist nicht möglich.', 'warn');
+      sfx('fehler');
+    } else sfx('ablegen');
     follow = true;
     refresh();
   },
@@ -114,12 +154,13 @@ const hud = new Hud(app, VALLEY, {
     if (!ship?.port) return;
     const r = buyShip(state, VALLEY, ship.port, type);
     hud.toast(r.message, r.ok ? 'info' : 'warn');
+    sfx(r.ok ? 'erfolg' : 'fehler');
     if (r.ship) selected = r.ship.id;
     refresh();
   },
   dismantle() {
     const r = dismantleRaft(state, selected);
-    hud.tradeFeedback(r);
+    feedback(r, 'muenzen');
     if (r.ok) selected = state.ships[0]?.id ?? -1;
     refresh();
   },
@@ -128,9 +169,141 @@ const hud = new Hud(app, VALLEY, {
   },
   menu() {
     running = false;
+    sfx('papier');
     menu.showGameMenu();
   },
+  command(cmd, d) {
+    runCommand(cmd, d);
+  },
 });
+
+/** Befehle aus Kontor, Werft, Kneipe, Route und Auftragsbuch */
+function runCommand(cmd: string, d: Record<string, string | number>): void {
+  const ship = current();
+  const town = ship?.port ?? '';
+  const n = (k: string) => Number(d[k] ?? 0);
+  let r: TradeResult | null = null;
+  let ok: SfxName = 'klick';
+  switch (cmd) {
+    case 'refresh':
+      sfx('papier');
+      break;
+    case 'buildKontor':
+      r = buildKontor(state, town);
+      ok = 'erfolg';
+      break;
+    case 'upgradeKontor':
+      r = upgradeKontor(state, town);
+      ok = 'erfolg';
+      break;
+    case 'buildBetrieb':
+      r = buildBetrieb(state, VALLEY, town, String(d.type));
+      ok = 'erfolg';
+      break;
+    case 'toggleBetrieb':
+      r = toggleBetrieb(state, n('id'));
+      break;
+    case 'sellBetrieb':
+      r = sellBetrieb(state, n('id'));
+      ok = 'muenzen';
+      break;
+    case 'store':
+      r = store(state, selected, String(d.good), n('n'));
+      break;
+    case 'load':
+      r = load(state, selected, String(d.good), n('n'));
+      break;
+    case 'kontorBuy':
+      r = kontorBuy(state, town, String(d.good), n('n'));
+      ok = 'kauf';
+      break;
+    case 'kontorSell':
+      r = kontorSell(state, town, String(d.good), n('n'));
+      ok = 'verkauf';
+      break;
+    case 'repair':
+      r = repair(state, VALLEY, selected);
+      ok = 'erfolg';
+      break;
+    case 'upgrade':
+      r = upgrade(state, VALLEY, selected, String(d.id));
+      ok = 'erfolg';
+      break;
+    case 'hire':
+      r = hireCaptain(state, selected, n('id'));
+      ok = 'glocke';
+      break;
+    case 'dismiss':
+      r = dismissCaptain(state, selected);
+      break;
+    case 'accept':
+      r = acceptContract(state, n('id'));
+      ok = 'stempel';
+      break;
+    case 'deliver':
+      r = deliverContract(state, selected, n('id'));
+      ok = r.taler > 0 ? 'muenzen' : 'verkauf';
+      break;
+    case 'routeAddStop':
+    case 'routeDelStop':
+    case 'routeAddOrder':
+    case 'routeDelOrder':
+    case 'routeToggle':
+    case 'routeClear':
+      if (ship) r = editRoute(ship, cmd, d);
+      break;
+  }
+  if (r) feedback(r, ok);
+  refresh();
+}
+
+function editRoute(ship: Ship, cmd: string, d: Record<string, string | number>): TradeResult | null {
+  const okMsg = (message: string): TradeResult => ({ ok: true, message, amount: 0, taler: 0 });
+  const r = (ship.route ??= { stops: [], next: 0, active: false });
+  switch (cmd) {
+    case 'routeAddStop': {
+      const town = String(d.town);
+      if (r.stops.length && r.stops[r.stops.length - 1].town === town) return { ok: false, message: 'Diese Stadt ist schon der letzte Halt.', amount: 0, taler: 0 };
+      r.stops.push({ town, orders: [] });
+      return null;
+    }
+    case 'routeDelStop':
+      r.stops.splice(Number(d.stop), 1);
+      r.next = 0;
+      if (r.stops.length < 2) r.active = false;
+      return null;
+    case 'routeAddOrder': {
+      const stop = r.stops[Number(d.stop)];
+      if (!stop) return null;
+      stop.orders.push({
+        kind: String(d.kind) as OrderKind,
+        good: String(d.good),
+        amount: Math.max(0, Math.floor(Number(d.amount) || 0)),
+        limit: Math.max(0, Math.floor(Number(d.limit) || 0)),
+      });
+      return null;
+    }
+    case 'routeDelOrder':
+      r.stops[Number(d.stop)]?.orders.splice(Number(d.order), 1);
+      return null;
+    case 'routeToggle':
+      if (!r.active && !ship.captain) return { ok: false, message: 'Erst einen Kapitän anheuern.', amount: 0, taler: 0 };
+      if (!r.active && r.stops.length < 2) return { ok: false, message: 'Eine Route braucht mindestens zwei Halte.', amount: 0, taler: 0 };
+      r.active = !r.active;
+      r.retryAt = undefined;
+      r.note = undefined;
+      // beginnt am Halt, an dem das Schiff gerade liegt, sonst beim ersten
+      if (r.active) {
+        const here = r.stops.findIndex((s) => s.town === ship.port);
+        r.next = here >= 0 ? here : 0;
+      }
+      return okMsg(r.active ? `${ship.captain!.name} übernimmt die Route.` : 'Route angehalten.');
+    case 'routeClear':
+      ship.route = null;
+      return okMsg('Route gelöscht.');
+  }
+  return null;
+}
 
 const menu = new Menu(
   app,
@@ -141,12 +314,19 @@ const menu = new Menu(
     startChapter(id) {
       const c = CHAPTERS.find((x) => x.id === id)!;
       startGame(
-        newGame(VALLEY, { startTown: c.startTown, money: c.money, startShip: c.startShip, allowedShips: c.allowedShips }),
+        newGame(VALLEY, {
+          startTown: c.startTown,
+          money: c.money,
+          startShip: c.startShip,
+          allowedShips: c.allowedShips,
+          rivals: c.rivals ?? false,
+          seed: Date.now() % 100000,
+        }),
         { mode: 'kampagne', chapter: c, completed: new Set(), finished: false },
       );
     },
     startFree() {
-      startGame(newGame(VALLEY, 'oberau'), { mode: 'frei', completed: new Set(), finished: false });
+      startGame(newGame(VALLEY, { startTown: 'oberau', seed: Date.now() % 100000 }), { mode: 'frei', completed: new Set(), finished: false });
     },
     save(slot) {
       saveSlot(slot);
@@ -166,19 +346,27 @@ const menu = new Menu(
     resume() {
       running = true;
     },
+    setSound(on) {
+      settings.sound = on;
+      mute(!on);
+      saveJson('settings', settings);
+    },
   },
   () => ({
     slots: listSlots(),
     unlockedChapters: progress.unlocked,
     tiltShift: settings.tiltShift,
+    sound: !isMuted(),
     inGame: inGame,
   }),
 );
 let inGame = false;
 
 function startGame(s: GameState, sess: Session): void {
-  for (const view of views.values()) view.removeFrom(stage.scene);
+  for (const view of [...views.values(), ...rivalViews.values()]) view.removeFrom(stage.scene);
   views.clear();
+  rivalViews.clear();
+  setMusic('epoche1');
   state = s;
   session = sess;
   selected = state.ships[0]?.id ?? -1;
@@ -227,7 +415,7 @@ function loadSlot(slot: string): boolean {
   const save = readSlot(slot);
   if (!save) return false;
   const chapter = CHAPTERS.find((c) => c.id === save.chapter);
-  startGame(save.state, {
+  startGame(upgradeState(save.state, VALLEY), {
     mode: save.mode,
     chapter,
     completed: new Set(save.completedGoals),
@@ -255,7 +443,10 @@ function checkGoals(silent = false): void {
   c.goals.forEach((g, i) => {
     if (session.completed.has(i) || !goalDone(state, g)) return;
     session.completed.add(i);
-    if (!silent) hud.toast(`Ziel erfüllt: ${g.text}`, 'gain');
+    if (!silent) {
+      hud.toast(`Ziel erfüllt: ${g.text}`, 'gain');
+      sfx('erfolg');
+    }
   });
   hud.renderGoals(
     `Kapitel ${c.number}: ${c.title}`,
@@ -276,6 +467,7 @@ function checkGoals(silent = false): void {
     running = false;
     hud.renderGoals(null, []);
     saveSlot('auto');
+    sfx('stempel');
     menu.showChapterDone(c, next);
   }
 }
@@ -294,13 +486,25 @@ function handleEvents(events: GameEvent[]): void {
   for (const e of events) {
     if (e.type === 'arrived') {
       const ship = state.ships.find((s) => s.id === e.ship);
-      if (ship) hud.toast(`${ship.name} ist in ${townName(e.town)} angekommen.`);
+      if (ship && (!e.auto || ship.id === selected)) {
+        hud.toast(`${ship.name} ist in ${townName(e.town)} angekommen.`);
+        sfx('anlegen');
+      }
+      changed = true;
+    } else if (e.type === 'news') {
+      if (e.important) {
+        hud.toast(e.item.text, 'warn');
+        sfx('glocke');
+      } else if (e.item.kind === 'auftrag' && e.item.text.startsWith('Frist')) {
+        hud.toast(e.item.text, 'loss');
+      }
       changed = true;
     } else if (e.type === 'townLevel') {
       const name = townName(e.town);
       if (e.up) {
         const goods = e.newGoods.map((g) => GOOD_BY_ID.get(g)!.name).join(', ');
         hud.stamp(`${name} wächst`, `jetzt ${LEVELS[e.level].name}`);
+        sfx('stempel');
         hud.toast(`${name} ist jetzt ${LEVELS[e.level].name}.${goods ? ` Neue Nachfrage: ${goods}.` : ''}`, 'gain');
       } else {
         hud.toast(`${name} schrumpft zum ${LEVELS[e.level].name}.`, 'loss');
@@ -336,7 +540,10 @@ function syncViews(): void {
       views.set(ship.id, view);
     }
     view.setSelected(ship.id === selected);
-    view.setCargo(GOODS.map((g) => ({ color: g.color, amount: ship.cargo[g.id]?.amount ?? 0 })));
+    view.setCargo(
+      GOODS.map((g) => ({ color: g.color, amount: ship.cargo[g.id]?.amount ?? 0 })),
+      capacityOf(ship),
+    );
     if (ship.port) {
       const p = placeOf(ship.port);
       const slot = slots.get(ship.port) ?? 0;
@@ -344,6 +551,47 @@ function syncViews(): void {
       view.dock(p.mooring, p.def.river, p.def.riverT, slot);
     }
   }
+
+  // Schiffe der Konkurrenz mit ihren Farben
+  const alive = new Set<number>();
+  for (const r of state.rivals) {
+    const color = RIVAL_BY_ID.get(r.id)!.color;
+    for (const ship of r.ships) {
+      alive.add(ship.id);
+      let view = rivalViews.get(ship.id);
+      if (!view) {
+        view = new ShipView(land, SHIPS[ship.type], -ship.id, color);
+        view.addTo(stage.scene);
+        rivalViews.set(ship.id, view);
+      }
+      view.setCargo(GOODS.map((g) => ({ color: g.color, amount: ship.cargo?.good === g.id ? ship.cargo.amount : 0 })));
+      if (ship.port) {
+        const p = placeOf(ship.port);
+        const slot = slots.get(ship.port) ?? 0;
+        slots.set(ship.port, slot + 1);
+        view.dock(p.mooring, p.def.river, p.def.riverT, slot);
+      }
+    }
+  }
+  for (const [id, view] of rivalViews) {
+    if (alive.has(id)) continue;
+    view.removeFrom(stage.scene);
+    rivalViews.delete(id);
+  }
+}
+
+/** Kontore und Betriebe aller Häuser in die Landschaft stellen */
+function syncEstates(): void {
+  const info = new Map<string, EstateInfo>();
+  const get = (town: string) => {
+    let e = info.get(town);
+    if (!e) info.set(town, (e = { kontore: [], betriebe: [] }));
+    return e;
+  };
+  for (const [town, k] of Object.entries(state.kontore)) get(town).kontore.push({ color: PLAYER_COLOR, level: k.level });
+  for (const r of state.rivals) for (const town of r.kontore) get(town).kontore.push({ color: RIVAL_BY_ID.get(r.id)!.color, level: 1 });
+  for (const b of state.betriebe) get(b.town).betriebe.push({ type: b.type, active: b.active });
+  estates.sync(info);
 }
 
 function syncTowns(): void {
@@ -360,6 +608,7 @@ function refresh(): void {
   hud.render(state, selected);
   syncViews();
   syncTowns();
+  syncEstates();
   checkGoals();
 }
 
@@ -401,7 +650,7 @@ function updateSeasonVisuals(): void {
 
 const smooth = (x: number) => x * x * (3 - 2 * x);
 
-function placeOnVoyage(ship: Ship, view: ShipView): void {
+function placeOnVoyage(ship: { voyage: Voyage | null }, view: ShipView): void {
   const v = ship.voyage!;
   const { leg, progress: p, index } = voyagePosition(v);
   const seg = segOf(leg.seg);
@@ -442,6 +691,18 @@ stage.renderer.domElement.addEventListener('pointerup', (e) => {
   }
 });
 
+// --- Geräusche der Landschaft ---
+const BIRDS: Record<Season, number> = { fruehling: 0.8, sommer: 0.6, herbst: 0.3, winter: 0.05 };
+function updateAmbience(): void {
+  const s = season(Math.floor(state.hour / 24) + 1);
+  const night = Math.abs((state.hour % 24) - 13) > 8;
+  ambient({
+    flow: state.ice ? 0.15 : Math.min(1, 0.45 + Math.max(-0.3, state.waterLevel) * 0.3),
+    wind: Math.min(1, wind(state) / 1.25),
+    birds: night ? 0 : BIRDS[s],
+  });
+}
+
 // --- Schleife ---
 const timer = new THREE.Timer();
 let uiTick = 0;
@@ -456,6 +717,7 @@ function frame(): void {
     if (uiTick > 0.25) {
       uiTick = 0;
       hud.render(state, selected);
+      updateAmbience();
     }
   }
 
@@ -465,6 +727,18 @@ function frame(): void {
     if (ship.voyage) placeOnVoyage(ship, view);
     view.update(dt);
   }
+  let rivalDocked = false;
+  for (const r of state.rivals) {
+    for (const ship of r.ships) {
+      const view = rivalViews.get(ship.id);
+      if (!view) continue;
+      if (ship.voyage) placeOnVoyage(ship, view);
+      else if (!view.docked) rivalDocked = true;
+      view.update(dt);
+    }
+  }
+  if (rivalDocked) syncViews();
+  estates.update(dt, wind(state));
 
   updateSeasonVisuals();
   land.update(dt, 0.012 * (1 + Math.max(0, state.waterLevel) * 0.35));

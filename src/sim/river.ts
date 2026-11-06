@@ -13,6 +13,8 @@ export interface Segment {
 export interface Conditions {
   level: number;
   ice?: boolean;
+  /** gesperrte Abschnitte, etwa nach einem Brückeneinsturz */
+  closed?: string[];
 }
 
 const asCond = (c: number | Conditions): Conditions => (typeof c === 'number' ? { level: c } : c);
@@ -39,9 +41,10 @@ export interface ShipType {
 /** Mindestgeschwindigkeit über Grund, darunter gilt ein Abschnitt als nicht befahrbar */
 const MIN_GROUND_SPEED = 0.5;
 
-export type BlockReason = 'nurTalwaerts' | 'tiefgang' | 'bruecke' | 'stroemung' | 'eis';
+export type BlockReason = 'gesperrt' | 'nurTalwaerts' | 'tiefgang' | 'bruecke' | 'stroemung' | 'eis';
 
 export const BLOCK_TEXT: Record<BlockReason, string> = {
+  gesperrt: 'gesperrt',
   eis: 'zugefroren',
   nurTalwaerts: 'fährt nur talwärts',
   tiefgang: 'zu seicht für den Tiefgang',
@@ -57,6 +60,7 @@ export function blockReason(
   conditions: number | Conditions,
 ): BlockReason | null {
   const c = asCond(conditions);
+  if (c.closed?.includes(seg.id)) return 'gesperrt';
   if (c.ice && seg.freezes) return 'eis';
   if (!downstream && !ship.canGoUpstream) return 'nurTalwaerts';
   if (seg.baseDepth + c.level < ship.draft) return 'tiefgang';
