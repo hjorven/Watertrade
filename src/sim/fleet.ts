@@ -43,6 +43,7 @@ export function addShip(state: GameState, type: string, port: string): Ship {
 }
 
 export function shipAllowed(state: GameState, type: string): boolean {
+  if ((SHIPS[type]?.epoch ?? 1) > state.epoch) return false;
   return state.allowedShips.length === 0 || state.allowedShips.includes(type);
 }
 
@@ -50,6 +51,7 @@ export function buyShip(state: GameState, map: MapDef, town: string, type: strin
   const def = map.towns.find((t) => t.id === town);
   const cls = SHIPS[type];
   if (!def || !cls || !def.shipyard.includes(type)) return { ok: false, message: 'Hier wird dieser Schiffstyp nicht gebaut.' };
+  if (cls.epoch > state.epoch) return { ok: false, message: `${cls.name} gibt es erst in einer späteren Epoche.` };
   if (!shipAllowed(state, type)) return { ok: false, message: `${cls.name} gibt es in diesem Kapitel noch nicht.` };
   if (state.money < cls.price) return { ok: false, message: `Ein ${cls.name} kostet ${cls.price} Taler.` };
   state.money -= cls.price;

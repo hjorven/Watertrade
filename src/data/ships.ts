@@ -3,12 +3,35 @@ import type { ShipType } from '../sim/river.ts';
 export interface ShipClass extends ShipType {
   price: number; // Taler beim Kauf
   description: string;
+  /** ab welcher Epoche die Werften diesen Typ bauen */
+  epoch: number;
+  /** Betriebskosten in Taler je Fahrstunde (Kohle, Diesel) */
+  fuel?: number;
+  /** Aufpreis beim Verkauf frischer Ware (Kühlschiff) */
+  fresh?: number;
+}
+
+/** Waren, die im Kühlraum frisch bleiben */
+export const FRESH_GOODS = ['fisch', 'brot', 'bier'];
+
+export const EPOCHS = [
+  { number: 1, name: 'Treidelzeit', from: 1 },
+  { number: 2, name: 'Dampf', from: 5 },
+  { number: 3, name: 'Motor', from: 10 },
+];
+
+/** Epoche nach Spieljahr im freien Spiel */
+export function epochOfYear(year: number): number {
+  let e = 1;
+  for (const x of EPOCHS) if (year >= x.from) e = x.number;
+  return e;
 }
 
 /** Epoche 1 */
 export const SHIPS: Record<string, ShipClass> = {
   floss: {
     id: 'floss',
+    epoch: 1,
     name: 'Floß',
     propulsion: 'drift',
     speed: 1,
@@ -21,6 +44,7 @@ export const SHIPS: Record<string, ShipClass> = {
   },
   plaette: {
     id: 'plaette',
+    epoch: 1,
     name: 'Plätte',
     propulsion: 'tow',
     speed: 4,
@@ -33,6 +57,7 @@ export const SHIPS: Record<string, ShipClass> = {
   },
   treidelkahn: {
     id: 'treidelkahn',
+    epoch: 1,
     name: 'Treidelkahn',
     propulsion: 'tow',
     speed: 5,
@@ -45,6 +70,7 @@ export const SHIPS: Record<string, ShipClass> = {
   },
   segelkahn: {
     id: 'segelkahn',
+    epoch: 1,
     name: 'Segelkahn',
     propulsion: 'sail',
     speed: 8,
@@ -54,6 +80,65 @@ export const SHIPS: Record<string, ShipClass> = {
     canGoUpstream: true,
     price: 950,
     description: 'Schnell und geräumig bei gutem Wind, bei Flaute langsam. Der Mast passt nicht unter jede Brücke.',
+  },
+  // Epoche 2: Dampf
+  raddampfer: {
+    id: 'raddampfer',
+    epoch: 2,
+    name: 'Raddampfer',
+    propulsion: 'steam',
+    speed: 10,
+    draft: 1.2,
+    height: 6,
+    capacity: 70,
+    canGoUpstream: true,
+    price: 2600,
+    fuel: 3,
+    description: 'Schaufelräder und Kohle: schnell gegen jede Strömung, ohne Pferde und Wind. Der Schornstein ist hoch.',
+  },
+  schleppverband: {
+    id: 'schleppverband',
+    epoch: 2,
+    name: 'Schleppverband',
+    propulsion: 'steam',
+    speed: 6,
+    draft: 1.7,
+    height: 5,
+    capacity: 180,
+    canGoUpstream: true,
+    price: 4200,
+    fuel: 5,
+    description: 'Ein Schlepper zieht zwei Kähne. Riesige Ladung, aber tief und langsam: nur auf dem Hauptstrom sinnvoll.',
+  },
+  // Epoche 3: Motor
+  motorschiff: {
+    id: 'motorschiff',
+    epoch: 3,
+    name: 'Motorschiff',
+    propulsion: 'motor',
+    speed: 14,
+    draft: 1.5,
+    height: 4,
+    capacity: 110,
+    canGoUpstream: true,
+    price: 6500,
+    fuel: 4,
+    description: 'Dieselmotor, Steuerhaus achtern, flacher Aufbau: schnell, groß und passt unter die meisten Brücken.',
+  },
+  kuehlschiff: {
+    id: 'kuehlschiff',
+    epoch: 3,
+    name: 'Kühlschiff',
+    propulsion: 'motor',
+    speed: 12,
+    draft: 1.4,
+    height: 4,
+    capacity: 80,
+    canGoUpstream: true,
+    price: 7200,
+    fuel: 5,
+    fresh: 0.2,
+    description: 'Kühlraum für Fisch, Brot und Bier: frische Ware bringt 20 % mehr.',
   },
 };
 

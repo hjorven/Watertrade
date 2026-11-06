@@ -3,7 +3,7 @@ import { TRAITS } from '../data/captains.ts';
 import { GOOD_BY_ID, GOODS } from '../data/goods.ts';
 import type { MapDef, TownDef } from '../data/maps/valley.ts';
 import { RIVAL_BY_ID } from '../data/rivals.ts';
-import { SHIPS, UPGRADES } from '../data/ships.ts';
+import { EPOCHS, SHIPS, UPGRADES } from '../data/ships.ts';
 import { dayInSeason, season, SEASON_NAME, year } from '../sim/calendar.ts';
 import { MAX_ACCEPTED, PENALTY } from '../sim/contracts.ts';
 import { buyPrice, sellPrice } from '../sim/economy.ts';
@@ -26,7 +26,11 @@ import {
   type OrderKind,
   type Ship,
   type TradeResult,
+  type Voyage,
+  effectiveSegments,
 } from '../sim/game.ts';
+import { PROJECTS } from '../data/projects.ts';
+import { daysLeft, projectState } from '../sim/works.ts';
 import { betriebeIn, buildingAllowed, KONTOR_UPKEEP, playerWorth } from '../sim/house.ts';
 import { rivalWorth } from '../sim/rivals.ts';
 import { BLOCK_TEXT } from '../sim/river.ts';
@@ -46,7 +50,7 @@ export interface HudActions {
   command(cmd: string, data: Record<string, string | number>): void;
 }
 
-type View = 'ship' | 'register' | 'news' | 'contracts';
+type View = 'ship' | 'register' | 'news' | 'contracts' | 'works' | 'map';
 type Tab = 'markt' | 'kontor' | 'werft' | 'kneipe' | 'route';
 
 const fmtHours = (h: number) => {
@@ -87,6 +91,14 @@ const flows = (r: Record<string, number>) =>
     .map(([g, n]) => `${n} ${goodName(g)}`)
     .join(' + ');
 
+export interface MapData {
+  viewBox: string;
+  rivers: { path: string; width: number }[];
+  towns: Record<string, { x: number; y: number }>;
+  segMid: Record<string, { x: number; y: number }>;
+  shipPos(ship: { port: string | null; voyage: Voyage | null }): { x: number; y: number } | null;
+}
+
 export class Hud {
   private readonly top: HTMLElement;
   private readonly fleet: HTMLElement;
@@ -115,7 +127,9 @@ export class Hud {
         <nav class="views" aria-label="Bücher">
           <button class="btn" data-act="view" data-view="contracts">Aufträge<i class="badge" data-badge="contracts"></i></button>
           <button class="btn" data-act="view" data-view="news">Flussbote<i class="badge" data-badge="news"></i></button>
+          <button class="btn" data-act="view" data-view="works">Wasserbau</button>
           <button class="btn" data-act="view" data-view="register">Register</button>
+          <button class="btn" data-act="view" data-view="map">Karte</button>
         </nav>
         <button class="btn menu-btn" data-act="menu" aria-label="Menü">Menü</button>
         <div class="speed" role="group" aria-label="Tempo">
@@ -240,7 +254,8 @@ export class Hud {
       <span><small>Kasse</small><b>${fmt(state.money)}</b> Taler</span>
       <span><small>${SEASON_NAME[season(day(state))]} · Jahr ${year(day(state))}</small><b>${dayInSeason(day(state))}. Tag</b> ${clock(state.hour)}</span>
       <span class="hide-narrow"><small>Pegel</small><b>${state.waterLevel >= 0 ? '+' : '−'}${Math.abs(state.waterLevel).toFixed(1).replace('.', ',')} m</b>${state.ice ? ' Eis' : ''}</span>
-      <span class="hide-narrow"><small>Wind</small><b>${windText(w)}</b></span>${events}`,
+      <span class="hide-narrow"><small>Wind</small><b>${windText(w)}</b></span>
+      <span class="hide-narrow hide-mid"><small>Epoche</small><b>${EPOCHS[state.epoch - 1].name}</b></span>${events}`,
     );
     this.newsKey = state.news[0] ? `${state.news[0].day}|${state.news[0].text}` : '';
     if (this.view === 'news') this.newsSeen = this.newsKey;
@@ -249,11 +264,14 @@ export class Hud {
     this.navBadges.contracts.textContent = offers ? String(offers) : '';
     this.root.querySelectorAll<HTMLButtonElement>('.views .btn').forEach((b) => b.classList.toggle('on', b.dataset.view === this.view));
 
+    this.root.querySelector('.ledger')!.classList.toggle('wide', this.view === 'map');
     const ship = state.ships.find((s) => s.id === selected) ?? state.ships[0];
     setHtml(this.fleet, ship ? this.renderFleet(state, ship) : '');
     if (this.view === 'register') return setHtml(this.body, this.renderRegister(state));
     if (this.view === 'news') return setHtml(this.body, this.renderNews(state));
     if (this.view === 'contracts') return setHtml(this.body, this.renderContracts(state, ship));
+    if (this.view === 'works') return setHtml(this.body, this.renderWorks(state));
+    if (this.view === 'map') return setHtml(this.body, this.mapHtml(state));
     if (!ship) {
       setHtml(this.body, `<div class="ledger-head"><h2>Keine Schiffe</h2><p>Deine Flotte ist leer.</p></div>`);
       return;
@@ -511,6 +529,7 @@ export class Hud {
               <button class="btn" data-act="cmd" data-cmd="upgrade" data-id="${u.id}" ${has || state.money < c ? 'disabled' : ''}>${has ? 'eingebaut' : `${fmt(c)} Taler`}</button></div>`;
           }).join('')}</div>`;
     const buildable = town.shipyard.filter((id) => shipAllowed(state, id));
+    const later = town.shipyard.filter((id) => SHIPS[id].epoch > state.epoch);
     const newShips = buildable.length
       ? `<h3>Neue Schiffe</h3><div class="yard">${buildable
           .map((id) => {
@@ -521,6 +540,8 @@ export class Hud {
               <button class="btn" data-act="buyship" data-type="${id}" ${state.money >= c.price ? '' : 'disabled'}>${fmt(c.price)} Taler</button>
             </div>`;
           })
+          .join('')}${later
+          .map((id) => `<div class="yard-row muted"><div><b>${SHIPS[id].name}</b> <small>kommt in der Epoche „${EPOCHS[SHIPS[id].epoch - 1].name}“</small></div></div>`)
           .join('')}</div>`
       : '';
     return `${this.portHead(town, 'Werft')}${state_}
@@ -635,7 +656,11 @@ export class Hud {
           ? 'Talwärts hilft die Strömung.'
           : cls.propulsion === 'tow'
             ? 'Bergwärts ziehen Treidelpferde vom Ufer.'
-            : 'Bergwärts unter Segel, gegen die Strömung.';
+            : cls.propulsion === 'steam'
+              ? 'Die Schaufelräder stampfen gegen die Strömung.'
+              : cls.propulsion === 'motor'
+                ? 'Der Motor schiebt gleichmäßig gegen die Strömung.'
+                : 'Bergwärts unter Segel, gegen die Strömung.';
     const route = v.legs
       .map((l, i) => `<li class="${i < index ? 'done' : i === index ? 'now' : ''}">${this.townName(l.from)} → ${this.townName(l.to)} <small>${fmtHours(l.hours)}</small></li>`)
       .join('');
@@ -685,7 +710,7 @@ export class Hud {
       <h3>Dein Haus</h3>
       <ul class="plain">
         <li>Gewinn bisher: <b>${fmt(state.totalProfit)}</b> Taler, ${state.stats.trips} Fahrten, ${state.stats.contracts} Aufträge erfüllt</li>
-        <li>Gestern: Löhne ${fmt(l.wages)}, Unterhalt ${fmt(l.upkeep)}, eigene Erzeugung im Wert von ${fmt(l.production)} Taler</li>
+        <li>Gestern: Löhne ${fmt(l.wages)}, Unterhalt ${fmt(l.upkeep)}${l.fuel ? `, Brennstoff ${fmt(l.fuel)}` : ''}, eigene Erzeugung im Wert von ${fmt(l.production)} Taler</li>
         ${kontore || '<li>Noch keine Kontore</li>'}
       </ul>`;
   }
@@ -725,6 +750,77 @@ export class Hud {
       ${accepted.map(row).join('') || '<p class="note">Keine.</p>'}
       <h3>Angebote</h3>
       ${offers.map(row).join('') || '<p class="note">Gerade sucht niemand etwas. Neue Angebote kommen fast täglich.</p>'}`;
+  }
+
+  private renderWorks(state: GameState): string {
+    const list = PROJECTS.map((p) => {
+      const st = projectState(state, p.id);
+      const seg = this.map.segments.find((s) => s.id === p.seg)!;
+      const where = `${this.townName(seg.from)} – ${this.townName(seg.to)}`;
+      const locked = p.epoch > state.epoch;
+      const btn =
+        st === 'fertig'
+          ? '<span class="done-mark">fertig</span>'
+          : st === 'bau'
+            ? `<span class="note">noch ${daysLeft(state, p.id)} Tage</span>`
+            : locked
+              ? `<span class="note">ab Epoche „${EPOCHS[p.epoch - 1].name}“</span>`
+              : `<button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" ${state.money >= p.cost ? '' : 'disabled'}>${fmt(p.cost)} Taler</button>`;
+      return `<div class="yard-row ${locked ? 'muted' : ''}"><div><b>${p.name}</b> <small>${where} · ${p.days} Tage Bauzeit</small>
+        <small class="desc">${p.text}</small></div>${btn}</div>`;
+    }).join('');
+    return `<div class="ledger-head"><div class="stamp-small">Wasserbauamt</div><h2>Den Fluss verbessern</h2>
+      <p>Brücken, Schleusen, Kanäle und Fahrrinnen verändern den Fluss für immer, für dich und für die Konkurrenz. Wer baut, zahlt, aber jede Fahrt wird leichter.</p></div>
+      <div class="yard">${list}</div>`;
+  }
+
+  /** Papierkarte des Tals mit allen Schiffen; Daten der Flussläufe kommen von außen */
+  setMapData(data: MapData): void {
+    this.mapData = data;
+  }
+
+  private mapData: MapData | null = null;
+
+  private mapHtml(state: GameState): string {
+    const d = this.mapData;
+    if (!d) return '';
+    const rivers = d.rivers.map((r) => `<path d="${r.path}" class="m-river" style="stroke-width:${r.width}"/>`).join('');
+    const segs = effectiveSegments(state, this.map);
+    const notes = segs
+      .map((seg) => {
+        const m = d.segMid[seg.id];
+        const marks: string[] = [];
+        if (seg.bridgeHeight !== undefined) marks.push(`Brücke ${seg.bridgeHeight} m`);
+        if (seg.freezes && state.ice) marks.push('Eis');
+        const ev = state.events.find((e) => e.seg === seg.id);
+        if (ev) marks.push(EVENT_TITLE[ev.kind]);
+        marks.push(`${(seg.baseDepth + state.waterLevel).toFixed(1).replace('.', ',')} m tief`);
+        return `<text x="${m.x}" y="${m.y}" class="m-note">${marks.join(' · ')}</text>`;
+      })
+      .join('');
+    const towns = this.map.towns
+      .map((t) => {
+        const p = d.towns[t.id];
+        const lvl = levelOf(state.towns[t.id].population);
+        const mine = state.kontore[t.id] ? '<rect class="m-kontor" x="-3" y="-15" width="6" height="6"/>' : '';
+        return `<g transform="translate(${p.x},${p.y})"><circle r="${4 + lvl * 1.5}" class="m-town"/>${mine}<text y="${-8 - lvl}" x="8" class="m-label">${t.name}</text></g>`;
+      })
+      .join('');
+    const ships = state.ships
+      .map((s) => {
+        const p = d.shipPos(s);
+        return p ? `<circle cx="${p.x}" cy="${p.y}" r="3.2" class="m-ship"><title>${s.name}</title></circle>` : '';
+      })
+      .join('');
+    const rivals = state.rivals
+      .flatMap((r) => r.ships.map((s) => ({ s, color: RIVAL_BY_ID.get(r.id)!.color })))
+      .map(({ s, color }) => {
+        const p = d.shipPos(s);
+        return p ? `<circle cx="${p.x}" cy="${p.y}" r="2.4" fill="${hex(color)}" class="m-rival"/>` : '';
+      })
+      .join('');
+    return `<div class="ledger-head"><div class="stamp-small">Flusskarte</div><h2>Das Tal</h2><p>Rote Punkte sind deine Schiffe, Quadrate deine Kontore.</p></div>
+      <svg class="paper-map" viewBox="${d.viewBox}" role="img" aria-label="Karte des Flusstals">${rivers}${notes}${towns}${rivals}${ships}</svg>`;
   }
 
   /* ---------- Rückmeldungen ---------- */

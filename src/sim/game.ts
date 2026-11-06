@@ -5,7 +5,10 @@ import { eventWaterOffset, tickEvents } from './events.ts';
 import { addShip, refreshTavern, runRoute } from './fleet.ts';
 import { tickHouse } from './house.ts';
 import { initialRivals, moveRivals, tickRivals } from './rivals.ts';
-import { day, type GameEvent, type GameState, type NewsItem } from './state.ts';
+import { EPOCHS, epochOfYear } from '../data/ships.ts';
+import { YEAR_DAYS, year } from './calendar.ts';
+import { addNews, day, shipClass, type GameEvent, type GameState, type NewsItem } from './state.ts';
+import { tickWorks } from './works.ts';
 import { initialMarket, initialTown, tickTown } from './towns.ts';
 import { wearRate } from './voyage.ts';
 
@@ -13,6 +16,7 @@ export * from './state.ts';
 export * from './trade.ts';
 export * from './voyage.ts';
 export { addShip, buyShip, dismantleRaft, RAFT_TIMBER, shipAllowed } from './fleet.ts';
+export { effectiveSegments } from './works.ts';
 
 export interface NewGameOptions {
   startTown: string;
@@ -22,6 +26,16 @@ export interface NewGameOptions {
   /** Konkurrenz ab Spielbeginn (Standard: an) */
   rivals?: boolean;
   seed?: number;
+  /** feste Epoche (Kampagne); ohne Angabe folgt sie den Spieljahren */
+  epoch?: number;
+  /** zusätzliche Startschiffe */
+  extraShips?: string[];
+  /** Kontore zu Spielbeginn */
+  kontore?: string[];
+  /** fertige Wasserbauten zu Spielbeginn */
+  works?: string[];
+  /** Spielbeginn im Jahr (für spätere Kapitel) */
+  startYear?: number;
 }
 
 export const START_MONEY = 500;
@@ -62,8 +76,20 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
     nextId: 1,
     rng: opts.seed ?? 20260601,
     ledger: { day: 0, wages: 0, upkeep: 0, production: 0 },
+    epoch: opts.epoch ?? 1,
+    epochAuto: opts.epoch === undefined,
+    works: (opts.works ?? []).map((id) => ({ id, started: 0, done: true })),
+    fuelToday: 0,
   };
+  if (opts.startYear && opts.startYear > 1) {
+    state.hour += (opts.startYear - 1) * YEAR_DAYS * 24;
+    state.waterLevel = waterLevel(state.hour / 24 + 1);
+    state.ice = isIce(day(state));
+  }
+  if (state.epochAuto) state.epoch = epochOfYear(year(day(state)));
   addShip(state, opts.startShip ?? 'treidelkahn', opts.startTown);
+  for (const t of opts.extraShips ?? []) addShip(state, t, opts.startTown);
+  for (const town of opts.kontore ?? []) state.kontore[town] = { level: 1, stock: {} };
   refreshTavern(state, map);
   if (state.rivalsActive) state.rivals = initialRivals(state);
   return state;
@@ -82,6 +108,12 @@ export function upgradeState(state: GameState, map: MapDef): GameState {
   s.nextId ??= 1;
   s.rng ??= 20260601;
   s.ledger ??= { day: 0, wages: 0, upkeep: 0, production: 0 };
+  s.works ??= [];
+  s.fuelToday ??= 0;
+  if (s.epoch === undefined) {
+    s.epochAuto = true;
+    s.epoch = epochOfYear(year(day(s)));
+  }
   if (s.rivalsActive === undefined) {
     s.rivalsActive = true;
     s.rivals = [];
@@ -137,6 +169,16 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
       }
     }
     tickHouse(state);
+    pushNews(events, tickWorks(state, map), true);
+    if (state.epochAuto) {
+      const e = epochOfYear(year(d));
+      if (e > state.epoch) {
+        state.epoch = e;
+        const name = EPOCHS.find((x) => x.number === e)!.name;
+        pushNews(events, [addNews(state, 'ereignis', `Eine neue Zeit beginnt: ${name}. Die Werften bauen neue Schiffe.`)], true);
+        events.push({ type: 'epoch', epoch: e });
+      }
+    }
     pushNews(events, tickEvents(state, map), true);
     pushNews(events, tickContracts(state, map), false);
     if (state.rivalsActive) pushNews(events, tickRivals(state, map), false);
@@ -152,6 +194,9 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
       const dt = Math.min(hours, v.hours - v.elapsed);
       v.elapsed = Math.min(v.hours, v.elapsed + hours);
       ship.condition = Math.max(0, ship.condition - dt * wearRate(ship));
+      const fuel = (shipClass(ship).fuel ?? 0) * dt;
+      state.money -= fuel;
+      state.fuelToday += fuel;
       if (v.elapsed >= v.hours) {
         ship.port = v.to;
         ship.voyage = null;

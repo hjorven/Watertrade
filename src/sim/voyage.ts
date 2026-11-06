@@ -1,5 +1,6 @@
 import type { MapDef, SegmentDef } from '../data/maps/valley.ts';
 import { explainBlock, findRoute, travelTime, type BlockReason, type ShipType } from './river.ts';
+import { effectiveSegments } from './works.ts';
 import { conditions, effectiveType, getShip, hasUpgrade, type GameState, type Leg, type Ship, type Voyage } from './state.ts';
 
 export type VoyagePlan = { ok: true; voyage: Voyage } | { ok: false; reasons: { seg: SegmentDef; reason: BlockReason }[] };
@@ -19,16 +20,17 @@ export function planRoute(
   upstreamBoost = 1,
 ): VoyagePlan {
   const cond = conditions(state);
-  const route = findRoute(map.segments, from, to, type, cond);
+  const segments = effectiveSegments(state, map);
+  const route = findRoute(segments, from, to, type, cond);
   if (!route) {
-    const reasons = explainBlock(map.segments, from, to, type, cond);
+    const reasons = explainBlock(segments, from, to, type, cond);
     return { ok: false, reasons: reasons as { seg: SegmentDef; reason: BlockReason }[] };
   }
   const legs: Leg[] = [];
   let node = from;
   let toll = 0;
   for (const id of route.path) {
-    const seg = map.segments.find((s) => s.id === id)!;
+    const seg = segments.find((s) => s.id === id)!;
     const downstream = seg.from === node;
     const next = downstream ? seg.to : seg.from;
     const t = downstream ? type : { ...type, speed: type.speed * upstreamBoost };

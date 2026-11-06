@@ -1167,3 +1167,100 @@ ul.plain small {
 .btn.on:hover:not(:disabled) {
   background: #47382a;
 }
+
+/* --- M5: Wasserbau, Papierkarte --- */
+.yard-row.muted {
+  opacity: 0.55;
+}
+
+.done-mark {
+  font-variant: small-caps;
+  font-weight: 700;
+  color: var(--gain);
+  border: 2px solid var(--gain);
+  padding: 0 6px;
+  transform: rotate(-4deg);
+}
+
+.paper-map {
+  width: 100%;
+  height: auto;
+  margin-top: 6px;
+  background:
+    radial-gradient(ellipse at center, transparent 55%, rgb(120 90 50 / 0.18)),
+    #efe2c2;
+  border: 1px solid var(--line);
+  box-shadow: inset 0 0 0 4px #efe2c2, inset 0 0 0 5px var(--line);
+}
+
+.paper-map .m-river {
+  fill: none;
+  stroke: #6f9db0;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.paper-map .m-town {
+  fill: #f6eedb;
+  stroke: var(--ink);
+  stroke-width: 1.2;
+}
+
+.paper-map .m-kontor {
+  fill: var(--stamp);
+}
+
+.paper-map .m-label {
+  font-size: 11px;
+  font-variant: small-caps;
+  font-weight: 700;
+  fill: var(--ink);
+}
+
+.paper-map .m-note {
+  font-size: 6.5px;
+  font-style: italic;
+  fill: var(--ink-soft);
+}
+
+.paper-map .m-ship {
+  fill: var(--stamp);
+  stroke: #fff;
+  stroke-width: 0.8;
+}
+
+.paper-map .m-rival {
+  stroke: #fff;
+  stroke-width: 0.6;
+}
+
+@media (max-width: 1280px) {
+  .views .btn {
+    padding: 3px 6px;
+  }
+}
+
+/* Kopfzeile darf nicht unter das Kontorbuch laufen */
+@media (min-width: 721px) {
+  .topbar {
+    max-width: calc(100% - 440px - 40px);
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+}
+
+@media (min-width: 721px) {
+  .ledger.wide {
+    width: min(960px, calc(100% - 24px));
+    top: 124px;
+    max-height: calc(100% - 136px);
+  }
+}
+
+.paper-map .m-label {
+  font-size: 9px;
+}
+
+.paper-map .m-note {
+  font-size: 5px;
+}

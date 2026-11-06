@@ -121,7 +121,8 @@ export function tickHouse(state: GameState): void {
     }
   }
   state.money -= wages + upkeep;
-  state.ledger = { day: day(state), wages, upkeep, production: Math.round(production) };
+  state.ledger = { day: day(state), wages, upkeep, production: Math.round(production), fuel: Math.round(state.fuelToday ?? 0) };
+  state.fuelToday = 0;
 }
 
 function roomOf(state: GameState, town: string): number {

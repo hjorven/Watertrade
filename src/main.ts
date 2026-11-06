@@ -10,6 +10,7 @@ import { RIVAL_BY_ID } from './data/rivals.ts';
 import { SHIPS } from './data/ships.ts';
 import { Estates, PLAYER_COLOR, type EstateInfo } from './render/buildings.ts';
 import { ShipView } from './render/ships.ts';
+import { WaterWorks } from './render/works.ts';
 import { buildBridge, buildTown, placeTown, type TownView } from './render/towns.ts';
 import { dateText, dayInSeason, dayOfYear, season, SEASON_NAME, SEASONS, type Season } from './sim/calendar.ts';
 import { acceptContract, deliverContract } from './sim/contracts.ts';
@@ -38,6 +39,8 @@ import {
   type TradeResult,
   type Voyage,
 } from './sim/game.ts';
+import { startProject } from './sim/works.ts';
+import { EPOCHS } from './data/ships.ts';
 import { buildBetrieb, buildKontor, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
 import { goalDone, goalProgress } from './sim/goals.ts';
 import { deserialize, SAVE_VERSION, serialize, type SaveGame } from './sim/save.ts';
@@ -72,8 +75,55 @@ towns.forEach((t, i) => {
   townViews.set(t.def.id, view);
   townLabels.set(t.def.id, stage.addLabel(t.def.name, t.center.clone().setY(land.heightAt(t.center.x, t.center.z) + 6)));
 });
-for (const seg of VALLEY.segments) if (seg.bridgeHeight !== undefined) stage.scene.add(buildBridge(land, seg));
+const oldBridges = new Map<string, THREE.Object3D>();
+for (const seg of VALLEY.segments) {
+  if (seg.bridgeHeight === undefined) continue;
+  const b = buildBridge(land, seg);
+  oldBridges.set(seg.id, b);
+  stage.scene.add(b);
+}
+const waterWorks = new WaterWorks(stage.scene, land, VALLEY.segments, oldBridges);
 const estates = new Estates(stage.scene, towns);
+
+// Papierkarte: Flussläufe in Kartenkoordinaten (x nach rechts, z nach unten)
+function setupMapData(): void {
+  const all: THREE.Vector3[] = [];
+  const rivers = VALLEY.rivers.map((r) => {
+    const pts = land.curve(r.id).getSpacedPoints(80);
+    all.push(...pts);
+    return { pts, width: r.halfWidth * 0.9 };
+  });
+  for (const t of towns) all.push(t.center);
+  const minX = Math.min(...all.map((p) => p.x)) - 30;
+  const maxX = Math.max(...all.map((p) => p.x)) + 90;
+  const minZ = Math.min(...all.map((p) => p.z)) - 20;
+  const maxZ = Math.max(...all.map((p) => p.z)) + 20;
+  const f = (n: number) => n.toFixed(1);
+  hud.setMapData({
+    viewBox: `${f(minX)} ${f(minZ)} ${f(maxX - minX)} ${f(maxZ - minZ)}`,
+    rivers: rivers.map((r) => ({ path: 'M' + r.pts.map((p) => `${f(p.x)} ${f(p.z)}`).join(' L'), width: r.width })),
+    towns: Object.fromEntries(towns.map((t) => [t.def.id, { x: t.center.x, y: t.center.z }])),
+    segMid: Object.fromEntries(
+      VALLEY.segments.map((sg) => {
+        const p = land.pointAt(sg.river, (sg.fromT + sg.toT) / 2);
+        return [sg.id, { x: p.x + 6, y: p.z + 2 }];
+      }),
+    ),
+    shipPos(ship) {
+      if (ship.port) {
+        const m = placeOf(ship.port).mooring;
+        return { x: m.x, y: m.z };
+      }
+      const v = ship.voyage;
+      if (!v) return null;
+      const { leg, progress: p } = voyagePosition(v);
+      const sg = segOf(leg.seg);
+      const t = leg.downstream ? sg.fromT + (sg.toT - sg.fromT) * p : sg.toT - (sg.toT - sg.fromT) * p;
+      const q = land.pointAt(sg.river, t);
+      return { x: q.x, y: q.z };
+    },
+  });
+}
 const placeOf = (id: string) => towns.find((t) => t.def.id === id)!;
 const segOf = (id: string) => VALLEY.segments.find((s) => s.id === id)!;
 const townName = (id: string) => placeOf(id).def.name;
@@ -236,6 +286,10 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
     case 'dismiss':
       r = dismissCaptain(state, selected);
       break;
+    case 'project':
+      r = startProject(state, String(d.id));
+      ok = 'glocke';
+      break;
     case 'accept':
       r = acceptContract(state, n('id'));
       ok = 'stempel';
@@ -305,6 +359,8 @@ function editRoute(ship: Ship, cmd: string, d: Record<string, string | number>):
   return null;
 }
 
+setupMapData();
+
 const menu = new Menu(
   app,
   {
@@ -321,6 +377,11 @@ const menu = new Menu(
           allowedShips: c.allowedShips,
           rivals: c.rivals ?? false,
           seed: Date.now() % 100000,
+          epoch: c.epoch ?? 1,
+          startYear: c.startYear,
+          extraShips: c.extraShips,
+          kontore: c.kontore,
+          works: c.works,
         }),
         { mode: 'kampagne', chapter: c, completed: new Set(), finished: false },
       );
@@ -366,7 +427,7 @@ function startGame(s: GameState, sess: Session): void {
   for (const view of [...views.values(), ...rivalViews.values()]) view.removeFrom(stage.scene);
   views.clear();
   rivalViews.clear();
-  setMusic('epoche1');
+  setMusic(epochMusic(s.epoch));
   state = s;
   session = sess;
   selected = state.ships[0]?.id ?? -1;
@@ -434,6 +495,7 @@ function listSlots(): SlotInfo[] {
 }
 
 // --- Ziele ---
+const fmtNum = (n: number) => Math.floor(n).toLocaleString('de-DE');
 function checkGoals(silent = false): void {
   const c = session.chapter;
   if (!c || session.finished) {
@@ -453,7 +515,8 @@ function checkGoals(silent = false): void {
     c.goals.map((g, i) => {
       const p = goalProgress(state, g);
       const done = session.completed.has(i);
-      const progressText = g.type === 'profit' || g.type === 'townLevel' ? '' : `${Math.floor(Math.min(p.value, p.target))} / ${p.target}`;
+      const binary = ['profit', 'townLevel', 'rank', 'project'].includes(g.type);
+      const progressText = binary ? '' : `${fmtNum(Math.min(p.value, p.target))} / ${fmtNum(p.target)}`;
       return { text: g.text, done, progress: progressText };
     }),
   );
@@ -481,9 +544,17 @@ const SEASON_HINT: Record<Season, string> = {
   winter: 'Bald friert der Erzbach zu. Wer jetzt nicht liefert, muss bis zum Frühjahr warten.',
 };
 
+const epochMusic = (e: number) => (e >= 3 ? 'epoche3' : e === 2 ? 'epoche2' : 'epoche1');
+
 function handleEvents(events: GameEvent[]): void {
   let changed = false;
   for (const e of events) {
+    if (e.type === 'epoch') {
+      hud.stamp('Neue Zeit', EPOCHS[e.epoch - 1].name);
+      setMusic(epochMusic(e.epoch));
+      changed = true;
+      continue;
+    }
     if (e.type === 'arrived') {
       const ship = state.ships.find((s) => s.id === e.ship);
       if (ship && (!e.auto || ship.id === selected)) {
@@ -609,6 +680,7 @@ function refresh(): void {
   syncViews();
   syncTowns();
   syncEstates();
+  waterWorks.sync(state.works);
   checkGoals();
 }
 

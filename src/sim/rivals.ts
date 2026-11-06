@@ -15,9 +15,12 @@ const RIVAL_UPKEEP = 6;
 const MAX_RIVAL_SHIPS = 3;
 
 export function initialRivals(state: GameState): RivalState[] {
+  // In späteren Kapiteln sind die Häuser schon gewachsen
+  const years = Math.max(0, Math.floor(state.hour / 24 / 120));
   return RIVALS.map((def) => {
-    const r: RivalState = { id: def.id, money: def.money, ships: [], kontore: [], profit: 0 };
-    for (const type of def.startShips) addRivalShip(state, r, type, def.home);
+    const r: RivalState = { id: def.id, money: Math.round(def.money * (1 + years * 1.5)), ships: [], kontore: [], profit: 0 };
+    for (const type of def.startShips) addRivalShip(state, r, preferredShip(type, state.epoch), def.home);
+    for (let i = 0; i < Math.min(2, Math.floor(years / 3)); i++) addRivalShip(state, r, preferredShip(def.preferredShip, state.epoch), def.home);
     return r;
   });
 }
@@ -165,18 +168,26 @@ export function moveRivals(state: GameState, map: MapDef, hours: number): void {
   }
 }
 
+/** Mit neuen Epochen kaufen die Häuser moderne Schiffe */
+function preferredShip(base: string, epoch: number): string {
+  if (epoch >= 3) return base === 'plaette' ? 'raddampfer' : 'motorschiff';
+  if (epoch >= 2) return base === 'treidelkahn' || base === 'segelkahn' ? 'raddampfer' : base;
+  return base;
+}
+
 /** Täglich: Unterhalt zahlen, wachsen, Kontore bauen */
 export function tickRivals(state: GameState, map: MapDef): NewsItem[] {
   const news: NewsItem[] = [];
   for (const r of state.rivals) {
     const def = RIVAL_BY_ID.get(r.id)!;
     r.money -= r.ships.length * RIVAL_UPKEEP;
-    const cls = SHIPS[def.preferredShip];
-    if (r.ships.length < MAX_RIVAL_SHIPS && r.money > def.expandAt + cls.price) {
-      const yard = map.towns.find((t) => t.shipyard.includes(def.preferredShip));
+    const type = preferredShip(def.preferredShip, state.epoch);
+    const cls = SHIPS[type];
+    if (r.ships.length < MAX_RIVAL_SHIPS + state.epoch - 1 && r.money > def.expandAt * state.epoch + cls.price) {
+      const yard = map.towns.find((t) => t.shipyard.includes(type));
       if (yard) {
         r.money -= cls.price;
-        const s = addRivalShip(state, r, def.preferredShip, yard.id);
+        const s = addRivalShip(state, r, type, yard.id);
         news.push(addNews(state, 'konkurrenz', `${def.name} stellt einen neuen ${cls.name} in Dienst, die „${s.name}".`));
       }
     }

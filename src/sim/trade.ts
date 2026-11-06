@@ -1,7 +1,8 @@
 import { KONTOR_CAPACITY, KONTOR_SELL_FACTOR } from '../data/buildings.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import { available, price, SELL_FACTOR, type MarketEntry } from './economy.ts';
-import { capacityOf, cargoLoad, fail, getShip, type CargoSlot, type GameState, type Ship, type TradeResult } from './state.ts';
+import { FRESH_GOODS } from '../data/ships.ts';
+import { capacityOf, cargoLoad, fail, getShip, shipClass, type CargoSlot, type GameState, type Ship, type TradeResult } from './state.ts';
 
 /** Händlerblut am Ruder: etwas bessere Preise */
 const HAENDLER = 0.04;
@@ -69,7 +70,7 @@ function sellFrom(
   cargo: Record<string, CargoSlot>,
   goodId: string,
   wanted: number,
-  opts: { haendler?: boolean; limit?: number } = {},
+  opts: { haendler?: boolean; limit?: number; bonus?: number } = {},
 ): TradeResult {
   const good = GOOD_BY_ID.get(goodId);
   if (!good) return fail('Unbekannte Ware.');
@@ -78,7 +79,7 @@ function sellFrom(
   if (max <= 0) return fail(`Kein ${good.name} vorrätig.`);
   const m = state.markets[town][goodId];
   if (!m) return fail(`${good.name} wird hier nicht gehandelt.`);
-  const f = sellFactorAt(state, town) * (opts.haendler ? 1 + HAENDLER : 1);
+  const f = sellFactorAt(state, town) * (opts.haendler ? 1 + HAENDLER : 1) * (1 + (opts.bonus ?? 0));
   let amount = 0;
   let revenue = 0;
   for (let i = 1; i <= max; i++) {
@@ -116,7 +117,8 @@ export function buy(state: GameState, shipId: number, goodId: string, wanted: nu
 export function sell(state: GameState, shipId: number, goodId: string, wanted: number, limit = 0): TradeResult {
   const ship = getShip(state, shipId);
   if (!ship.port) return fail('Unterwegs kann nicht gehandelt werden.');
-  const r = sellFrom(state, ship.port, ship.cargo, goodId, wanted, { haendler: isHaendler(ship), limit });
+  const fresh = FRESH_GOODS.includes(goodId) ? (shipClass(ship).fresh ?? 0) : 0;
+  const r = sellFrom(state, ship.port, ship.cargo, goodId, wanted, { haendler: isHaendler(ship), limit, bonus: fresh });
   if (!r.ok && r.message.startsWith('Kein ')) return fail(r.message.replace('vorrätig', 'an Bord'));
   return r;
 }
