@@ -9,6 +9,7 @@ import { dayInSeason, season, SEASON_NAME, year } from '../sim/calendar.ts';
 import { MAX_ACCEPTED, PENALTY } from '../sim/contracts.ts';
 import { buyPrice, sellPrice } from '../sim/economy.ts';
 import { describeEvent, describeForecast, EVENT_TITLE, visibleForecasts } from '../sim/events.ts';
+import { epochProgress, epochProgressText } from '../sim/epochs.ts';
 import { hasYard, repairCost, timberPlan, upgradeCost } from '../sim/fleet.ts';
 import {
   bunkerPlan,
@@ -356,7 +357,7 @@ export class Hud {
       this.top,
       `
       <span><small>Kasse</small><b>${fmt(state.money)} Taler</b></span>
-      <span title="${EPOCHS[state.epoch - 1].name}"><small>${SEASON_NAME[season(day(state))]} · Jahr ${year(day(state))}</small><b>${dayInSeason(day(state))}. Tag, ${clock(state.hour)}</b></span>
+      <span title="${epochProgressText(state)}"><small>${SEASON_NAME[season(day(state))]} · Jahr ${year(day(state))}</small><b>${dayInSeason(day(state))}. Tag, ${clock(state.hour)}</b></span>
       <span class="river-stat" title="Pegel und Wind bestimmen, welche Schiffe wie schnell fahren"><small>Fluss</small><b>${state.waterLevel >= 0 ? '+' : '−'}${Math.abs(state.waterLevel).toFixed(1).replace('.', ',')} m${state.ice ? ', Eis' : ''} · Wind ${windText(w)}</b></span>${events}`,
     );
     this.newsKey = state.news[0] ? `${state.news[0].day}|${state.news[0].text}` : '';
@@ -492,8 +493,9 @@ export class Hud {
         const v = plan.voyage;
         const dir = v.legs.every((l) => l.downstream) ? 'talwärts' : v.legs.every((l) => !l.downstream) ? 'bergwärts' : 'tal- und bergwärts';
         const fees = feeSum(v.fees);
-        const zoll = (v.toll ?? 0) - fees;
-        const toll = `${zoll ? `, Zoll ${zoll}` : v.evaded ? `, ${v.evaded} Zoll umgangen, Kontrolle möglich` : ''}${fees ? `, Gebühren ${fees}` : ''}`;
+        const tow = v.towFee ?? 0;
+        const zoll = (v.toll ?? 0) - fees - tow;
+        const toll = `${zoll ? `, Zoll ${zoll}` : v.evaded ? `, ${v.evaded} Zoll umgangen, Kontrolle möglich` : ''}${fees ? `, Gebühren ${fees}` : ''}${tow ? `, Treidelgeld ${tow}` : ''}`;
         const dockH = (v.dock ?? 0) + (v.dockEnd ?? 0);
         const dockText = dockH >= 0.5 ? ` (davon ${fmtHours(dockH)} Laden und Löschen)` : '';
         const coal = bunkerPlan(state, ship, sailingHours(v), v.toll ?? 0);
@@ -673,7 +675,7 @@ export class Hud {
       : '';
     return `${this.portHead(town, 'Werft')}${state_}
       ${ship.type === 'floss' ? '' : `<button class="btn wide ${cost > 0 ? 'primary' : ''}" data-act="cmd" data-cmd="repair" ${cost > 0 && state.money >= cost ? '' : 'disabled'}>Überholen<small>${cost > 0 ? `${fmt(cost)} Taler` : 'nicht nötig'}</small></button>`}
-      ${ups}${newShips}`;
+      ${ups}${newShips}${epochNote(state)}`;
   }
 
   /** Kapitän an Bord: Erfahrung, Treue, Lohn mit Knöpfen zum Anpassen */
@@ -829,7 +831,7 @@ export class Hud {
         <p>${how} ${speed.toFixed(1).replace('.', ',')} km/h über Grund, Strömung ${String(seg.current).replace('.', ',')} km/h.</p>
       </div>
       <div class="progress"><div style="width:${pct}%"></div></div>
-      <p class="note">${fmtHours(v.elapsed)} von ${fmtHours(v.hours)}${v.toll ? ` · ${v.fees?.length ? 'Zoll und Gebühren' : 'Zoll'} bezahlt: ${v.toll} Taler` : ''}${v.evaded ? ` · ${v.evaded} Taler Zoll umgangen, Kontrolle möglich` : ''}</p>
+      <p class="note">${fmtHours(v.elapsed)} von ${fmtHours(v.hours)}${v.toll ? ` · ${paidLabel(v)} bezahlt: ${v.toll} Taler` : ''}${v.evaded ? ` · ${v.evaded} Taler Zoll umgangen, Kontrolle möglich` : ''}</p>
       ${dockNote(v)}
       <ol class="route">${route}</ol>
       <p class="note">Ladung: ${cargo || 'leer'} · Zustand ${Math.round(ship.condition * 100)} %${cls.coal ? ` · Bunker ${Math.floor(ship.bunker ?? 0)} t Kohle` : ''}</p>
@@ -1167,4 +1169,25 @@ export class Hud {
     setTimeout(() => el.classList.add('out'), 2600);
     setTimeout(() => el.remove(), 3400);
   }
+}
+
+/** Hinweis in der Werft, was die nächste Epoche bringt (nur freies Spiel) */
+function epochNote(state: GameState): string {
+  if (!state.epochAuto) return '';
+  const p = epochProgress(state);
+  if (!p.next) return '';
+  const parts = p.conditions.map((c) => `${c.label} (${Math.min(c.value, c.target)}/${c.target})`);
+  return `<p class="note">Die Zeit „${p.next.name}“ beginnt, sobald alles erfüllt ist: ${parts.join(', ')}. Spätestens im Jahr ${p.next.latestYear}.</p>`;
+}
+
+/** Was beim Ablegen bezahlt wurde: Zoll, Gebühren, Treidelgeld */
+function paidLabel(v: Voyage): string {
+  const tow = v.towFee ?? 0;
+  const fees = feeSum(v.fees);
+  const parts: string[] = [];
+  if ((v.toll ?? 0) - tow - fees > 0) parts.push('Zoll');
+  if (fees > 0) parts.push('Gebühren');
+  if (tow > 0) parts.push('Treidelgeld');
+  if (parts.length <= 1) return parts[0] ?? 'Zoll';
+  return `${parts.slice(0, -1).join(', ')} und ${parts[parts.length - 1]}`;
 }
