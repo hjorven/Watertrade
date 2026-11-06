@@ -49,7 +49,7 @@ import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upg
 import { goalDone, goalProgress } from './sim/goals.ts';
 import { deserialize, SAVE_VERSION, serialize, type GameMode, type SaveGame } from './sim/save.ts';
 import { LEVELS, levelOf } from './sim/towns.ts';
-import { Hud } from './ui/hud.ts';
+import { ALL_FEATURES, Hud, type HudFeatures } from './ui/hud.ts';
 import { Menu, type SlotInfo } from './ui/menu.ts';
 import { loadJson, saveJson } from './ui/storage.ts';
 
@@ -507,9 +507,35 @@ function startGame(s: GameState, sess: Session): void {
   inGame = true;
   running = true;
   lastSeason = null;
+  hud.setFeatures(featuresFor(session));
   checkGoals(true);
   refresh();
   saveSlot('auto');
+}
+
+/** Die Kampagne führt Reiter und Bücher nach und nach ein, alle anderen Modi zeigen alles */
+function featuresFor(sess: Session): HudFeatures {
+  const n = sess.mode === 'kampagne' ? (sess.chapter?.number ?? 99) : 99;
+  if (n <= 1) return { tabs: ['markt', 'werft'], views: ['ship', 'news', 'map'] };
+  if (n === 2) return { tabs: ['markt', 'kontor', 'werft', 'kneipe', 'route'], views: ['ship', 'news', 'map', 'contracts', 'register'] };
+  return ALL_FEATURES;
+}
+
+/** Nächster Schritt im ersten Kapitel, solange man noch lernt */
+function tutorialHint(): string | null {
+  if (session.mode !== 'kampagne' || session.chapter?.id !== 'k1' || session.finished) return null;
+  const ship = current();
+  if (!ship) return null;
+  const loaded = Object.values(ship.cargo).some((c) => c.amount > 0);
+  if (!state.firstProfitDone) {
+    if (ship.voyage) return 'Unterwegs. Oben rechts lässt sich die Zeit mit <b>4×</b> beschleunigen.';
+    if (!loaded)
+      return 'Kauf eine Ware, die hier im <b>Überschuss</b> ist, denn dann ist sie billig. Zum Beispiel Holz mit <b>+10</b>.';
+    return 'Liegt der Verkaufspreis über deinem Einkauf (ø), verkauf mit <b>Verkaufen</b>. Sonst leg unten ab, zu einer Stadt mit <b>Bedarf</b> an der Ware.';
+  }
+  if (state.stats.rafts < 1)
+    return 'Erster Gewinn! In der <b>Werft</b> kannst du ein Floß bauen. Es treibt nur talwärts und wird am Ziel als Holz verkauft.';
+  return null;
 }
 
 // --- Speichern ---
@@ -822,6 +848,7 @@ function syncTowns(): void {
 }
 
 function refresh(): void {
+  hud.setHint(tutorialHint());
   hud.render(state, selected);
   syncViews();
   syncTowns();
@@ -914,9 +941,10 @@ const BIRDS: Record<Season, number> = { fruehling: 0.8, sommer: 0.6, herbst: 0.3
 function updateAmbience(): void {
   const s = season(Math.floor(state.hour / 24) + 1);
   const night = Math.abs((state.hour % 24) - 13) > 8;
+  // bewusst leise: der Fluss soll Hintergrund sein, kein Rauschen im Vordergrund
   ambient({
-    flow: state.ice ? 0.15 : Math.min(1, 0.45 + Math.max(-0.3, state.waterLevel) * 0.3),
-    wind: Math.min(1, wind(state) / 1.25),
+    flow: state.ice ? 0.05 : Math.min(0.4, 0.18 + Math.max(-0.3, state.waterLevel) * 0.12),
+    wind: Math.min(0.35, wind(state) / 3.5),
     birds: night ? 0 : BIRDS[s],
   });
 }
