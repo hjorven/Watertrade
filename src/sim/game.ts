@@ -16,6 +16,7 @@ import { tickWorks } from './works.ts';
 import { observe, tickMarketInfo, tripArrive, tripSail } from './market-info.ts';
 import { closeSteamDay, logSteam } from './steam.ts';
 import { tickCanal } from './canal.ts';
+import { closeFinanceDay, sailFinance, tickFinance } from './finance.ts';
 import { initialMarket, initialTown, tickTown } from './towns.ts';
 import { movingHours, wearFactor, wearRate } from './voyage.ts';
 import { voyageProgress } from './navigation.ts';
@@ -238,6 +239,8 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     // gleich nach der Lohnzahlung buchen, bevor Kapitäne gehen oder abgeworben werden
     bookRouteWages(state);
     pushNews(events, tickCaptains(state, map), true);
+    closeFinanceDay(state);
+    pushNews(events, tickFinance(state, map), true);
     pushNews(events, tickWorks(state, map), true);
     pushNews(events, tickWaterworks(state, map), false);
     pushNews(events, tickCanal(state, map), true);
@@ -287,6 +290,8 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
         if (ship.route?.active) bookCoal(state, ship.route, burnt);
         logSteam(state, ship.id, dt);
       }
+      // Versicherungsprämie und Gefahren unterwegs (Eisgang, Ladung über Bord)
+      sailFinance(state, map, ship, state.hour - hours, dt);
       // ohne Kühlraum verdirbt Fisch, Brot und Bier unterwegs
       if (!cls.fresh) {
         for (const [g, slot] of Object.entries(ship.cargo)) {

@@ -62,6 +62,7 @@ import { deliverToCanal, startCanalStage } from './sim/canal.ts';
 import { EPOCHS } from './data/ships.ts';
 import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
 import { goalDone, goalProgress, restoreCompleted } from './sim/goals.ts';
+import { payOverdueNow, repayLoan, setInsured, takeLoan } from './sim/finance.ts';
 import { deserialize, SAVE_VERSION, serialize, type GameMode, type SaveGame } from './sim/save.ts';
 import { LEVELS, levelOf } from './sim/towns.ts';
 import { chapterOneHint } from './ui/tutorial.ts';
@@ -418,6 +419,22 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
       r = deliverContract(state, selected, n('id'));
       ok = r.taler > 0 ? 'muenzen' : 'verkauf';
       break;
+    case 'takeLoan':
+      r = takeLoan(state, town, n('n'), n('days'));
+      ok = 'muenzen';
+      break;
+    case 'repayLoan':
+      r = repayLoan(state, n('id'));
+      ok = 'muenzen';
+      break;
+    case 'payOverdue':
+      r = payOverdueNow(state, n('id'));
+      ok = 'muenzen';
+      break;
+    case 'insure':
+      r = setInsured(state, selected, n('on') === 1);
+      ok = 'stempel';
+      break;
     case 'routeAddStop':
     case 'routeDelStop':
     case 'routeAddOrder':
@@ -750,8 +767,8 @@ function reloadWithMap(s: GameState, sess: Session): void {
 /** Die Kampagne führt Reiter und Bücher nach und nach ein, alle anderen Modi zeigen alles */
 function featuresFor(sess: Session): HudFeatures {
   const n = sess.mode === 'kampagne' ? (sess.chapter?.number ?? 99) : 99;
-  if (n <= 1) return { tabs: ['markt', 'werft'], views: ['ship', 'news', 'map'] };
-  if (n === 2) return { tabs: ['markt', 'kontor', 'werft', 'kneipe', 'route'], views: ['ship', 'news', 'map', 'contracts', 'register'] };
+  if (n <= 1) return { tabs: ['markt', 'werft', 'bank'], views: ['ship', 'news', 'map'] };
+  if (n === 2) return { tabs: ['markt', 'kontor', 'werft', 'kneipe', 'route', 'bank'], views: ['ship', 'news', 'map', 'contracts', 'register'] };
   return ALL_FEATURES;
 }
 
@@ -956,6 +973,8 @@ const epochMusic = (e: number) => (e >= 3 ? 'epoche3' : e === 2 ? 'epoche2' : 'e
 
 function handleEvents(events: GameEvent[]): void {
   let changed = false;
+  // die Bank kann bei einer Pfändung das gewählte Schiff nehmen
+  if (!current()) selected = state.ships[0]?.id ?? -1;
   for (const e of events) {
     if (e.type === 'epoch') {
       hud.stamp('Neue Zeit', EPOCHS[e.epoch - 1].name);

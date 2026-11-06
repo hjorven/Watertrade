@@ -176,5 +176,7 @@ export function playerWorth(state: GameState): number {
   for (const lot of state.auction?.lots ?? []) if (lot.bidder === 'player') w += lot.bid;
   // unterwegs zählt die Ladung zum Markt am Ziel
   for (const s of state.ships) for (const [g, slot] of Object.entries(s.cargo)) w += stockValue(state, s.port ?? s.voyage?.to ?? null, g, slot);
+  // Schulden bei der Stadtbank (finance.ts)
+  for (const l of state.finance?.loans ?? []) w -= l.remaining;
   return Math.round(w);
 }
