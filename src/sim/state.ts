@@ -1,6 +1,7 @@
-import type { Trait } from '../data/captains.ts';
+import { hasTrait, isMaster, type Trait } from '../data/captains.ts';
 import { PERISH, SHIPS, type ShipClass } from '../data/ships.ts';
 import { windOfDay, withWind, type Conditions, type ShipType } from './river.ts';
+import type { PriceBookPage, PricePoint, TripRecord } from './market-info.ts';
 import type { TownMarket, TownState } from './towns.ts';
 
 /** Datentypen des Spielstands und kleine Helfer, die alle Simulationsmodule brauchen */
@@ -39,6 +40,21 @@ export interface Voyage {
   hours: number;
   elapsed: number;
   toll?: number;
+  /** Zoll, den ein Schmuggler auf dieser Fahrt umgeht; bei der Ankunft droht eine Kontrolle */
+  evaded?: number;
+  /** Liegezeit zum Laden vor dem Ablegen (Stunden, am Anfang der Fahrt) */
+  dock?: number;
+  /** Liegezeit zum Löschen am Ziel (Stunden, am Ende der Fahrt) */
+  dockEnd?: number;
+  /** Gebühren für fremde Bauwerke und Leichtern, in `toll` schon enthalten */
+  fees?: FeeItem[];
+}
+
+/** Eine Gebühr, die beim Ablegen fällig wird, und wer sie bekommt */
+export interface FeeItem {
+  /** Bauwerk (Projekt-ID) oder Hafen ('hafen:<stadt>') oder 'leichtern' */
+  work: string;
+  amount: number;
 }
 
 export interface Captain {
@@ -47,6 +63,18 @@ export interface Captain {
   trait: Trait;
   wage: number; // Taler pro Tag
   hire: number; // Handgeld
+  /** zweite Eigenschaft, gelernt mit der Erfahrung */
+  trait2?: Trait;
+  /** gefahrene Kilometer */
+  km?: number;
+  /** Treue 0 bis 100; sinkt, wenn der Lohn unter dem liegt, was der Kapitän wert ist */
+  loyalty?: number;
+  /** Abwerbeangebot: geht im nächsten Hafen von Bord, wenn der Lohn bis dahin nicht mindestens so hoch ist */
+  offer?: { wage: number; from: string; day: number };
+  /** Lohnzusage nach einem abgewehrten Angebot: bis zum Tag `until` nicht unter `wage` */
+  promised?: { wage: number; until: number };
+  /** wurde schon wegen zu wenig Lohn gewarnt */
+  warned?: boolean;
 }
 
 export type OrderKind = 'kaufen' | 'verkaufen' | 'einlagern' | 'auslagern';
@@ -87,6 +115,10 @@ export interface Ship {
   route: TradeRoute | null;
   /** Kohle im Bunker (Dampfer), in Tonnen */
   bunker?: number;
+  /** Schiffsbuch: laufende oder zuletzt beendete Fahrt (nimmt Verkäufe im Zielhafen auf) */
+  trip?: TripRecord;
+  /** Schiffsbuch: abgeschlossene Fahrten, neueste zuerst */
+  tripLog?: TripRecord[];
 }
 
 export interface Kontor {
@@ -120,6 +152,59 @@ export interface RivalState {
   ships: RivalShip[];
   kontore: string[];
   profit: number;
+  /** Verärgerung über den Spieler, 0..100 (siehe rivalry.ts) */
+  anger?: number;
+  /** Vom Spieler verkaufte Tonnen je Revierware beim letzten Tageswechsel */
+  seen?: Record<string, number>;
+  /** Laufende Vergeltung gegen den Spieler */
+  retaliation?: Retaliation | null;
+  /** Anteile in Spielerhand, 0..100 % */
+  shares?: number;
+  /** Tage in Folge mit Schulden */
+  debtDays?: number;
+  /** Anzahl Schiffe, für die schon ein Kaufplan im Flussboten stand */
+  planned?: number;
+  /** bis zu diesem Tag kein neues Abkommen (nach Kündigung) */
+  noPactUntil?: number;
+}
+
+export interface Retaliation {
+  kind: 'unterbieten' | 'leerkaufen';
+  good: string;
+  town: string;
+  until: number; // letzter Tag
+}
+
+/** Gebietsabkommen: Der Spieler lässt `playerGood` in Ruhe, das Haus `houseGood` */
+export interface Pact {
+  house: string;
+  playerGood: string;
+  houseGood: string;
+  from: number; // Tag
+  until: number; // letzter Tag
+  /** vom Spieler verkaufte Tonnen von playerGood bei Abschluss */
+  baseline: number;
+}
+
+export interface AuctionLot {
+  town: string;
+  min: number;
+  bid: number; // 0 = noch kein Gebot
+  /** 'player' oder Haus-ID */
+  bidder: string | null;
+}
+
+/** Versteigerung der Kontore eines Hauses im Konkurs */
+export interface Auction {
+  house: string; // Name des gefallenen Hauses
+  until: number; // letzter Tag
+  lots: AuctionLot[];
+}
+
+export interface FallenHouse {
+  id: string;
+  how: 'konkurs' | 'uebernahme';
+  day: number;
 }
 
 export type WorldEventKind = 'hochwasser' | 'duerre' | 'zoll' | 'bruecke' | 'stadtfest' | 'seuche';
@@ -138,7 +223,7 @@ export interface WorldEvent {
 
 export interface NewsItem {
   day: number;
-  kind: 'ereignis' | 'konkurrenz' | 'stadt' | 'auftrag' | 'haus';
+  kind: 'ereignis' | 'konkurrenz' | 'stadt' | 'auftrag' | 'haus' | 'geruecht';
   text: string;
 }
 
@@ -161,12 +246,47 @@ export interface Ledger {
   upkeep: number;
   production: number; // Wert der eigenen Erzeugung zum Marktpreis
   fuel?: number; // Kohle und Diesel
+  /** Wasserbau: Gebühreneinnahmen und Ausgaben (Unterhalt, fremde Gebühren, Leichtern) */
+  works?: { income: number; cost: number };
 }
+
+/** Gemeinschaftsbau: Stadt oder KI-Haus zahlt die Hälfte und bekommt einen Anteil an den Gebühren */
+export interface WorkPartner {
+  kind: 'stadt' | 'haus';
+  id: string; // Stadt- oder Haus-ID
+  share: number; // Anteil an Gebühren und Unterhalt, 0..1
+}
+
+/** Gebührenstufe für eigene Bauwerke */
+export type FeeLevel = 'frei' | 'normal' | 'hoch';
 
 export interface Work {
   id: string; // Projekt aus data/projects.ts
   started: number; // Tag
   done: boolean;
+  /** Bauherr: 'spieler' oder ID eines KI-Hauses. Fehlt bei öffentlichen Bauten (Kampagnenstart), die nichts kosten und nicht verlanden. */
+  owner?: string;
+  partner?: WorkPartner;
+  fee?: FeeLevel;
+  /** Verlandung einer Fahrrinne, 0 = frisch gebaggert, 1 = ganz zugeschwemmt */
+  silt?: number;
+  /** Laufende Pflege: hält die Rinne frei, kostet täglich */
+  upkeep?: boolean;
+  /** Gebühren, die der Spieler mit diesem Bauwerk eingenommen hat */
+  earned?: number;
+  /** Gebührenanteil, der an den Partner ging */
+  partnerEarned?: number;
+}
+
+/** Ausbau eines Hafens durch den Spieler */
+export interface Harbor {
+  level: number; // 0 = natürlicher Hafen, bis 3
+  /** laufender Ausbau auf die nächste Stufe */
+  building?: { level: number; started: number };
+  partner?: WorkPartner;
+  fee?: FeeLevel;
+  earned?: number;
+  partnerEarned?: number;
 }
 
 /** Ansehen des Spielers in einer Stadt (sim/standing.ts) */
@@ -229,6 +349,22 @@ export interface GameState {
   fuelToday: number;
   /** Ansehen je Stadt; fehlt in älteren Spielständen */
   standing?: Record<string, TownStanding>;
+  /** Preisbuch: Stand des letzten Besuchs je Stadt */
+  priceBook?: Record<string, PriceBookPage>;
+  /** Beobachteter Preisverlauf: Stadt -> Ware -> Punkte */
+  priceHistory?: Record<string, Record<string, PricePoint[]>>;
+  /** Gebietsabkommen mit KI-Häusern */
+  pacts?: Pact[];
+  /** bis zu diesem Tag schließt nach einem Vertragsbruch niemand ein Abkommen */
+  pactBanUntil?: number;
+  /** laufende Versteigerung von Kontoren */
+  auction?: Auction | null;
+  /** Häuser, die pleitegingen oder übernommen wurden */
+  housesGone?: FallenHouse[];
+  /** Hafenausbau je Stadt (fehlt = überall natürlicher Hafen) */
+  harbors?: Record<string, Harbor>;
+  /** Gebühren und Unterhalt des Wasserbaus seit Mitternacht (+ Einnahmen, − Ausgaben) */
+  worksToday?: { income: number; cost: number };
 }
 
 export function shipClass(ship: { type: string }): ShipClass {
@@ -282,7 +418,8 @@ export function effectiveDraft(ship: Ship): number {
 export function speedFactor(ship: Ship): number {
   let f = 0.7 + 0.3 * ship.condition;
   if (hasUpgrade(ship, 'antrieb')) f *= 1.12;
-  if (ship.captain?.trait === 'schnell') f *= 1.12;
+  if (hasTrait(ship.captain, 'schnell')) f *= 1.12;
+  if (isMaster(ship.captain)) f *= 1.05;
   return f;
 }
 

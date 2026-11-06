@@ -6,10 +6,11 @@ import { BUILDINGS, betriebUpkeep, KONTOR_PRICE, KONTOR_SLOTS, type BuildingType
 import type { Chapter } from '../data/campaign.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
-import { buyCost, price, sellRevenue } from './economy.ts';
+import { buyCost, price, SELL_FACTOR, sellRevenue } from './economy.ts';
+import { MIN_FRESH, PERISH } from '../data/ships.ts';
 import { hasYard, repair } from './fleet.ts';
 import { advance, buy, cargoLoad, day, depart, kontorBuy, kontorSell, newGame, planVoyage, sell, shipClass, type GameState } from './game.ts';
-import { betriebeIn, buildBetrieb, buildingAllowed, buildKontor, playerWorth } from './house.ts';
+import { betriebeIn, buildBetrieb, buildingAllowed, buildKontor, dailyUpkeep, playerWorth, sellBetrieb } from './house.ts';
 import { rivalWorth } from './rivals.ts';
 
 export interface BalanceReport {
@@ -39,7 +40,9 @@ function bestTrade(state: GameState, map: MapDef, shipId: number) {
       for (let amount = 5; amount <= max; amount += 5) {
         const cost = buyCost(base, m, amount);
         if (cost > state.money) break;
-        const perHour = (sellRevenue(base, dest, amount) - cost) / plan.voyage.hours;
+        // verderbliche Ware kommt ohne Kühlraum mit weniger Wert an
+        const fresh = shipClass(ship).fresh ? 1 : Math.max(MIN_FRESH, 1 - ((PERISH[goodId] ?? 0) * plan.voyage.hours) / 24);
+        const perHour = (sellRevenue(base, dest, amount, SELL_FACTOR * fresh) - cost) / plan.voyage.hours;
         if (!best || perHour > best.perHour) best = { good: goodId, to: town.id, amount, perHour };
       }
     }
@@ -151,6 +154,13 @@ function localPrice(state: GameState, town: string): PriceOf {
 
 /** Ein Tag Hausverwaltung für den Bot: Rohware kaufen, Erzeugnisse verkaufen, neu bauen */
 function manageHouse(state: GameState, map: MapDef, opts: GrowthOptions): void {
+  // in der Klemme verkauft ein vernünftiger Spieler den schwächsten Betrieb, statt pleitezugehen
+  while (state.money < 0 && state.betriebe.length) {
+    const worst = state.betriebe
+      .map((b) => ({ b, m: dailyMargin(BUILDINGS.find((x) => x.id === b.type)!, localPrice(state, b.town)) }))
+      .sort((a, c) => a.m - c.m)[0];
+    sellBetrieb(state, worst.b.id);
+  }
   for (const b of state.betriebe) {
     const t = BUILDINGS.find((x) => x.id === b.type)!;
     // ein vernünftiger Spieler lässt Betriebe ruhen, die gerade Verlust machen oder für die das Geld fehlt
@@ -166,7 +176,8 @@ function manageHouse(state: GameState, map: MapDef, opts: GrowthOptions): void {
     for (const [g, slot] of Object.entries(k.stock)) if (!inputs.has(g) && slot.amount >= 1) kontorSell(state, town, g, Math.floor(slot.amount));
   }
   if (!opts.build) return;
-  const reserve = 600;
+  // Rücklage: 15 Tage Löhne und Unterhalt, sonst geht der Bot in einer Flaute pleite
+  const reserve = Math.max(600, 15 * (dailyUpkeep(state) + state.betriebe.reduce((s, b) => s + BUILDINGS.find((x) => x.id === b.type)!.wage, 0)));
   // Kontor in der Stadt mit dem besten Betrieb, den man dort bauen kann
   let best: { town: string; type: BuildingType; days: number } | null = null;
   for (const t of map.towns) {

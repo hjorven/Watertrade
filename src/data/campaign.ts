@@ -12,7 +12,8 @@ export type Goal =
   | { type: 'rank'; place: number; text: string }
   | { type: 'project'; id: string; text: string }
   | { type: 'routes'; count: number; text: string }
-  | { type: 'allTowns'; level: number; text: string };
+  | { type: 'allTowns'; level: number; text: string }
+  | { type: 'takeover'; count: number; text: string };
 
 export interface Chapter {
   id: string;
@@ -34,6 +35,8 @@ export interface Chapter {
   extraShips?: string[];
   kontore?: string[];
   works?: string[];
+  /** Dieses KI-Haus startet geschwächt und verkauft Anteile (Übernahme als Kapitelziel) */
+  weakHouse?: string;
 }
 
 export const CHAPTERS: Chapter[] = [
@@ -80,7 +83,7 @@ export const CHAPTERS: Chapter[] = [
       { type: 'betriebe', count: 2, text: 'Lass zwei eigene Betriebe arbeiten' },
       { type: 'routes', count: 1, text: 'Lass ein Schiff mit Kapitän eine Handelsroute fahren' },
       { type: 'contracts', count: 3, text: 'Erfülle drei Aufträge' },
-      { type: 'worth', amount: 40000, text: 'Bring dein Haus auf 40.000 Taler Vermögen' },
+      { type: 'worth', amount: 55000, text: 'Bring dein Haus auf 55.000 Taler Vermögen' },
     ],
   },
   {

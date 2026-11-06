@@ -10,6 +10,7 @@ import { Landscape } from './render/landscape.ts';
 import { Stage } from './render/scene.ts';
 import { ambient, getVolume, isMuted, mute, playSfx, setMusic, setVolume, unlockAudioOnGesture, type SfxName } from './audio/index.ts';
 import { RIVAL_BY_ID } from './data/rivals.ts';
+import { buyShares, endPact, offerPact, placeBid, sellShares } from './sim/rivalry.ts';
 import { SHIPS } from './data/ships.ts';
 import { Estates, PLAYER_COLOR, type EstateInfo } from './render/buildings.ts';
 import { ShipView } from './render/ships.ts';
@@ -18,6 +19,7 @@ import { buildBridge, buildTown, placeTown, type TownView } from './render/towns
 import { dateText, dayInSeason, dayOfYear, season, SEASON_NAME, SEASONS, type Season } from './sim/calendar.ts';
 import { acceptContract, deliverContract } from './sim/contracts.ts';
 import { dismissCaptain, hireCaptain, repair, upgrade } from './sim/fleet.ts';
+import { setCaptainWage } from './sim/captains.ts';
 import {
   advance,
   buy,
@@ -45,7 +47,8 @@ import {
   type TradeResult,
   type Voyage,
 } from './sim/game.ts';
-import { startProject } from './sim/works.ts';
+import { buildHarbor, dredge, setFee, setUpkeep, startProjectWith } from './sim/wasserbau.ts';
+import type { FeeLevel } from './sim/state.ts';
 import { EPOCHS } from './data/ships.ts';
 import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
 import { buildTownhouse, found, joinCouncil, leaveCouncil } from './sim/standing.ts';
@@ -299,6 +302,25 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
       r = kontorSell(state, town, String(d.good), n('n'));
       ok = 'verkauf';
       break;
+    case 'pactOffer':
+      r = offerPact(state, VALLEY, String(d.house), String(d.mine), String(d.theirs));
+      ok = 'erfolg';
+      break;
+    case 'pactEnd':
+      r = endPact(state, String(d.house));
+      break;
+    case 'buyShares':
+      r = buyShares(state, VALLEY, String(d.house));
+      ok = 'muenzen';
+      break;
+    case 'sellShares':
+      r = sellShares(state, String(d.house));
+      ok = 'muenzen';
+      break;
+    case 'bid':
+      r = placeBid(state, String(d.town));
+      ok = 'muenzen';
+      break;
     case 'bunker':
       r = fillBunker(state, selected);
       ok = 'kauf';
@@ -318,8 +340,25 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
     case 'dismiss':
       r = dismissCaptain(state, selected);
       break;
+    case 'wage':
+      r = setCaptainWage(state, selected, n('wage'));
+      break;
     case 'project':
-      r = startProject(state, String(d.id));
+      r = startProjectWith(state, VALLEY, String(d.id), d.partner === 'stadt' || d.partner === 'haus' ? d.partner : undefined);
+      ok = 'glocke';
+      break;
+    case 'workFee':
+      r = setFee(state, String(d.id), String(d.level) as FeeLevel);
+      break;
+    case 'workUpkeep':
+      r = setUpkeep(state, String(d.id), String(d.on) === '1');
+      break;
+    case 'dredge':
+      r = dredge(state, String(d.id));
+      ok = 'erfolg';
+      break;
+    case 'harbor':
+      r = buildHarbor(state, VALLEY, String(d.town), d.partner === 'stadt');
       ok = 'glocke';
       break;
     case 'found':
@@ -429,6 +468,7 @@ const menu = new Menu(
           extraShips: c.extraShips,
           kontore: c.kontore,
           works: c.works,
+          weakHouse: c.weakHouse,
         }),
         { mode: 'kampagne', chapter: c, completed: new Set(), finished: false },
       );

@@ -1,5 +1,6 @@
 import { BUILDING_BY_ID, BUILDINGS, betriebUpkeep, KONTOR_CAPACITY, KONTOR_PRICE, KONTOR_SLOTS, KONTOR_UPGRADE } from '../data/buildings.ts';
-import { TRAITS } from '../data/captains.ts';
+import { CAPTAIN_RANKS, captainRank, traitText } from '../data/captains.ts';
+import { fairWage, LOYALTY_POACH, LOYALTY_WARN } from '../sim/captains.ts';
 import { GOOD_BY_ID, GOODS } from '../data/goods.ts';
 import type { MapDef, TownDef } from '../data/maps/valley.ts';
 import { RIVAL_BY_ID } from '../data/rivals.ts';
@@ -35,8 +36,28 @@ import { daysLeft, projectState } from '../sim/works.ts';
 import { betriebeIn, betriebSlots, buildingAllowed, kontorUpkeepIn, playerWorth } from '../sim/house.ts';
 import { extraSlots } from '../sim/standing.ts';
 import { closedLine, renderRathaus, seasonLine, standingLine } from './standing-panel.ts';
+import { HARBOR_LEVELS } from '../data/harbors.ts';
+import {
+  berths,
+  dredgeCost,
+  FEE_LABEL,
+  feeSum,
+  harborCost,
+  harborDaysLeft,
+  harborOf,
+  harborPartner,
+  nextHarborLevel,
+  ownerName,
+  partnerOffer,
+  passageFee,
+  quayDepth,
+  upkeepCost,
+} from '../sim/wasserbau.ts';
+import { sailingHours } from '../sim/voyage.ts';
 import { rivalWorth } from '../sim/rivals.ts';
+import { renderRivalry } from './rivalry.ts';
 import { BLOCK_TEXT, segmentDepth } from '../sim/river.ts';
+import { goodPicker, priceBookPanel, shipBook } from './market-info.ts';
 import { GROWTH_THRESHOLD, LEVELS, levelOf, netFlow, nextLevelNeeds, CRISIS_THRESHOLD, MIN_POP_SHARE } from '../sim/towns.ts';
 
 /** Frische verderblicher Ware als kurzer Hinweis, etwa "Frische 82 %" */
@@ -60,7 +81,7 @@ export interface HudActions {
 }
 
 export type View = 'ship' | 'register' | 'news' | 'contracts' | 'works' | 'map';
-export type Tab = 'markt' | 'kontor' | 'werft' | 'kneipe' | 'route' | 'rathaus';
+export type Tab = 'markt' | 'kontor' | 'werft' | 'kneipe' | 'route' | 'buch' | 'rathaus';
 
 /** Was gerade sichtbar ist; die Kampagne schaltet Reiter und Bücher nach und nach frei */
 export interface HudFeatures {
@@ -77,6 +98,13 @@ const fmtHours = (h: number) => {
   const whole = Math.floor(h);
   const min = Math.round((h - whole) * 60);
   return min === 0 ? `${whole} Std` : `${whole} Std ${min} Min`;
+};
+
+/** Hinweis, solange ein Schiff zu Beginn oder am Ende einer Fahrt am Anleger umschlägt */
+const dockNote = (v: { elapsed: number; hours: number; dock?: number; dockEnd?: number }) => {
+  if (v.dock && v.elapsed < v.dock) return `<p class="note">Wird noch beladen, legt in ${fmtHours(v.dock - v.elapsed)} ab.</p>`;
+  if (v.dockEnd && v.elapsed > v.hours - v.dockEnd) return `<p class="note">Liegt am Kai und wird gelöscht.</p>`;
+  return '';
 };
 
 const clock = (hour: number) => {
@@ -235,8 +263,22 @@ export class Hud {
           this.actions.command('refresh', {});
           break;
         }
+        case 'bookGood':
+          // im Markt-Reiter klappt ein Klick auf die Ware das Preisbuch auf und wieder zu
+          if (this.tab === 'markt') {
+            this.marketGood = this.marketGood === d.good ? null : d.good!;
+            this.bookTown = null;
+          }
+          this.bookGood = d.good!;
+          this.actions.command('refresh', {});
+          break;
+        case 'bookTown':
+          this.bookTown = d.town!;
+          this.actions.command('refresh', {});
+          break;
         case 'tab':
           this.tab = d.tab as Tab;
+          this.bookTown = null;
           this.actions.command('refresh', {});
           break;
         case 'cmd': {
@@ -254,6 +296,10 @@ export class Hud {
 
   private goalsOpen = false;
   private folded = false;
+  /** Preisbuch: gewählte Ware und Stadt; im Markt-Reiter die aufgeklappte Ware */
+  private bookGood: string | null = null;
+  private bookTown: string | null = null;
+  private marketGood: string | null = null;
   private features: HudFeatures = ALL_FEATURES;
   private hintText: string | null = null;
   private hintDismissed: string | null = null;
@@ -363,13 +409,15 @@ export class Hud {
           ['werft', 'Werft'],
           ['kneipe', 'Kneipe'],
           ['route', 'Route'],
+          ['buch', 'Bücher'],
           ['rathaus', 'Rathaus'],
         ]
       : [
           ['markt', 'Fahrt'],
           ['route', 'Route'],
+          ['buch', 'Bücher'],
         ];
-    const visible = tabs.filter(([t]) => t === 'markt' || this.features.tabs.includes(t));
+    const visible = tabs.filter(([t]) => t === 'markt' || t === 'buch' || this.features.tabs.includes(t));
     tabs.length = 0;
     tabs.push(...visible);
     if (!tabs.some(([t]) => t === this.tab)) this.tab = 'markt';
@@ -377,7 +425,8 @@ export class Hud {
       .map(([t, label]) => `<button class="tab ${t === this.tab ? 'on' : ''}" data-act="tab" data-tab="${t}">${label}</button>`)
       .join('')}</nav>`;
     let body = '';
-    if (!ship.port) body = this.tab === 'route' ? this.renderRoute(ship) : this.renderVoyage(state, ship);
+    if (this.tab === 'buch') body = this.renderBooks(state, ship);
+    else if (!ship.port) body = this.tab === 'route' ? this.renderRoute(ship) : this.renderVoyage(state, ship);
     else if (this.tab === 'kontor') body = this.renderKontor(state, ship);
     else if (this.tab === 'werft') body = this.renderYard(state, ship);
     else if (this.tab === 'kneipe') body = this.renderTavern(state, ship);
@@ -427,7 +476,7 @@ export class Hud {
         const role = flow > 0 ? 'Überschuss' : flow < 0 ? 'Bedarf' : '';
         return `
         <tr>
-          <th scope="row">${swatch(g.id)}${g.name}<small>${Math.floor(m.stock)} t${role ? ` · ${role}` : ''}</small></th>
+          <th scope="row"><button class="link goodlink ${this.marketGood === g.id ? 'on' : ''}" data-act="bookGood" data-good="${g.id}" title="Preisbuch und Verlauf">${swatch(g.id)}${g.name}</button><small>${Math.floor(m.stock)} t${role ? ` · ${role}` : ''}</small></th>
           <td class="num">${bp}</td>
           <td class="num ${margin}">${sp}${avg !== null ? `<small>ø ${avg}</small>` : ''}</td>
           <td class="num">${aboard}${freshText(slot) ? `<small>${freshText(slot)}</small>` : ''}</td>
@@ -451,12 +500,16 @@ export class Hud {
         }
         const v = plan.voyage;
         const dir = v.legs.every((l) => l.downstream) ? 'talwärts' : v.legs.every((l) => !l.downstream) ? 'bergwärts' : 'tal- und bergwärts';
-        const toll = v.toll ? `, Zoll ${v.toll}` : '';
-        const coal = bunkerPlan(state, ship, v.hours, v.toll ?? 0);
+        const fees = feeSum(v.fees);
+        const zoll = (v.toll ?? 0) - fees;
+        const toll = `${zoll ? `, Zoll ${zoll}` : v.evaded ? `, ${v.evaded} Zoll umgangen, Kontrolle möglich` : ''}${fees ? `, Gebühren ${fees}` : ''}`;
+        const dockH = (v.dock ?? 0) + (v.dockEnd ?? 0);
+        const dockText = dockH >= 0.5 ? ` (davon ${fmtHours(dockH)} Laden und Löschen)` : '';
+        const coal = bunkerPlan(state, ship, sailingHours(v), v.toll ?? 0);
         if (coal.problem) return `<button class="btn dest" disabled title="${coal.problem}"><b>${t.name}</b><small>${coal.buy ? `${coal.buy} t Kohle fehlen` : 'Bunker zu klein'}</small></button>`;
         const coalText = coal.need ? `, Kohle ${String(coal.need).replace('.', ',')} t${coal.buy ? `, bunkert ${coal.buy} t für ${coal.cost} Taler` : ''}` : '';
         const tooDear = (v.toll ?? 0) + coal.cost > state.money;
-        return `<button class="btn dest" data-act="depart" data-to="${t.id}" ${tooDear ? 'disabled' : ''}><b>${t.name}</b><small>${dir}, ${fmtHours(v.hours)}${toll}${coalText}</small></button>`;
+        return `<button class="btn dest" data-act="depart" data-to="${t.id}" ${tooDear ? 'disabled' : ''}><b>${t.name}</b><small>${dir}, ${fmtHours(v.hours)}${dockText}${toll}${coalText}</small></button>`;
       })
       .join('');
 
@@ -498,6 +551,7 @@ export class Hud {
         <thead><tr><th>Ware</th><th title="Preis je Tonne beim Kauf">Kauf</th><th title="Preis je Tonne beim Verkauf">Verkauf</th><th>Bord</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
+      ${this.marketGood && market[this.marketGood] ? priceBookPanel(state, this.map, this.marketGood, this.bookTown ?? town.id) : '<p class="note">Tipp: Auf eine Ware tippen zeigt Preisbuch und Preisverlauf.</p>'}
       ${raft}
       <h3>Ablegen nach</h3>
       <div class="dests">${departures}</div>
@@ -631,18 +685,41 @@ export class Hud {
       ${ups}${newShips}`;
   }
 
+  /** Kapitän an Bord: Erfahrung, Treue, Lohn mit Knöpfen zum Anpassen */
+  private captainBox(state: GameState, ship: Ship, dismiss: boolean): string {
+    const c = ship.captain!;
+    const fair = fairWage(c);
+    const rank = CAPTAIN_RANKS[captainRank(c.km)];
+    const next = CAPTAIN_RANKS[captainRank(c.km) + 1];
+    const loyalty = Math.round(c.loyalty ?? 70);
+    const mood = loyalty >= 60 ? 'zufrieden' : loyalty >= LOYALTY_WARN ? 'unruhig' : loyalty >= LOYALTY_POACH ? 'unzufrieden' : 'sieht sich um';
+    const target = Math.max(fair, c.offer?.wage ?? 0);
+    const who = c.offer ? (c.offer.from ? (RIVAL_BY_ID.get(c.offer.from)?.name ?? c.offer.from) : 'Ein anderer Reeder') : '';
+    const promise = c.promised && c.promised.until >= Math.floor(state.hour / 24) + 1 ? `, zugesagt bis Tag ${c.promised.until}` : '';
+    const offer = c.offer
+      ? `<p class="note">${who} bietet ${c.name} ${c.offer.wage} Taler am Tag. Zahlst du nicht mindestens so viel, geht ${c.name} ${ship.port ? 'morgen hier' : 'im nächsten Hafen'} von Bord.</p>`
+      : '';
+    return `<div class="captain"><b>${c.name}</b> führt die ${ship.name}
+        <small>${traitText(c)}</small>
+        <small>${rank.name}, ${fmt(c.km ?? 0)} km gefahren${next ? `, ${next.name} ab ${fmt(next.km)} km` : ''} · Treue ${loyalty} von 100, ${mood}</small>
+        <small>Lohn ${c.wage} Taler am Tag${promise}, wert ist ${c.name.split(' ')[0]} ${fair}</small>
+        <span class="wage-btns"><button class="btn" data-act="cmd" data-cmd="wage" data-wage="${c.wage - 1}" ${c.wage > 1 ? '' : 'disabled'} aria-label="Lohn senken">Lohn −1</button>
+        <button class="btn" data-act="cmd" data-cmd="wage" data-wage="${c.wage + 1}" aria-label="Lohn erhöhen">Lohn +1</button>
+        ${c.wage < target ? `<button class="btn primary" data-act="cmd" data-cmd="wage" data-wage="${target}">Auf ${target} erhöhen</button>` : ''}
+        ${dismiss ? '<button class="btn" data-act="cmd" data-cmd="dismiss">Entlassen</button>' : ''}</span></div>${offer}`;
+  }
+
   private renderTavern(state: GameState, ship: Ship): string {
     const town = this.map.towns.find((t) => t.id === ship.port)!;
     const c = ship.captain;
     const mine = c
-      ? `<div class="captain"><b>${c.name}</b> führt die ${ship.name}<small>${TRAITS[c.trait].name}: ${TRAITS[c.trait].text} · Lohn ${c.wage} am Tag</small>
-         <button class="btn" data-act="cmd" data-cmd="dismiss">Entlassen</button></div>`
+      ? this.captainBox(state, ship, true)
       : `<p>${ship.type === 'floss' ? 'Ein Floß steuert sich selbst.' : `Die ${ship.name} hat keinen Kapitän. Ohne Kapitän fährt sie nur auf deinen Befehl, mit Kapitän kann sie Handelsrouten allein fahren.`}</p>`;
     const list = state.tavern[town.id] ?? [];
     const guests = list.length
       ? list
           .map(
-            (x) => `<div class="yard-row"><div><b>${x.name}</b> <small>${TRAITS[x.trait].name}: ${TRAITS[x.trait].text}</small>
+            (x) => `<div class="yard-row"><div><b>${x.name}</b> <small>${CAPTAIN_RANKS[captainRank(x.km)].name}, ${fmt(x.km ?? 0)} km · ${traitText(x)}</small>
               <small class="desc">Lohn ${x.wage} Taler am Tag, Handgeld ${x.hire}</small></div>
               <button class="btn" data-act="cmd" data-cmd="hire" data-id="${x.id}" ${state.money >= x.hire && ship.type !== 'floss' ? '' : 'disabled'}>Anheuern</button></div>`,
           )
@@ -758,7 +835,7 @@ export class Hud {
     const route = v.legs
       .map((l, i) => `<li class="${i < index ? 'done' : i === index ? 'now' : ''}">${this.townName(l.from)} → ${this.townName(l.to)} <small>${fmtHours(l.hours)}</small></li>`)
       .join('');
-    const captain = ship.captain ? `<p class="note">Kapitän: ${ship.captain.name} (${TRAITS[ship.captain.trait].name})${ship.route?.active ? ', fährt Handelsroute' : ''}</p>` : '';
+    const captain = ship.captain ? `${ship.route?.active ? '<p class="note">Der Kapitän fährt die Handelsroute.</p>' : ''}${this.captainBox(state, ship, false)}` : '';
     void state;
     return `
       <div class="ledger-head">
@@ -767,10 +844,23 @@ export class Hud {
         <p>${how} ${speed.toFixed(1).replace('.', ',')} km/h über Grund, Strömung ${String(seg.current).replace('.', ',')} km/h.</p>
       </div>
       <div class="progress"><div style="width:${pct}%"></div></div>
-      <p class="note">${fmtHours(v.elapsed)} von ${fmtHours(v.hours)}${v.toll ? ` · Zoll bezahlt: ${v.toll} Taler` : ''}</p>
+      <p class="note">${fmtHours(v.elapsed)} von ${fmtHours(v.hours)}${v.toll ? ` · ${v.fees?.length ? 'Zoll und Gebühren' : 'Zoll'} bezahlt: ${v.toll} Taler` : ''}${v.evaded ? ` · ${v.evaded} Taler Zoll umgangen, Kontrolle möglich` : ''}</p>
+      ${dockNote(v)}
       <ol class="route">${route}</ol>
       <p class="note">Ladung: ${cargo || 'leer'} · Zustand ${Math.round(ship.condition * 100)} %${cls.coal ? ` · Bunker ${Math.floor(ship.bunker ?? 0)} t Kohle` : ''}</p>
       ${captain}`;
+  }
+
+  /** Reiter Bücher: Preisbuch aller Städte und Schiffsbuch mit Gewinn je Fahrt */
+  private renderBooks(state: GameState, ship: Ship): string {
+    const here = ship.port ?? ship.voyage?.to ?? this.map.towns[0].id;
+    const firstCargo = GOODS.find((g) => ship.cargo[g.id])?.id;
+    const good = this.bookGood ?? firstCargo ?? Object.keys(state.markets[here] ?? {})[0] ?? GOODS[0].id;
+    return `<div class="ledger-head"><div class="stamp-small">Preisbuch</div><h2>Was kostet was am Fluss?</h2>
+        <p>Preise, die deine Schiffe gesehen haben, und was jede Fahrt eingebracht hat.</p></div>
+      ${goodPicker(state, good)}
+      ${priceBookPanel(state, this.map, good, this.bookTown ?? here)}
+      ${shipBook(this.map, ship)}`;
   }
 
   /* ---------- Bücher ---------- */
@@ -806,7 +896,8 @@ export class Hud {
         <li>Gewinn bisher: <b>${fmt(state.totalProfit)}</b> Taler, ${state.stats.trips} Fahrten, ${state.stats.contracts} Aufträge erfüllt</li>
         <li>Gestern: Löhne ${fmt(l.wages)}, Unterhalt ${fmt(l.upkeep)}${l.fuel ? `, Brennstoff ${fmt(l.fuel)}` : ''}, eigene Erzeugung im Wert von ${fmt(l.production)} Taler</li>
         ${kontore || '<li>Noch keine Kontore</li>'}
-      </ul>`;
+      </ul>
+      ${renderRivalry(state, this.map)}`;
   }
 
   private renderNews(state: GameState): string {
@@ -849,25 +940,100 @@ export class Hud {
   }
 
   private renderWorks(state: GameState): string {
+    const feeBtns = (id: string, current: string | undefined) =>
+      `<div class="row-btns" role="group" aria-label="Gebühr"><small>Gebühr:</small>${(['frei', 'normal', 'hoch'] as const)
+        .map(
+          (lv) =>
+            `<button class="btn small ${(current ?? 'normal') === lv ? 'on' : ''}" data-act="cmd" data-cmd="workFee" data-id="${id}" data-level="${lv}" aria-pressed="${(current ?? 'normal') === lv}" title="${FEE_LABEL[lv]}">${lv === 'frei' ? 'frei' : lv === 'normal' ? 'üblich' : 'hoch'}</button>`,
+        )
+        .join('')}</div>`;
     const list = PROJECTS.map((p) => {
       const st = projectState(state, p.id);
+      const w = state.works.find((x) => x.id === p.id);
       const seg = this.map.segments.find((s) => s.id === p.seg)!;
       const where = `${this.townName(seg.from)} – ${this.townName(seg.to)}`;
       const locked = p.epoch > state.epoch;
-      const btn =
-        st === 'fertig'
-          ? '<span class="done-mark">fertig</span>'
-          : st === 'bau'
-            ? `<span class="note">noch ${daysLeft(state, p.id)} Tage</span>`
-            : locked
-              ? `<span class="note nowrap">ab Epoche „${EPOCHS[p.epoch - 1].name}“</span>`
-              : `<button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" ${state.money >= p.cost ? '' : 'disabled'}>${fmt(p.cost)} Taler</button>`;
-      return `<div class="yard-row ${locked ? 'muted' : ''}"><div><b>${p.name}</b> <small>${where} · ${p.days} Tage Bauzeit</small>
-        <small class="desc">${p.text}</small></div>${btn}</div>`;
+      const extra: string[] = [];
+      let btn: string;
+      if (st === 'offen') {
+        if (locked) btn = `<span class="note nowrap">ab Epoche „${EPOCHS[p.epoch - 1].name}“</span>`;
+        else {
+          const half = Math.round(p.cost / 2);
+          const town = partnerOffer(state, this.map, p.id, 'stadt');
+          const house = partnerOffer(state, this.map, p.id, 'haus');
+          btn = `<div class="row-btns">
+            <button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" ${state.money >= p.cost ? '' : 'disabled'} title="allein bauen, alle Gebühren gehören dir">${fmt(p.cost)} Taler</button>
+            ${town ? `<button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" data-partner="stadt" ${state.money >= half ? '' : 'disabled'} title="${town.name} zahlt die Hälfte und bekommt die Hälfte der Gebühren">mit ${town.name}: ${fmt(half)}</button>` : ''}
+            ${house ? `<button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" data-partner="haus" ${state.money >= half ? '' : 'disabled'} title="${house.name} zahlt die Hälfte, bekommt die Hälfte der Gebühren und fährt selbst gebührenfrei">mit ${house.name}: ${fmt(half)}</button>` : ''}
+          </div>`;
+        }
+      } else {
+        btn = st === 'fertig' ? '<span class="done-mark">fertig</span>' : `<span class="note">noch ${daysLeft(state, p.id)} Tage</span>`;
+        if (w?.owner) {
+          const partner = w.partner ? `, gemeinsam mit ${w.partner.kind === 'stadt' ? this.townName(w.partner.id) : (RIVAL_BY_ID.get(w.partner.id)?.name ?? w.partner.id)}` : '';
+          extra.push(`Bauherr: ${ownerName(w)}${partner}`);
+          const fee = passageFee({ ...w, done: true }, 60);
+          if (w.owner === 'spieler') {
+            const part = w.partner ? `, Anteil des Partners: ${fmt(Math.round(w.partnerEarned ?? 0))} Taler` : '';
+            if (fee || w.fee === 'frei') extra.push(`Gebühr je fremder Durchfahrt: ${fee} Taler (mittleres Schiff), eingenommen: ${fmt(Math.round(w.earned ?? 0))} Taler${part}`);
+          } else if (fee) extra.push(`Gebühr für deine Schiffe: rund ${fee} Taler je Durchfahrt (mittleres Schiff).`);
+        }
+        if (w?.owner === 'spieler' && st === 'fertig' && p.kind === 'vertiefung') {
+          const silt = Math.round((w.silt ?? 0) * 100);
+          const cost = dredgeCost(w);
+          extra.push(
+            w.upkeep
+              ? `Baggerschiffe halten die Rinne auf ihrem Stand (${silt} % verlandet): ${upkeepCost(w)} Taler am Tag.`
+              : `Verlandet zu ${silt} %. Ohne Pflege schwemmt der Fluss die Rinne langsam zu.`,
+          );
+          extra.push(`<span class="row-btns">
+            <button class="btn small" data-act="cmd" data-cmd="workUpkeep" data-id="${p.id}" data-on="${w.upkeep ? 0 : 1}">${w.upkeep ? 'Pflege beenden' : `Pflege für ${upkeepCost(w)} Taler am Tag`}</button>
+            ${cost && (w.silt ?? 0) >= 0.05 ? `<button class="btn small" data-act="cmd" data-cmd="dredge" data-id="${p.id}" ${state.money >= cost ? '' : 'disabled'}>Nachbaggern: ${fmt(cost)} Taler</button>` : ''}
+          </span>`);
+        }
+        if (w?.owner === 'spieler' && st === 'fertig' && passageFee({ ...w, fee: 'normal' }, 60)) extra.push(feeBtns(p.id, w.fee));
+      }
+      return `<div class="yard-row ${locked && st === 'offen' ? 'muted' : ''}"><div><b>${p.name}</b> <small>${where} · ${p.days} Tage Bauzeit</small>
+        <small class="desc">${p.text}</small>${extra.map((x) => (x.startsWith('<') ? x : `<small class="desc">${x}</small>`)).join('')}</div>${btn}</div>`;
     }).join('');
+
+    const harbors = this.map.towns
+      .map((t) => {
+        const h = harborOf(state, t.id);
+        const cur = HARBOR_LEVELS[h.level];
+        const next = nextHarborLevel(state, t.id);
+        const depth = quayDepth(state, t.id).toFixed(1).replace('.', ',');
+        const info = `${cur.name} · ${cur.rate} t je Stunde · ${berths(state, t.id)} Liegeplätze · ${depth} m am Kai`;
+        let btn = '';
+        if (h.building) btn = `<span class="note">${HARBOR_LEVELS[h.building.level].name}: noch ${harborDaysLeft(state, t.id)} Tage</span>`;
+        else if (!next) btn = '<span class="done-mark">voll ausgebaut</span>';
+        else if (next.epoch > state.epoch) btn = `<span class="note nowrap">${next.name} ab Epoche „${EPOCHS[next.epoch - 1].name}“</span>`;
+        else {
+          const alone = harborCost(state, this.map, t.id, false);
+          const town = harborPartner(state, this.map, t.id);
+          const withTown = harborCost(state, this.map, t.id, true);
+          btn = `<div class="row-btns">
+            <button class="btn" data-act="cmd" data-cmd="harbor" data-town="${t.id}" ${state.money >= alone ? '' : 'disabled'} title="${next.text}">${next.name}: ${fmt(alone)}</button>
+            ${town ? `<button class="btn" data-act="cmd" data-cmd="harbor" data-town="${t.id}" data-partner="stadt" ${state.money >= withTown ? '' : 'disabled'} title="Die Stadt zahlt die Hälfte und bekommt die Hälfte des Liegegelds">mit der Stadt: ${fmt(withTown)}</button>` : ''}
+          </div>`;
+        }
+        const own =
+          h.level > 0
+            ? `<small class="desc">Liegegeld von fremden Schiffen, eingenommen: ${fmt(Math.round(h.earned ?? 0))} Taler${h.partner ? `, Anteil der Stadt: ${fmt(Math.round(h.partnerEarned ?? 0))} Taler` : ''}</small>${feeBtns(`hafen:${t.id}`, h.fee)}`
+            : '';
+        return `<div class="yard-row"><div><b>${t.name}</b> <small>${info}</small>${own}</div>${btn}</div>`;
+      })
+      .join('');
+
+    const l = state.ledger.works;
+    const ledger = l && (l.income || l.cost) ? `<p class="note">Gestern: Gebühren +${fmt(l.income)} Taler, Unterhalt und fremde Gebühren −${fmt(l.cost)} Taler.</p>` : '';
     return `<div class="ledger-head"><div class="stamp-small">Wasserbauamt</div><h2>Den Fluss verbessern</h2>
-      <p>Brücken, Schleusen, Kanäle und Fahrrinnen verändern den Fluss für immer, für dich und für die Konkurrenz. Wer baut, zahlt, aber jede Fahrt wird leichter.</p></div>
-      <div class="yard">${list}</div>`;
+      <p>Brücken, Schleusen, Kanäle und Fahrrinnen verändern den Fluss für immer. Wer baut, darf von fremden Schiffen eine Durchfahrtsgebühr nehmen. Eine Stadt oder ein Handelshaus trägt auf Wunsch die Hälfte und bekommt dafür die Hälfte der Gebühren. Ausgebaggerte Rinnen verlanden, wenn niemand sie pflegt.</p></div>
+      ${ledger}
+      <div class="yard">${list}</div>
+      <div class="ledger-head"><div class="stamp-small">Häfen</div><h2>Häfen ausbauen</h2>
+      <p>Ein besserer Hafen schlägt schneller um, hat mehr Liegeplätze und tieferes Wasser am Kai. Zu tiefe Schiffe müssen sonst über Schuten geleichtert werden, das dauert doppelt so lange und kostet einen halben Taler je Tonne.</p></div>
+      <div class="yard">${harbors}</div>`;
   }
 
   /** Papierkarte des Tals mit allen Schiffen; Daten der Flussläufe kommen von außen */

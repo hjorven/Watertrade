@@ -1,14 +1,17 @@
 import type { MapDef, SegmentDef } from '../data/maps/valley.ts';
 import { PROJECT_BY_ID, PROJECTS, type ProjectDef } from '../data/projects.ts';
-import { addNews, day, fail, type GameState, type NewsItem, type TradeResult } from './state.ts';
+import { addNews, day, fail, type GameState, type NewsItem, type TradeResult, type WorkPartner } from './state.ts';
 
 /** Abschnitte mit allen fertigen Wasserbauten */
 const cache = new WeakMap<MapDef, { key: string; segs: SegmentDef[] }>();
 
 export function effectiveSegments(state: GameState, map: MapDef): SegmentDef[] {
-  const done = (state.works ?? []).filter((w) => w.done).map((w) => w.id);
-  if (!done.length) return map.segments;
-  const key = done.join(',');
+  const finished = (state.works ?? []).filter((w) => w.done);
+  if (!finished.length) return map.segments;
+  // Verlandung mindert die zusätzliche Tiefe; im Schlüssel auf Prozent gerundet, damit der Zwischenspeicher hält
+  const silt = new Map(finished.map((w) => [w.id, Math.round(Math.min(1, Math.max(0, w.silt ?? 0)) * 100) / 100]));
+  const done = finished.map((w) => w.id);
+  const key = finished.map((w) => (silt.get(w.id) ? `${w.id}~${silt.get(w.id)}` : w.id)).join(',');
   const hit = cache.get(map);
   if (hit && hit.key === key) return hit.segs;
   const segs = map.segments.map((seg) => {
@@ -16,7 +19,7 @@ export function effectiveSegments(state: GameState, map: MapDef): SegmentDef[] {
     for (const id of done) {
       const p = PROJECT_BY_ID.get(id);
       if (!p || p.seg !== seg.id) continue;
-      if (p.effect.depth) s.baseDepth += p.effect.depth;
+      if (p.effect.depth) s.baseDepth += p.effect.depth * (1 - (silt.get(id) ?? 0));
       if (p.effect.current) s.current = Math.max(0.3, s.current + p.effect.current);
       if (p.effect.bridgeHeight !== undefined) s.bridgeHeight = p.effect.bridgeHeight;
       if (p.effect.iceFree) s.freezes = false;
@@ -36,16 +39,18 @@ export function availableProjects(state: GameState): ProjectDef[] {
   return PROJECTS.filter((p) => p.epoch <= state.epoch);
 }
 
-export function startProject(state: GameState, id: string): TradeResult {
+/** Bauvorhaben beginnen. Mit Partner (Gemeinschaftsbau) zahlt der Spieler nur seinen Anteil. */
+export function startProject(state: GameState, id: string, partner?: WorkPartner): TradeResult {
   const p = PROJECT_BY_ID.get(id);
   if (!p) return fail('Unbekanntes Bauvorhaben.');
   if (p.epoch > state.epoch) return fail('Dafür fehlt noch die Technik.');
   if (state.works.some((w) => w.id === id)) return fail('Schon in Arbeit.');
-  if (state.money < p.cost) return fail(`${p.name} kostet ${p.cost} Taler.`);
-  state.money -= p.cost;
-  state.works.push({ id, started: day(state), done: false });
+  const cost = partner ? Math.round(p.cost * (1 - partner.share)) : p.cost;
+  if (state.money < cost) return fail(`${p.name} kostet ${cost} Taler.`);
+  state.money -= cost;
+  state.works.push({ id, started: day(state), done: false, owner: 'spieler', fee: 'normal', upkeep: p.kind === 'vertiefung', partner });
   addNews(state, 'haus', `Baubeginn: ${p.name}. Fertig in ${p.days} Tagen.`);
-  return { ok: true, message: `${p.name}: Die Arbeiten beginnen.`, amount: 0, taler: p.cost };
+  return { ok: true, message: `${p.name}: Die Arbeiten beginnen.`, amount: 0, taler: cost };
 }
 
 export function daysLeft(state: GameState, id: string): number {

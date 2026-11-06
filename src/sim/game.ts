@@ -1,17 +1,22 @@
 import type { MapDef } from '../data/maps/valley.ts';
 import { isIce, waterLevel } from './calendar.ts';
+import { captainArrived, tickCaptains } from './captains.ts';
 import { tickContracts } from './contracts.ts';
 import { eventWaterOffset, tickEvents } from './events.ts';
 import { addShip, refreshTavern, runRoute } from './fleet.ts';
 import { tickHouse } from './house.ts';
 import { initialRivals, moveRivals, tickRivals } from './rivals.ts';
+import { weakenHouse } from './rivalry.ts';
 import { EPOCHS, epochOfYear, MIN_FRESH, PERISH, SHIPS } from '../data/ships.ts';
 import { YEAR_DAYS, year } from './calendar.ts';
 import { addNews, day, shipClass, type GameEvent, type GameState, type NewsItem } from './state.ts';
 import { tickWorks } from './works.ts';
 import { tickStanding, townNews, townOptions } from './standing.ts';
+import { observe, tickMarketInfo, tripArrive, tripSail } from './market-info.ts';
 import { initialMarket, initialTown, tickTown } from './towns.ts';
-import { wearFactor, wearRate } from './voyage.ts';
+import { movingHours, wearFactor, wearRate } from './voyage.ts';
+import { tickWaterworks } from './wasserbau.ts';
+import { PROJECT_BY_ID } from '../data/projects.ts';
 
 export * from './state.ts';
 export * from './trade.ts';
@@ -37,6 +42,8 @@ export interface NewGameOptions {
   works?: string[];
   /** Spielbeginn im Jahr (für spätere Kapitel) */
   startYear?: number;
+  /** KI-Haus, das geschwächt startet (Kapitel mit Übernahme-Ziel) */
+  weakHouse?: string;
 }
 
 export const START_MONEY = 500;
@@ -93,6 +100,10 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
   for (const town of opts.kontore ?? []) state.kontore[town] = { level: 1, stock: {} };
   refreshTavern(state, map);
   if (state.rivalsActive) state.rivals = initialRivals(state);
+  state.priceBook = {};
+  state.priceHistory = {};
+  observe(state, opts.startTown);
+  if (opts.weakHouse) weakenHouse(state, opts.weakHouse);
   return state;
 }
 
@@ -110,7 +121,19 @@ export function upgradeState(state: GameState, map: MapDef): GameState {
   s.rng ??= 20260601;
   s.ledger ??= { day: 0, wages: 0, upkeep: 0, production: 0 };
   s.works ??= [];
+  // ältere Spielstände: selbst gebaute Werke (Baubeginn nach Tag 0) gehören dem Spieler
+  for (const w of s.works) {
+    if (w.owner || w.started <= 0) continue;
+    w.owner = 'spieler';
+    w.fee ??= 'normal';
+    if (PROJECT_BY_ID.get(w.id)?.kind === 'vertiefung' && w.upkeep === undefined) {
+      w.upkeep = true;
+      addNews(s, 'haus', `Neu beim Wasserbauamt: ${PROJECT_BY_ID.get(w.id)!.name} wird jetzt gepflegt und kostet täglich Unterhalt. Abschalten im Reiter Wasserbau.`);
+    }
+  }
   s.fuelToday ??= 0;
+  s.priceBook ??= {};
+  s.priceHistory ??= {};
   if (s.epoch === undefined) {
     s.epochAuto = true;
     s.epoch = epochOfYear(year(day(s)));
@@ -129,7 +152,8 @@ export function upgradeState(state: GameState, map: MapDef): GameState {
     ship.bunker ??= SHIPS[ship.type]?.bunker ?? 0;
   }
   if (!Object.keys(s.tavern).length) refreshTavern(s, map);
-  if (s.rivalsActive && !s.rivals.length) s.rivals = initialRivals(s);
+  // nicht neu anlegen, wenn alle Häuser pleite oder übernommen sind
+  if (s.rivalsActive && !s.rivals.length && !s.housesGone?.length) s.rivals = initialRivals(s);
   return s;
 }
 
@@ -174,7 +198,9 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     }
     tickHouse(state);
     pushNews(events, tickStanding(state, map), false);
+    pushNews(events, tickCaptains(state, map), true);
     pushNews(events, tickWorks(state, map), true);
+    pushNews(events, tickWaterworks(state, map), false);
     if (state.epochAuto) {
       const e = epochOfYear(year(d));
       if (e > state.epoch) {
@@ -188,6 +214,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     pushNews(events, tickContracts(state, map), false);
     if (state.rivalsActive) pushNews(events, tickRivals(state, map), false);
     if (d % TAVERN_DAYS === 0) refreshTavern(state, map);
+    pushNews(events, tickMarketInfo(state, map), false);
     state.ice = isIce(d);
     events.push({ type: 'newDay', day: d });
   }
@@ -196,14 +223,17 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
   for (const ship of state.ships) {
     const v = ship.voyage;
     if (v) {
-      const dt = Math.min(hours, v.hours - v.elapsed);
+      const before = v.elapsed;
       v.elapsed = Math.min(v.hours, v.elapsed + hours);
+      // Verbrauch und Verschleiß nur in Fahrstunden, nicht während des Ladens und Löschens
+      const dt = movingHours(v, before, v.elapsed);
       const cls = shipClass(ship);
       ship.condition = Math.max(0, ship.condition - dt * wearRate(ship, wearFactor(state, map, ship)));
       // Diesel wird unterwegs bezahlt, Kohle kommt aus dem Bunker (beim Ablegen gekauft)
       const fuel = (cls.fuel ?? 0) * dt;
       state.money -= fuel;
       state.fuelToday += fuel;
+      tripSail(ship, dt, fuel, v.elapsed - before);
       if (cls.coal) ship.bunker = Math.max(0, (ship.bunker ?? 0) - cls.coal * dt);
       // ohne Kühlraum verdirbt Fisch, Brot und Bier unterwegs
       if (!cls.fresh) {
@@ -215,6 +245,8 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
       if (v.elapsed >= v.hours) {
         ship.port = v.to;
         ship.voyage = null;
+        tripArrive(state, ship);
+        pushNews(events, captainArrived(state, map, ship, v), true);
         events.push({ type: 'arrived', ship: ship.id, town: v.to, auto: !!ship.route?.active });
       }
     }

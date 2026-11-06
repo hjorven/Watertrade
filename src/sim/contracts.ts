@@ -3,6 +3,7 @@ import type { MapDef } from '../data/maps/valley.ts';
 import { price } from './economy.ts';
 import { addNews, day, fail, getShip, rand, randInt, type Contract, type GameState, type NewsItem, type TradeResult } from './state.ts';
 import { contractBonus, noteContractDone, noteContractFailed, offerWeight } from './standing.ts';
+import { tripPartialDelivery, tripSale } from './market-info.ts';
 import { needs } from './towns.ts';
 
 const MAX_OFFERS = 4;
@@ -115,12 +116,14 @@ export function deliverContract(state: GameState, shipId: number, id: number): T
   delivered[c.good] = (delivered[c.good] ?? 0) + amount;
   if (c.delivered < c.amount) {
     state.totalProfit -= costShare;
+    tripPartialDelivery(ship, costShare, amount);
     return { ok: true, message: `${amount} t ${name} übergeben, noch ${c.amount - c.delivered} t.`, amount, taler: 0 };
   }
   state.money += c.reward;
   state.totalProfit += c.reward - costShare;
   state.stats.contracts++;
   noteContractDone(state, c.town, c.amount);
+  tripSale(ship, c.reward, costShare, amount);
   state.contracts = state.contracts.filter((x) => x.id !== id);
   return { ok: true, message: `Auftrag erfüllt: ${c.reward} Taler.`, amount, taler: c.reward, profit: c.reward - costShare };
 }

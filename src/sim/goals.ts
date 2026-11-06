@@ -43,6 +43,8 @@ export function goalProgress(state: GameState, goal: Goal): { value: number; tar
       const n = Object.values(state.towns).filter((t) => levelOf(t.population) >= goal.level).length;
       return { value: n, target: Object.keys(state.towns).length };
     }
+    case 'takeover':
+      return { value: (state.housesGone ?? []).filter((h) => h.how === 'uebernahme').length, target: goal.count };
   }
 }
 
