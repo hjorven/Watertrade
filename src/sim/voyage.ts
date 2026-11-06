@@ -4,6 +4,7 @@ import { available, buyCost } from './economy.ts';
 import { explainBlock, findRoute, segmentDepth, travelTime, type BlockReason, type ShipType } from './river.ts';
 import { effectiveSegments } from './works.ts';
 import { towFee } from './epochs.ts';
+import { tripDepart } from './market-info.ts';
 import { conditions, effectiveDraft, effectiveType, getShip, hasUpgrade, shipClass, type GameState, type Leg, type Ship, type Voyage } from './state.ts';
 
 export type VoyagePlan = { ok: true; voyage: Voyage } | { ok: false; reasons: { seg: SegmentDef; reason: BlockReason }[] };
@@ -158,6 +159,7 @@ export function depart(state: GameState, map: MapDef, shipId: number, to: string
   if (coal.problem || toll + coal.cost > state.money) return null;
   if (coal.buy > 0) bunkerCoal(state, ship, coal.buy);
   state.money -= toll;
+  tripDepart(state, ship, ship.port!, to, toll);
   ship.voyage = plan.voyage;
   ship.port = null;
   state.stats.trips++;

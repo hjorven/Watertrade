@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { SegmentDef } from '../data/maps/valley.ts';
 import { PROJECT_BY_ID } from '../data/projects.ts';
 import type { Landscape } from './landscape.ts';
+import { boxGeo, coneGeo, cylGeo, Kit } from './kit.ts';
 import { buildBridge } from './towns.ts';
 
 /** Wasserbauten in der Landschaft: Baustellen, Schleusen, Kanalmauern, Bojen und die neue Brücke */
@@ -84,6 +85,67 @@ function buoys(land: Landscape, seg: SegmentDef): THREE.Group {
   return g;
 }
 
+const lamp = new THREE.MeshStandardMaterial({ color: 0xffe08a, emissive: 0xffc04a, emissiveIntensity: 1.2 });
+const COL = { stone: 0x9d9384, plaster: 0xeee4cf, roof: 0x8f3a2a, wood: 0x8a5e38, dark: 0x3a2a1c, red: 0xb8322a, white: 0xf2efe6, iron: 0x3a3d42 };
+
+/** Pegelhaus: Wärterhäuschen am Ufer, Steg und eine rot-weiß geteilte Pegellatte im Wasser */
+function gauge(land: Landscape, seg: SegmentDef, f: number): THREE.Group {
+  const g = new THREE.Group();
+  const { p, n, hw, heading } = frame(land, seg, f);
+  const k = new Kit();
+  const hx = p.x + n.x * (hw + 2.4);
+  const hz = p.z + n.z * (hw + 2.4);
+  // Häuschen auf dem Ufer, Höhe aus dem Geländenetz
+  k.at({ x: hx, y: Math.max(0.1, land.surfaceAt(hx, hz)), z: hz, ry: heading }, () => {
+    k.add(boxGeo(1.5, 1.1, 1.3), COL.plaster);
+    k.add(coneGeo(1.15, 0.8, 4), COL.roof, { y: 1.1, ry: Math.PI / 4 });
+    k.add(boxGeo(0.35, 0.6, 0.05), COL.dark, { z: -0.66 });
+    k.add(boxGeo(0.06, 1.4, 0.06), COL.dark, { x: 0.9, z: -0.5 });
+    k.add(boxGeo(0.5, 0.3, 0.03), COL.white, { x: 0.9, y: 1.15, z: -0.5 });
+  });
+  // Steg vom Ufer zur Latte und die Latte selbst, in Abschnitten von 0,3 m
+  // Steg auf Uferhöhe, damit er bei hohem Ufer nicht im Gelände verschwindet
+  const walkY = Math.max(0.3, land.surfaceAt(p.x + n.x * (hw + 1.2), p.z + n.z * (hw + 1.2)));
+  k.at({ x: p.x + n.x * (hw + 0.4), y: 0, z: p.z + n.z * (hw + 0.4), ry: heading }, () => {
+    k.add(boxGeo(0.5, 0.08, 2.0), COL.wood, { y: walkY });
+    for (const dz of [-0.8, 0.8]) k.add(boxGeo(0.1, walkY + 0.5, 0.1), COL.dark, { x: 0.2, y: -0.5, z: dz });
+  });
+  k.at({ x: p.x + n.x * (hw - 0.6), y: 0, z: p.z + n.z * (hw - 0.6), ry: heading }, () => {
+    k.add(boxGeo(0.08, 2.9, 0.08), COL.dark, { y: -0.9, z: 0.06 });
+    for (let i = 0; i < 8; i++) k.add(boxGeo(0.18, 0.3, 0.06), i % 2 ? COL.red : COL.white, { y: -0.6 + i * 0.3 });
+  });
+  g.add(k.mesh());
+  return g;
+}
+
+/** Leuchtfeuer: rot-weißer Turm auf einem Steinsockel am Ufer mit leuchtender Laterne */
+function beacon(land: Landscape, seg: SegmentDef, f: number, side: number): THREE.Group {
+  const g = new THREE.Group();
+  const { p, n, hw } = frame(land, seg, f);
+  const x = p.x + n.x * side * (hw + 2.7);
+  const z = p.z + n.z * side * (hw + 2.7);
+  const k = new Kit();
+  k.add(cylGeo(1.3, 1.5, 0.9, 10), COL.stone, { y: -0.4 });
+  for (let i = 0; i < 4; i++) {
+    const r0 = 0.85 - i * 0.09;
+    k.add(cylGeo(r0 - 0.09, r0, 1.1, 10), i % 2 ? COL.red : COL.white, { y: 0.5 + i * 1.1 });
+  }
+  k.add(cylGeo(0.75, 0.75, 0.12, 10), COL.iron, { y: 4.9 });
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    k.add(boxGeo(0.04, 0.35, 0.04), COL.iron, { x: Math.cos(a) * 0.7, y: 5.0, z: Math.sin(a) * 0.7 });
+  }
+  k.add(coneGeo(0.6, 0.7, 10), COL.red, { y: 5.75 });
+  // Tür zur Landseite, weg vom Fluss
+  k.at({ ry: Math.atan2(n.x * side, n.z * side) }, () => k.add(boxGeo(0.4, 0.8, 0.06), COL.dark, { z: 0.82, y: 0.45 }));
+  const tower = k.mesh();
+  const light = new THREE.Mesh(cylGeo(0.4, 0.4, 0.7, 8), lamp);
+  light.position.y = 5.05;
+  g.add(tower, light);
+  g.position.set(x, Math.max(0.1, land.surfaceAt(x, z)), z);
+  return g;
+}
+
 /** Baustelle: Gerüst, Kran und Materialhaufen am Ufer */
 function site(land: Landscape, seg: SegmentDef): THREE.Group {
   const g = new THREE.Group();
@@ -146,6 +208,12 @@ export class WaterWorks {
           break;
         case 'vertiefung':
           this.root.add(buoys(this.land, seg));
+          break;
+        case 'pegel':
+          this.root.add(gauge(this.land, seg, 0.3));
+          break;
+        case 'leuchtfeuer':
+          this.root.add(beacon(this.land, seg, 0.5, -1));
           break;
       }
     }

@@ -69,3 +69,13 @@ export function tickWorks(state: GameState, map: MapDef): NewsItem[] {
   }
   return out;
 }
+
+/** Anzahl fertiger Pegelstationen: eine kündigt Hochwasser und Dürre an, ab zwei mit genauem Tag und Pegel */
+export function gaugeCount(state: GameState): number {
+  return (state.works ?? []).filter((w) => w.done && PROJECT_BY_ID.get(w.id)?.effect.gauge).length;
+}
+
+/** Abschnitte mit fertigem Leuchtfeuer, für die Nachtfahrt */
+export function litSegments(state: GameState): string[] {
+  return (state.works ?? []).filter((w) => w.done && PROJECT_BY_ID.get(w.id)?.effect.light).map((w) => PROJECT_BY_ID.get(w.id)!.seg);
+}

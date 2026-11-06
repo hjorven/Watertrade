@@ -2,6 +2,7 @@ import { KONTOR_CAPACITY, KONTOR_SELL_FACTOR } from '../data/buildings.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import { available, price, SELL_FACTOR, type MarketEntry } from './economy.ts';
 import { FRESH_GOODS } from '../data/ships.ts';
+import { tripSale, tripStore } from './market-info.ts';
 import { addToSlot, capacityOf, cargoLoad, fail, getShip, shipClass, type CargoSlot, type GameState, type Ship, type TradeResult } from './state.ts';
 
 /** Händlerblut am Ruder: etwas bessere Preise */
@@ -120,6 +121,7 @@ export function sell(state: GameState, shipId: number, goodId: string, wanted: n
   const fresh = FRESH_GOODS.includes(goodId) ? (shipClass(ship).fresh ?? 0) : 0;
   const r = sellFrom(state, ship.port, ship.cargo, goodId, wanted, { haendler: isHaendler(ship), limit, bonus: fresh });
   if (!r.ok && r.message.startsWith('Kein ')) return fail(r.message.replace('vorrätig', 'an Bord'));
+  if (r.ok) tripSale(ship, r.taler, r.taler - (r.profit ?? 0), r.amount);
   return r;
 }
 
@@ -154,6 +156,8 @@ export function store(state: GameState, shipId: number, goodId: string, wanted: 
   if (!ship.port || !state.kontore[ship.port]) return fail('Hier gibt es kein eigenes Kontor.');
   const amount = Math.min(wanted, ship.cargo[goodId]?.amount ?? 0, Math.floor(kontorSpace(state, ship.port)));
   if (amount <= 0) return fail(ship.cargo[goodId] ? 'Das Kontor ist voll.' : `Kein ${name} an Bord.`);
+  const slot = ship.cargo[goodId];
+  tripStore(state, ship, goodId, amount, Math.round((slot.cost * amount) / slot.amount), slot.fresh ?? 1);
   move(ship.cargo, state.kontore[ship.port].stock, goodId, amount);
   return { ok: true, message: `${amount} t ${name} eingelagert.`, amount, taler: 0 };
 }
