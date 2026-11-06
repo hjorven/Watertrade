@@ -5,6 +5,7 @@ import type { PriceBookPage, PricePoint, TripRecord } from './market-info.ts';
 import type { TownMarket, TownState } from './towns.ts';
 import type { Season } from './calendar.ts';
 import type { CanalState } from './canal.ts';
+import type { Finance } from './finance.ts';
 
 /** Datentypen des Spielstands und kleine Helfer, die alle Simulationsmodule brauchen */
 
@@ -155,6 +156,8 @@ export interface Ship {
   trip?: TripRecord;
   /** Schiffsbuch: abgeschlossene Fahrten, neueste zuerst */
   tripLog?: TripRecord[];
+  /** Flussversicherung abgeschlossen (finance.ts) */
+  insured?: boolean;
 }
 
 export interface Kontor {
@@ -397,6 +400,8 @@ export interface GameState {
   harbors?: Record<string, Harbor>;
   /** Gebühren und Unterhalt des Wasserbaus seit Mitternacht (+ Einnahmen, − Ausgaben) */
   worksToday?: { income: number; cost: number };
+  /** Stadtbank und Versicherung (finance.ts), fehlt bis zum ersten Kredit oder Vertrag */
+  finance?: Finance;
 }
 
 export function shipClass(ship: { type: string }): ShipClass {

@@ -12,7 +12,8 @@ export function goalProgress(state: GameState, goal: Goal): { value: number; tar
     case 'profit':
       return { value: state.firstProfitDone ? 1 : 0, target: 1 };
     case 'money':
-      return { value: state.money, target: goal.amount };
+      // Schulden bei der Stadtbank zählen dagegen, sonst ließe sich das Ziel mit einem Kredit erfüllen
+      return { value: state.money - (state.finance?.loans ?? []).reduce((s, l) => s + l.remaining, 0), target: goal.amount };
     case 'ships': {
       const n = state.ships.filter((s) => !goal.shipType || s.type === goal.shipType).length;
       return { value: n, target: goal.count };
