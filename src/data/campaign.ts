@@ -3,6 +3,10 @@ export type Goal =
   | { type: 'money'; amount: number; text: string }
   | { type: 'ships'; count: number; shipType?: string; text: string }
   | { type: 'townLevel'; town: string; level: number; text: string }
+  /** Versorgung einer Stadt in Prozent (die Leiste im Stadtfenster) */
+  | { type: 'supply'; town: string; percent: number; text: string }
+  /** Dampfertage: je Tag und eigenem Kohledampfer, der mindestens 4 Stunden gefahren ist, einer */
+  | { type: 'steamDays'; days: number; text: string }
   | { type: 'deliver'; town: string; good: string; amount: number; text: string }
   | { type: 'rafts'; count: number; text: string }
   | { type: 'kontore'; count: number; text: string }
@@ -46,19 +50,21 @@ export const CHAPTERS: Chapter[] = [
     title: 'Der erste Kahn',
     intro: [
       'Oberau, im Frühjahr. Dein Onkel hat dir einen alten Treidelkahn und 300 Taler hinterlassen, dazu einen Satz in seiner krakeligen Schrift: "Der Fluss gibt, wer ihn versteht."',
-      'Kaufe, wo eine Ware reichlich da ist, und verkaufe, wo sie gebraucht wird. Talwärts trägt dich die Strömung, bergwärts ziehen Pferde. Im Frühjahr ist das Wasser hoch und schnell, im Sommer wird es flach.',
+      'Am Oberlauf fängt jeder Händler mit Holz an. Zimmere ein Floß, lade Holz darauf und lass es talwärts treiben. Wo Holz gebraucht wird, verkaufst du Ladung und Floß zusammen. Bergwärts kommt nur dein Kahn, von Pferden gezogen. Im Frühjahr ist das Wasser hoch und schnell, im Sommer wird es flach.',
     ],
-    outro: 'Oberau ist kein Dorf mehr, und in den Kontoren am Fluss kennt man deinen Namen. Das Handelshaus steht.',
+    outro: 'In Oberau werden neue Häuser gezimmert, und in den Kontoren am Fluss kennt man deinen Namen. Das Handelshaus steht.',
     startTown: 'oberau',
     money: 300,
     startShip: 'treidelkahn',
     allowedShips: ['floss', 'treidelkahn'],
     goals: [
-      { type: 'profit', text: 'Mach mit einem Verkauf Gewinn' },
-      { type: 'rafts', count: 1, text: 'Bau in Oberau ein Floß, lass es talwärts treiben und zerlege es am Ziel' },
-      { type: 'deliver', town: 'oberau', good: 'getreide', amount: 60, text: 'Bring 60 t Getreide nach Oberau' },
+      { type: 'ships', count: 1, shipType: 'floss', text: 'Zimmere in der Werft von Oberau ein Floß' },
+      { type: 'profit', text: 'Verkauf eine Ladung mit Gewinn' },
+      { type: 'rafts', count: 1, text: 'Lass das Floß talwärts treiben und zerlege es am Ziel' },
+      { type: 'deliver', town: 'oberau', good: 'getreide', amount: 60, text: 'Bring mit dem Kahn 60 t Getreide bergwärts nach Oberau' },
+      { type: 'rafts', count: 4, text: 'Bring insgesamt vier Flöße ans Ziel' },
       { type: 'ships', count: 2, shipType: 'treidelkahn', text: 'Besitze zwei Treidelkähne' },
-      { type: 'townLevel', town: 'oberau', level: 1, text: 'Lass Oberau zum Marktflecken wachsen' },
+      { type: 'supply', town: 'oberau', percent: 80, text: 'Bring die Versorgung von Oberau auf 80 %' },
       { type: 'money', amount: 6000, text: 'Besitze 6000 Taler' },
     ],
   },
@@ -117,7 +123,7 @@ export const CHAPTERS: Chapter[] = [
     title: 'Dampf auf dem Strom',
     intro: [
       'Niedermünd, Jahr 6. Ein Schiff ohne Pferde und ohne Segel kommt den Strom herauf, gegen die Strömung, schwarzer Rauch über dem Schornstein. Die Treidler am Ufer schauen ihm stumm nach.',
-      'Dampfer brauchen Kohle und tiefes Wasser. Der Erzbach ist für sie zu seicht, die Kohle liegt aber genau dort. Bau Schleusen, und die Kohle kommt zu dir.',
+      'Dampfer sind schnell, aber hungrig: Jeder verbrennt in einer Stunde mehr als ein Kohlenträger am Tag schleppt. Kohle gibt es im Tal nur in Erzgrube, und der Erzbach ist für Dampfer zu seicht. Bau Schleusen, lass eigene Meiler brennen und lagere Kohle im Kontor. Dampfer bunkern dort zuerst die eigene Kohle.',
     ],
     outro: 'Kohle fährt den Erzbach hinunter, Dampfer den Strom hinauf. Das Tal ist schneller geworden.',
     startTown: 'niedermuend',
@@ -131,9 +137,9 @@ export const CHAPTERS: Chapter[] = [
     kontore: ['niedermuend'],
     works: ['bruecke-kessel'],
     goals: [
-      { type: 'ships', count: 2, shipType: 'raddampfer', text: 'Stell zwei Raddampfer in Dienst' },
+      { type: 'ships', count: 3, shipType: 'raddampfer', text: 'Stell drei Raddampfer in Dienst' },
       { type: 'project', id: 'schleuse-erzbach', text: 'Bau die Schleusentreppe am Erzbach' },
-      { type: 'deliver', town: 'niedermuend', good: 'kohle', amount: 300, text: 'Bring 300 t Kohle nach Niedermünd' },
+      { type: 'steamDays', days: 90, text: 'Sammle 90 Dampfertage, etwa drei Dampfer 30 Tage lang (ein Dampfertag: mindestens 4 Fahrstunden an einem Tag)' },
       { type: 'worth', amount: 50000, text: 'Bring dein Haus auf 50.000 Taler Vermögen' },
     ],
   },
@@ -170,7 +176,7 @@ export const CHAPTERS: Chapter[] = [
     title: 'Hundert Jahre am Fluss',
     intro: [
       'Motoren tuckern, wo einst Pferde zogen. Kühlschiffe bringen frischen Fisch bis in die Berge. Dein Haus ist alt geworden, der Fluss nicht.',
-      'Ein letztes Mal: Mach das ganze Tal reich. Jede Stadt soll wachsen, und dein Haus soll das erste am Fluss sein.',
+      'Die alten Handelshäuser tun sich schwer mit der neuen Zeit, ihre Anteile werden im Register gehandelt. Wer mehr als die Hälfte eines Hauses hält, bekommt Schiffe, Kontore und Kasse, muss aber die übrigen Teilhaber auszahlen. Ein letztes Mal: Mach dein Haus zum ersten am Fluss.',
     ],
     outro: 'Hundert Jahre am Fluss. Die Treidelpfade sind Spazierwege geworden, aber die Kontore stehen noch, und über den Türen steht dein Name.',
     startTown: 'altenfurt',
@@ -186,8 +192,8 @@ export const CHAPTERS: Chapter[] = [
     goals: [
       { type: 'ships', count: 1, shipType: 'kuehlschiff', text: 'Stell ein Kühlschiff in Dienst' },
       { type: 'project', id: 'kanal-oberlauf', text: 'Bau den Seitenkanal am Oberlauf' },
-      { type: 'allTowns', level: 1, text: 'Jede Stadt im Tal ist mindestens Marktflecken' },
-      { type: 'rank', place: 1, text: 'Sei das reichste Haus im Handelsregister' },
+      { type: 'townLevel', town: 'muehlheim', level: 1, text: 'Lass Mühlheim zum Marktflecken wachsen' },
+      { type: 'takeover', count: 1, text: 'Übernimm ein Handelshaus am Fluss' },
       { type: 'worth', amount: 150000, text: 'Bring dein Haus auf 150.000 Taler Vermögen' },
     ],
   },
