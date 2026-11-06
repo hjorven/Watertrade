@@ -308,6 +308,7 @@ describe('KI-Häuser bauen selbst', () => {
     for (const r of s.rivals) r.money = 60000;
     let built = false;
     for (let i = 0; i < 400 && !built; i++) {
+      s.hour += 24;
       tickWaterworks(s, VALLEY);
       built = s.works.some((w) => w.owner && w.owner !== 'spieler');
     }
@@ -319,7 +320,10 @@ describe('KI-Häuser bauen selbst', () => {
     const s = newGame(VALLEY, { startTown: 'altenfurt', money: 500, seed: 11, epoch: 2 });
     s.hour += 24 * 70;
     for (const r of s.rivals) r.money = 60000;
-    for (let i = 0; i < 400; i++) tickWaterworks(s, VALLEY);
+    for (let i = 0; i < 400; i++) {
+      s.hour += 24;
+      tickWaterworks(s, VALLEY);
+    }
     expect(s.works.length).toBe(0);
   });
 });

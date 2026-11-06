@@ -6,7 +6,6 @@ import {
   addNews,
   day,
   fail,
-  rand,
   type FeeItem,
   type FeeLevel,
   type GameState,
@@ -464,6 +463,18 @@ export function tickWaterworks(state: GameState, map: MapDef): NewsItem[] {
   return news;
 }
 
+/**
+ * Eigener Würfel aus Tag und Haus, unabhängig vom Zufallsstrom des Spielstands.
+ * So verschiebt der Bauentschluss keine Ereignisse, Aufträge oder KI-Fahrten.
+ */
+function chance(d: number, id: string): number {
+  let h = 2166136261 ^ d;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+  h = Math.imul(h ^ (h >>> 15), 2246822507);
+  h = Math.imul(h ^ (h >>> 13), 3266489909);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
 /** Reiche KI-Häuser errichten im freien Spiel selbst Wasserbauten und nehmen Gebühren */
 function rivalsBuild(state: GameState, map: MapDef): NewsItem[] {
   const news: NewsItem[] = [];
@@ -473,7 +484,7 @@ function rivalsBuild(state: GameState, map: MapDef): NewsItem[] {
   if (!open.length) return news;
   for (const r of state.rivals) {
     const p = open.find((x) => r.money > x.cost * 2 + 2000);
-    if (!p || rand(state) > 1 / 60) continue;
+    if (!p || chance(day(state), r.id) > 1 / 60) continue;
     r.money -= p.cost;
     state.works.push({ id: p.id, started: day(state), done: false, owner: r.id, fee: 'normal' });
     open.splice(open.indexOf(p), 1);
