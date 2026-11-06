@@ -1,8 +1,8 @@
 import type { Challenge, ChallengeEvent } from '../data/challenges.ts';
 import type { MapDef } from '../data/maps/valley.ts';
-import { dayOfYear, isIce, waterLevel } from './calendar.ts';
+import { waterLevel } from './calendar.ts';
 import { eventWaterOffset } from './events.ts';
-import { newGame } from './game.ts';
+import { effectiveSegments, newGame } from './game.ts';
 import { day, type GameState, type WorldEvent } from './state.ts';
 
 /**
@@ -23,8 +23,9 @@ export function challengeGame(map: MapDef, c: Challenge, seed: number): GameStat
     extraShips: c.extraShips,
     kontore: c.kontore,
     works: c.works,
+    // startYear setzt volle Jahre, startDay den Tag darin: Wasserstand, Eis, Preisbuch und Konkurrenz passen dazu
+    startDay: c.startDayOfYear,
   });
-  if (c.startDayOfYear) shiftStart(state, c.startDayOfYear);
   if (c.shipLimit !== undefined) state.shipLimit = c.shipLimit;
   for (const e of c.events ?? []) addFixedEvents(state, map, e);
   for (const x of c.stock ?? []) {
@@ -37,23 +38,12 @@ export function challengeGame(map: MapDef, c: Challenge, seed: number): GameStat
   return state;
 }
 
-/** Spielbeginn auf einen Tag im Jahr verschieben (0 = erster Frühlingstag) */
-function shiftStart(state: GameState, doy: number): void {
-  const skip = (doy - dayOfYear(day(state)) + 120) % 120;
-  if (!skip) return;
-  const hours = skip * 24;
-  state.hour += hours;
-  state.ice = isIce(day(state));
-  // die Konkurrenz legt zur selben Zeit ab wie sonst auch
-  for (const r of state.rivals) for (const s of r.ships) s.idleUntil += hours;
-}
-
 /** Feste Ereignisse der Herausforderung: laufen ab Spielbeginn so viele Tage */
 function addFixedEvents(state: GameState, map: MapDef, e: ChallengeEvent): void {
   const from = day(state);
   const base = (): WorldEvent => ({ id: state.nextId++, kind: e.kind, from, until: from + e.days - 1, value: e.value });
   if (e.kind === 'zoll' || e.kind === 'bruecke') {
-    const segs = e.seg === 'alle' ? map.segments.map((s) => s.id) : [e.seg!];
+    const segs = e.seg === 'alle' ? effectiveSegments(state, map).map((s) => s.id) : [e.seg!];
     for (const seg of segs) state.events.push({ ...base(), seg });
     return;
   }

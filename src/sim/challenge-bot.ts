@@ -150,7 +150,7 @@ function handleShip(state: GameState, map: MapDef, goals: Goal[], open: boolean[
   if (t && t.score > 0) {
     buy(state, ship.id, t.good, t.amount);
     // zu tief für die Fahrt oder zu wenig Geld für Zoll und Kohle: Ladung verringern
-    while (cargoLoad(ship) > 0 && !depart(state, map, ship.id, t.to)) sell(state, ship.id, t.good, 5);
+    while (cargoLoad(ship) > 0 && !depart(state, map, ship.id, t.to)) if (!sell(state, ship.id, t.good, 5).ok) break;
     if (!ship.port) return;
   }
   // nichts Lohnendes hier: leer dorthin fahren, wo das beste Geschäft wartet
@@ -180,7 +180,7 @@ function handleRaft(state: GameState, map: MapDef, goals: Goal[], open: boolean[
   if (t && t.score > 0) buy(state, ship.id, t.good, t.amount);
   const dest = t?.to ?? farthestDownstream(state, map, ship);
   if (dest) {
-    while (cargoLoad(ship) > 0 && !depart(state, map, ship.id, dest)) sell(state, ship.id, t!.good, 5);
+    while (cargoLoad(ship) > 0 && !depart(state, map, ship.id, dest)) if (!t || !sell(state, ship.id, t.good, 5).ok) break;
     if (!ship.port || depart(state, map, ship.id, dest)) rafts.add(ship.id);
   }
 }
@@ -388,3 +388,27 @@ export function playChallenge(map: MapDef, c: Challenge, seed: number, opts: Bot
     money: Math.round(state.money),
   };
 }
+
+/** Spielweise, mit der der Bot die jeweilige Herausforderung schafft (für den Machbarkeitstest) */
+export const BOT_STRATEGY: Record<string, BotOptions> = {
+  'h-floss': { maxShips: 2 },
+  'h-auftrag': { maxShips: 2 },
+  'h-kontor': { maxShips: 2 },
+  'h-dampf': { build: true, maxShips: 3 },
+  'h-rang': { build: true, maxShips: 3 },
+  'h-duerre': { maxShips: 2 },
+  'h-monopol': { maxShips: 6 },
+  'h-einschiff': { build: true },
+  'h-pest': { maxShips: 2 },
+  'h-eisgang': { maxShips: 2 },
+  'h-zollkrieg': { maxShips: 2 },
+  'h-flut': { maxShips: 3 },
+  'h-bruecke': { maxShips: 2 },
+  'h-kohle': { maxShips: 2 },
+  'h-motor': { build: true, maxShips: 3 },
+  'h-frisch': { maxShips: 2 },
+  'h-aufschwung': { build: true, maxShips: 3 },
+  'h-pfennig': { maxShips: 2 },
+  'h-kapitaene': { build: true, maxShips: 3 },
+  'h-erzbach': { maxShips: 2 },
+};

@@ -34,7 +34,7 @@ export const CHALLENGES: Challenge[] = [
     id: 'h-floss',
     number: 1,
     title: 'Flößer',
-    intro: ['Ein Sommer lang nur mit der Strömung: Baue in den Holzstädten Flöße, lass sie talwärts treiben und verkaufe Ladung und Stämme am Ziel.'],
+    intro: ['Einen Frühling lang nur mit der Strömung: Baue in den Holzstädten Flöße, lass sie talwärts treiben und verkaufe Ladung und Stämme am Ziel.'],
     outro: 'Fünf Flöße, kein einziges Pferd. Die Flößer in Oberau ziehen den Hut.',
     startTown: 'oberau',
     money: 300,
@@ -103,7 +103,7 @@ export const CHALLENGES: Challenge[] = [
     deadlineDays: 120,
     goals: [
       { type: 'ships', count: 3, text: 'Besitze drei Schiffe' },
-      { type: 'worth', amount: 10000, text: 'Komme auf ein Vermögen von 10 000 Talern' },
+      { type: 'worth', amount: 8000, text: 'Komme auf ein Vermögen von 8000 Talern' },
     ],
   },
   {
@@ -131,10 +131,10 @@ export const CHALLENGES: Challenge[] = [
     number: 6,
     title: 'Trockener Sommer',
     intro: [
-      'Seit dem Frühjahr kein Tropfen. Der Weißstrom liegt einen halben Meter unter dem üblichen Sommerpegel, auf dem Erzbach kratzen die Kiele über den Grund.',
+      'Seit dem Frühjahr kein Tropfen, und es bleibt trocken bis ins nächste Jahr. Der Weißstrom liegt einen halben Meter unter dem üblichen Pegel, auf dem Erzbach kratzen die Kiele über den Grund.',
       'Nur flache Boote kommen noch durch: Plätten und Flöße. Fahr leicht beladen und bring das Korn talwärts, bevor die Bäcker in Niedermünd aufgeben.',
     ],
-    outro: 'Als der Regen endlich kommt, ist dein Name in jeder Backstube am Fluss bekannt.',
+    outro: 'Der Fluss ist noch immer flach, aber dein Name ist in jeder Backstube am Fluss bekannt.',
     startTown: 'muehlheim',
     money: 900,
     startShip: 'plaette',
@@ -156,7 +156,7 @@ export const CHALLENGES: Challenge[] = [
     title: 'Holzmonopol',
     intro: [
       'Haus Steinbrück hält seit Generationen die Holzroute vom Oberlauf zur Mündung. Noch.',
-      'Verkaufe mehr Holz als alle anderen Häuser zusammen, bis dir sieben von zehn Tonnen am Fluss gehören. Gezählt wird jede verkaufte Tonne, deine und die der Konkurrenz.',
+      'Verkaufe mehr Holz als alle anderen Häuser zusammen, bis dir die Hälfte des Holzhandels am Fluss gehört. Gezählt wird jede verkaufte Tonne, deine und die der Konkurrenz.',
     ],
     outro: 'Wer im Tal ein Brett braucht, fragt jetzt zuerst bei dir.',
     startTown: 'oberau',
@@ -167,7 +167,7 @@ export const CHALLENGES: Challenge[] = [
     epoch: 1,
     startYear: 2,
     deadlineDays: 120,
-    goals: [{ type: 'share', good: 'holz', percent: 70, min: 1000, text: 'Verkaufe 70 % allen Holzes am Fluss, mindestens 1000 t' }],
+    goals: [{ type: 'share', good: 'holz', percent: 50, min: 800, text: 'Verkaufe mindestens die Hälfte des Holzes, das am Fluss gehandelt wird, und wenigstens 800 t' }],
   },
   {
     id: 'h-einschiff',
@@ -195,9 +195,9 @@ export const CHALLENGES: Challenge[] = [
     title: 'Das Fieber',
     intro: [
       'In Kesselbrück, Mühlheim und Altenfurt geht ein Fieber um. Die Apotheken sind leer, und Arznei gibt es nur unten in Niedermünd.',
-      'Bring Arznei flussauf, so schnell es geht. Wer klug ist, sorgt auch für Glas und Salz, damit die Apotheken nachkommen.',
+      'Bring Arznei flussauf, so schnell es geht. Wer klug ist, sorgt auch für Glas und Salz, damit die Apotheke in Niedermünd nachkommt oder eine eigene entsteht.',
     ],
-    outro: 'Das Fieber klingt ab. In drei Städten zünden sie Kerzen für den Schiffer, der die Arznei brachte.',
+    outro: 'Das Fieber klingt ab. In drei Städten zünden sie Kerzen für den Schiffer an, der die Arznei brachte.',
     startTown: 'niedermuend',
     money: 3000,
     startShip: 'treidelkahn',
@@ -207,14 +207,14 @@ export const CHALLENGES: Challenge[] = [
     startYear: 2,
     startDayOfYear: 70,
     kontore: ['niedermuend'],
-    deadlineDays: 25,
+    deadlineDays: 30,
     // die Apotheken im ganzen Tal sind leergekauft
     stock: [{ town: 'alle', good: 'arznei', amount: 0 }],
-    events: [{ kind: 'seuche', days: 25, towns: ['kesselbrueck', 'muehlheim', 'altenfurt'] }],
+    events: [{ kind: 'seuche', days: 30, towns: ['kesselbrueck', 'muehlheim', 'altenfurt'] }],
     goals: [
-      { type: 'deliver', town: 'kesselbrueck', good: 'arznei', amount: 40, text: 'Bring 40 t Arznei nach Kesselbrück' },
-      { type: 'deliver', town: 'muehlheim', good: 'arznei', amount: 40, text: 'Bring 40 t Arznei nach Mühlheim' },
-      { type: 'deliver', town: 'altenfurt', good: 'arznei', amount: 40, text: 'Bring 40 t Arznei nach Altenfurt' },
+      { type: 'deliver', town: 'kesselbrueck', good: 'arznei', amount: 30, text: 'Bring 30 t Arznei nach Kesselbrück' },
+      { type: 'deliver', town: 'muehlheim', good: 'arznei', amount: 30, text: 'Bring 30 t Arznei nach Mühlheim' },
+      { type: 'deliver', town: 'altenfurt', good: 'arznei', amount: 30, text: 'Bring 30 t Arznei nach Altenfurt' },
     ],
   },
   {
@@ -222,7 +222,7 @@ export const CHALLENGES: Challenge[] = [
     number: 10,
     title: 'Eisgang',
     intro: [
-      'Ende des Herbstes. In wenigen Tagen frieren der Erzbach und der Oberlauf zu, und mit ihnen die Wege zu Kohle und Holz.',
+      'Winteranfang. In wenigen Tagen frieren der Erzbach und der Oberlauf zu, und mit ihnen die Wege zu Kohle und Holz.',
       'Niedermünd wird beides brauchen. Hol, was du vor dem Frost noch holen kannst, oder warte auf das Tauwetter und die Schmelzflut danach.',
     ],
     outro: 'Die Öfen in Niedermünd sind nicht ausgegangen. Der Winter gehört dir.',
@@ -266,7 +266,7 @@ export const CHALLENGES: Challenge[] = [
     number: 12,
     title: 'Jahrhundertflut',
     intro: [
-      'Die Schneeschmelze kommt mit Macht. Der Fluss steht so hoch wie seit hundert Jahren nicht, die Strömung reißt alles talwärts.',
+      'Die Schneeschmelze kommt mit Macht. Der Fluss steigt über Wochen höher als in jedem Frühjahr, die Strömung reißt alles talwärts.',
       'Oberau und Kesselbrück warten auf Korn und Brot von unten. Bergwärts wird jede Meile zur Plackerei, und unter der alten Brücke passen bald nur noch flache Boote durch. Zum Glück liegt neben deinem Kahn eine Plätte.',
     ],
     outro: 'Gegen den Strom, durch die Flut, und die Vorräte sind angekommen.',
@@ -282,8 +282,8 @@ export const CHALLENGES: Challenge[] = [
     deadlineDays: 28,
     events: [{ kind: 'hochwasser', days: 28, value: 0.6 }],
     goals: [
-      { type: 'deliver', town: 'oberau', good: 'getreide', amount: 350, text: 'Bring 350 t Getreide nach Oberau' },
-      { type: 'deliver', town: 'kesselbrueck', good: 'brot', amount: 140, text: 'Bring 140 t Brot nach Kesselbrück' },
+      { type: 'deliver', town: 'oberau', good: 'getreide', amount: 250, text: 'Bring 250 t Getreide nach Oberau' },
+      { type: 'deliver', town: 'kesselbrueck', good: 'brot', amount: 120, text: 'Bring 120 t Brot nach Kesselbrück' },
     ],
   },
   {
@@ -302,7 +302,7 @@ export const CHALLENGES: Challenge[] = [
     rivals: true,
     epoch: 1,
     startYear: 2,
-    deadlineDays: 100,
+    deadlineDays: 120,
     events: [{ kind: 'bruecke', days: 45, seg: 'kessel-muehl' }],
     goals: [{ type: 'project', id: 'bruecke-kessel', text: 'Lass die neue Brücke in Kesselbrück bauen' }],
   },
@@ -324,8 +324,8 @@ export const CHALLENGES: Challenge[] = [
     startYear: 6,
     deadlineDays: 70,
     goals: [
-      { type: 'deliver', town: 'niedermuend', good: 'kohle', amount: 300, text: 'Bring 300 t Kohle nach Niedermünd' },
-      { type: 'deliver', town: 'kesselbrueck', good: 'kohle', amount: 200, text: 'Bring 200 t Kohle nach Kesselbrück' },
+      { type: 'deliver', town: 'niedermuend', good: 'kohle', amount: 200, text: 'Bring 200 t Kohle nach Niedermünd' },
+      { type: 'deliver', town: 'kesselbrueck', good: 'kohle', amount: 120, text: 'Bring 120 t Kohle nach Kesselbrück' },
     ],
   },
   {
@@ -341,10 +341,10 @@ export const CHALLENGES: Challenge[] = [
     rivals: true,
     epoch: 3,
     startYear: 10,
-    deadlineDays: 180,
+    deadlineDays: 200,
     goals: [
       { type: 'ships', count: 2, shipType: 'motorschiff', text: 'Besitze zwei Motorschiffe' },
-      { type: 'worth', amount: 15000, text: 'Komme auf ein Vermögen von 15 000 Talern' },
+      { type: 'worth', amount: 12000, text: 'Komme auf ein Vermögen von 12 000 Talern' },
     ],
   },
   {
@@ -365,9 +365,9 @@ export const CHALLENGES: Challenge[] = [
     startYear: 10,
     deadlineDays: 40,
     goals: [
-      { type: 'deliver', town: 'muehlheim', good: 'fisch', amount: 400, text: 'Bring 400 t Fisch nach Mühlheim' },
-      { type: 'deliver', town: 'altenfurt', good: 'fisch', amount: 400, text: 'Bring 400 t Fisch nach Altenfurt' },
-      { type: 'deliver', town: 'oberau', good: 'brot', amount: 150, text: 'Bring 150 t Brot nach Oberau' },
+      { type: 'deliver', town: 'muehlheim', good: 'fisch', amount: 150, text: 'Bring 150 t Fisch nach Mühlheim' },
+      { type: 'deliver', town: 'altenfurt', good: 'fisch', amount: 150, text: 'Bring 150 t Fisch nach Altenfurt' },
+      { type: 'deliver', town: 'altenfurt', good: 'brot', amount: 80, text: 'Bring 80 t Brot nach Altenfurt' },
     ],
   },
   {
@@ -396,7 +396,7 @@ export const CHALLENGES: Challenge[] = [
     id: 'h-pfennig',
     number: 18,
     title: 'Mit leeren Taschen',
-    intro: ['Eine Plätte, 80 Taler und ein Sommer. Jeder Taler muss zweimal arbeiten.'],
+    intro: ['Eine Plätte, 80 Taler und fünf Jahreszeiten. Jeder Taler muss zweimal arbeiten.'],
     outro: 'Aus 80 Talern wurden 3000. Der alte Kahnführer in Oberau nickt anerkennend.',
     startTown: 'oberau',
     money: 80,
@@ -427,7 +427,7 @@ export const CHALLENGES: Challenge[] = [
     deadlineDays: 120,
     goals: [
       { type: 'routes', count: 3, text: 'Lass drei Schiffe Routen allein fahren' },
-      { type: 'worth', amount: 8000, text: 'Komme auf ein Vermögen von 8000 Talern' },
+      { type: 'worth', amount: 6500, text: 'Komme auf ein Vermögen von 6500 Talern' },
     ],
   },
   {
@@ -435,7 +435,7 @@ export const CHALLENGES: Challenge[] = [
     number: 20,
     title: 'Hinauf nach Erzgrube',
     intro: [
-      'Hochsommer. Der Erzbach ist zum Rinnsal geworden, und die Bergleute in Erzgrube haben kaum noch Brot.',
+      'Der Sommer beginnt. Der Erzbach fällt von Tag zu Tag, und die Bergleute in Erzgrube haben kaum noch Brot.',
       'Nur flache Boote kommen hinauf. Versorge die Grube, bevor die Knappen in den Streik treten.',
     ],
     outro: 'Die Grube fördert weiter. Und die Knappen wissen, wem sie das verdanken.',
@@ -447,7 +447,7 @@ export const CHALLENGES: Challenge[] = [
     epoch: 1,
     startYear: 2,
     startDayOfYear: 35,
-    deadlineDays: 50,
+    deadlineDays: 60,
     goals: [
       { type: 'deliver', town: 'erzgrube', good: 'brot', amount: 80, text: 'Bring 80 t Brot nach Erzgrube' },
       { type: 'deliver', town: 'erzgrube', good: 'bier', amount: 50, text: 'Bring 50 t Bier nach Erzgrube' },
