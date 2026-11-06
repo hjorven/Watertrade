@@ -150,6 +150,23 @@ describe('Grundberührung', () => {
     expect(clean).toBeGreaterThan(0);
   });
 
+  it('fällt der Pegel unterwegs unter den Tiefgang, droht die höchste Gefahr statt keiner', () => {
+    let grounded = 0;
+    for (let i = 0; i < 20; i++) {
+      const s = newGame(VALLEY, { startTown: 'kesselbrueck', rivals: false });
+      s.hour = 24 * 40 + 8 + i;
+      s.waterLevel = waterLevel(s.hour / 24 + 1);
+      const ship = s.ships[0];
+      // bei der Abfahrt reichlich Wasser, beim Einfahren in den zweiten Abschnitt zu wenig
+      const deep = tightMap(s, ship, 'muehl-alten', 0.5);
+      expect(depart(s, deep, ship.id, 'altenfurt')).not.toBeNull();
+      const shallow = tightMap(s, ship, 'muehl-alten', -0.05);
+      const events = advance(s, shallow, 60);
+      if (events.some((e) => e.type === 'news' && /auf Grund/.test(e.item.text))) grounded++;
+    }
+    expect(grounded).toBeGreaterThan(5);
+  });
+
   it('der Stillstand verlängert die Fahrt um einen halben Tag', () => {
     const s = newGame(VALLEY, { startTown: 'kesselbrueck', rivals: false });
     s.hour = 24 * 40 + 8;

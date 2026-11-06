@@ -105,7 +105,8 @@ export function sail(
  * Der Fahrtplan rechnet in Stunden voller Fahrt; nachts kommt das Schiff langsamer voran.
  */
 export function realHours(state: GameState, type: string, v: Voyage, startHour = state.hour): number {
-  const wait = Math.max(0, v.aground ?? 0);
+  // ein schon gewürfelter Stillstand zählt mit
+  const wait = Math.max(0, v.aground ?? 0) + (v.groundAt !== undefined ? AGROUND_HOURS : 0);
   return wait + sail(state, type, v, startHour + wait, Infinity).real;
 }
 
@@ -143,12 +144,14 @@ export interface GroundingRisk {
 export function groundingRisks(state: GameState, map: MapDef, ship: Ship, v: Voyage): GroundingRisk[] {
   const segs = effectiveSegments(state, map);
   const draft = effectiveDraft(ship);
+  const lit = litSegments(state);
   const out: GroundingRisk[] = [];
   for (const leg of v.legs) {
     const seg = segs.find((s) => s.id === leg.seg);
     if (!seg) continue;
     const clearance = segmentDepth(seg, state.waterLevel) - draft;
-    const chance = groundingChance(clearance, { careful: ship.captain?.trait === 'vorsichtig' });
+    const dark = isNight(state.hour) && !lit.includes(leg.seg);
+    const chance = groundingChance(clearance, { careful: ship.captain?.trait === 'vorsichtig', dark });
     if (chance > 0) out.push({ seg: leg.seg, clearance, chance });
   }
   return out;
@@ -174,18 +177,22 @@ export function dice(...parts: number[]): number {
  * Bei Einfahrt in einen neuen Abschnitt würfeln, ob das Schiff dort auf Grund läuft.
  * Wenn ja, sitzt es etwa in der Mitte des Abschnitts fest.
  */
-function rollLeg(state: GameState, map: MapDef, ship: Ship, v: Voyage, index: number, legStart: number): void {
+function rollLeg(state: GameState, map: MapDef, ship: Ship, v: Voyage, index: number, legStart: number, elapsed: number, hour: number): void {
+  const fresh = v.checked === undefined;
   v.checked = index;
+  // ältere Spielstände: das Schiff ist schon mitten im Abschnitt, dort nicht nachträglich würfeln
+  if (fresh && elapsed > legStart + 1e-6) return;
   const leg = v.legs[index];
   const seg = effectiveSegments(state, map).find((s) => s.id === leg.seg);
   if (!seg) return;
-  const clearance = segmentDepth(seg, state.waterLevel) - effectiveDraft(ship);
-  const dark = isNight(state.hour) && !litSegments(state).includes(leg.seg);
+  // ist der Pegel seit der Abfahrt unter den Tiefgang gefallen, wird es so knapp wie möglich
+  const clearance = Math.max(0, segmentDepth(seg, state.waterLevel) - effectiveDraft(ship));
+  const dark = isNight(hour) && !litSegments(state).includes(leg.seg);
   const chance = groundingChance(clearance, { careful: ship.captain?.trait === 'vorsichtig', dark });
   if (chance <= 0) return;
-  if (dice(ship.id, Math.floor(state.hour), index) >= chance) return;
-  const where = 0.3 + 0.4 * dice(ship.id, index, Math.floor(state.hour) + 7);
-  v.groundAt = legStart + leg.hours * where;
+  if (dice(ship.id, Math.floor(hour), index) >= chance) return;
+  const where = 0.3 + 0.4 * dice(ship.id, index, Math.floor(hour) + 7);
+  v.groundAt = Math.max(elapsed, legStart + leg.hours * where);
 }
 
 /** Grundberührung anwenden: Verschleiß, Stillstand, Meldung */
@@ -233,7 +240,7 @@ export function voyageProgress(state: GameState, map: MapDef, ship: Ship, hours:
     let legStart = 0;
     while (index < v.legs.length - 1 && elapsed >= legStart + v.legs[index].hours - 1e-9) legStart += v.legs[index++].hours;
     const legEnd = legStart + v.legs[index].hours;
-    if (v.checked === undefined || v.checked < index) rollLeg(state, map, ship, v, index, legStart);
+    if (v.checked === undefined || v.checked < index) rollLeg(state, map, ship, v, index, legStart, elapsed, hour);
     const stopAt = v.groundAt !== undefined ? Math.min(v.groundAt, legEnd) : legEnd;
     const r = sail(state, ship.type, { ...v, elapsed }, hour, left, stopAt, lit);
     progress += r.progress;
