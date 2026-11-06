@@ -230,7 +230,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
       const fuel = (cls.fuel ?? 0) * dt;
       state.money -= fuel;
       state.fuelToday += fuel;
-      tripSail(ship, dt, fuel);
+      tripSail(ship, dt, fuel, v.elapsed - before);
       if (cls.coal) ship.bunker = Math.max(0, (ship.bunker ?? 0) - cls.coal * dt);
       // ohne Kühlraum verdirbt Fisch, Brot und Bier unterwegs
       if (!cls.fresh) {
