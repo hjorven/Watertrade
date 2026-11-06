@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CHAPTERS } from '../data/campaign.ts';
 import { VALLEY } from '../data/maps/valley.ts';
-import { newGame, upgradeState, type GameState } from './game.ts';
+import { advance, newGame, upgradeState, type GameState } from './game.ts';
 import { goalProgress } from './goals.ts';
 import { playerWorth } from './house.ts';
 import {
@@ -305,6 +305,13 @@ describe('Anteile und Übernahme', () => {
 });
 
 describe('Einbindung', () => {
+  it('in Epoche 3 verfallen die Häuser nicht von allein (Brennstoff im Geschäft eingerechnet)', () => {
+    const s = newGame(VALLEY, { startTown: 'altenfurt', money: 15000, rivals: true, epoch: 3, startYear: 11, seed: 1 });
+    const before = s.rivals.map(rivalWorth);
+    advance(s, VALLEY, 24 * 180);
+    s.rivals.forEach((r, i) => expect(rivalWorth(r)).toBeGreaterThan(before[i] * 0.6));
+  }, 30000);
+
   it('die Diplomatie zieht nicht am Zufallsstrom', () => {
     const s = game();
     sold(s, 'niedermuend', 'moebel', 500);
