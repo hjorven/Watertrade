@@ -1,0 +1,122 @@
+import * as THREE from 'three';
+import type { TownDef } from '../data/maps/m1.ts';
+import { Landscape, mulberry32, RIVER_HALF_WIDTH } from './landscape.ts';
+
+export interface TownPlacement {
+  def: TownDef;
+  center: THREE.Vector3;
+  mooring: THREE.Vector3; // Liegeplatz des Kahns am Steg
+  radius: number;
+}
+
+export function placeTown(land: Landscape, def: TownDef): TownPlacement {
+  const p = land.curve.getPointAt(def.riverT);
+  const n = land.normalAt(def.riverT).multiplyScalar(def.side);
+  const radius = 5 + def.houses * 0.42;
+  const center = p.clone().addScaledVector(n, RIVER_HALF_WIDTH + 3 + radius);
+  const mooring = p.clone().addScaledVector(n, RIVER_HALF_WIDTH - 1.3);
+  return { def, center, mooring, radius };
+}
+
+const WALLS = [0xf1e6cf, 0xe8d6b3, 0xd9c09a, 0xefe0c4, 0xc9a77f];
+const ROOFS = [0xa8432f, 0x8f3a2a, 0xb5573a, 0x6f4a3a];
+
+export function buildTown(land: Landscape, place: TownPlacement, seed: number): THREE.Group {
+  const g = new THREE.Group();
+  const rand = mulberry32(seed);
+  const dummy = new THREE.Object3D();
+  const color = new THREE.Color();
+
+  const wallGeo = new THREE.BoxGeometry(1, 1, 1);
+  wallGeo.translate(0, 0.5, 0);
+  const roofGeo = new THREE.ConeGeometry(0.75, 0.8, 4);
+  roofGeo.rotateY(Math.PI / 4);
+  roofGeo.translate(0, 0.4, 0);
+
+  const count = place.def.houses;
+  const walls = new THREE.InstancedMesh(
+    wallGeo,
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }),
+    count,
+  );
+  const roofs = new THREE.InstancedMesh(
+    roofGeo,
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, flatShading: true }),
+    count,
+  );
+
+  const placed: THREE.Vector3[] = [];
+  let i = 0;
+  let tries = 0;
+  while (i < count && tries < 2000) {
+    tries++;
+    const a = rand() * Math.PI * 2;
+    const r = Math.sqrt(rand()) * place.radius;
+    const x = place.center.x + Math.cos(a) * r;
+    const z = place.center.z + Math.sin(a) * r;
+    if (land.riverDistance(x, z).d < RIVER_HALF_WIDTH + 2.2) continue;
+    if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < 2.9)) continue;
+    const y = land.heightAt(x, z);
+    const w = 1.9 + rand() * 0.9;
+    const d = 1.6 + rand() * 0.7;
+    const h = 1.4 + rand() * 1.2;
+    const rot = Math.atan2(place.center.z - z, place.center.x - x) + (rand() - 0.5) * 0.3;
+
+    dummy.position.set(x, y - 0.2, z);
+    dummy.rotation.set(0, rot, 0);
+    dummy.scale.set(w, h + 0.2, d);
+    dummy.updateMatrix();
+    walls.setMatrixAt(i, dummy.matrix);
+    walls.setColorAt(i, color.setHex(WALLS[Math.floor(rand() * WALLS.length)]));
+
+    dummy.position.set(x, y + h, z);
+    dummy.scale.set(w * 1.05, 1.4 + rand() * 0.6, d * 1.05);
+    dummy.updateMatrix();
+    roofs.setMatrixAt(i, dummy.matrix);
+    roofs.setColorAt(i, color.setHex(ROOFS[Math.floor(rand() * ROOFS.length)]));
+
+    placed.push(new THREE.Vector3(x, y, z));
+    i++;
+  }
+  walls.count = i;
+  roofs.count = i;
+  walls.castShadow = roofs.castShadow = true;
+  walls.receiveShadow = true;
+  g.add(walls, roofs);
+
+  // Steg vom Ufer zum Liegeplatz
+  const shore = place.mooring.clone().lerp(place.center, 0.25);
+  const len = place.mooring.distanceTo(shore) + 1.5;
+  const pier = new THREE.Mesh(
+    new THREE.BoxGeometry(1.1, 0.15, len),
+    new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 0.9 }),
+  );
+  pier.position.copy(place.mooring).lerp(shore, 0.5);
+  pier.position.y = 0.35;
+  pier.lookAt(shore.x, 0.35, shore.z);
+  pier.castShadow = pier.receiveShadow = true;
+  g.add(pier);
+
+  // Pfähle
+  const postGeo = new THREE.CylinderGeometry(0.08, 0.08, 1.6, 5);
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x5b3b22 });
+  for (let k = 0; k < 3; k++) {
+    const p = place.mooring.clone().lerp(shore, k / 3);
+    const post = new THREE.Mesh(postGeo, postMat);
+    post.position.set(p.x, -0.3, p.z);
+    g.add(post);
+  }
+
+  // Lagerhaus am Steg
+  const shed = new THREE.Mesh(
+    new THREE.BoxGeometry(2.6, 1.4, 1.8),
+    new THREE.MeshStandardMaterial({ color: 0x7d5a3a, roughness: 0.9 }),
+  );
+  const shedPos = shore.clone().lerp(place.center, 0.15);
+  shed.position.set(shedPos.x, land.heightAt(shedPos.x, shedPos.z) + 0.6, shedPos.z);
+  shed.lookAt(place.mooring.x, shed.position.y, place.mooring.z);
+  shed.castShadow = true;
+  g.add(shed);
+
+  return g;
+}
