@@ -17,7 +17,9 @@ export type Goal =
   | { type: 'project'; id: string; text: string }
   | { type: 'routes'; count: number; text: string }
   | { type: 'allTowns'; level: number; text: string }
-  | { type: 'takeover'; count: number; text: string };
+  | { type: 'takeover'; count: number; text: string }
+  /** Bauabschnitte des Kanals fertig (Karte mit Kanal) */
+  | { type: 'canalStage'; stage: number; text: string };
 
 export interface Chapter {
   id: string;
@@ -41,6 +43,8 @@ export interface Chapter {
   works?: string[];
   /** Dieses KI-Haus startet geschwächt und verkauft Anteile (Übernahme als Kapitelziel) */
   weakHouse?: string;
+  /** Karten-id (siehe data/maps), ohne Angabe das Tal */
+  map?: string;
 }
 
 export const CHAPTERS: Chapter[] = [

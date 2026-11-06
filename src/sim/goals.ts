@@ -1,5 +1,6 @@
 import type { Goal } from '../data/campaign.ts';
 import type { GameState } from './game.ts';
+import { canalStagesDone } from './canal.ts';
 import { playerWorth } from './house.ts';
 import { rivalWorth } from './rivals.ts';
 import { steamDays } from './steam.ts';
@@ -50,6 +51,8 @@ export function goalProgress(state: GameState, goal: Goal): { value: number; tar
     }
     case 'takeover':
       return { value: (state.housesGone ?? []).filter((h) => h.how === 'uebernahme').length, target: goal.count };
+    case 'canalStage':
+      return { value: canalStagesDone(state), target: goal.stage };
   }
 }
 

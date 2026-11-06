@@ -15,6 +15,7 @@ import { addNews, day, shipClass, withStream, type GameEvent, type GameState, ty
 import { tickWorks } from './works.ts';
 import { observe, tickMarketInfo, tripArrive, tripSail } from './market-info.ts';
 import { closeSteamDay, logSteam } from './steam.ts';
+import { tickCanal } from './canal.ts';
 import { initialMarket, initialTown, tickTown } from './towns.ts';
 import { movingHours, wearFactor, wearRate } from './voyage.ts';
 import { voyageProgress } from './navigation.ts';
@@ -235,6 +236,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     pushNews(events, tickCaptains(state, map), true);
     pushNews(events, tickWorks(state, map), true);
     pushNews(events, tickWaterworks(state, map), false);
+    pushNews(events, tickCanal(state, map), true);
     if (state.epochAuto) {
       const e = dueEpoch(state);
       if (e > state.epoch) {
