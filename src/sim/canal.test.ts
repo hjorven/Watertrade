@@ -236,6 +236,10 @@ describe('Kanalbau', () => {
     if (r.ok) expect(r.voyage.legs.some((l) => l.seg === 'scheitelkanal')).toBe(true);
     expect(startCanalStage(s, MAP).ok).toBe(false);
     expect(canalAccepts(s, SCHEITELKANAL, 'brot')).toBe(0);
+    // das Spiel läuft mit dem Kanal-Eintrag in state.works weiter (kein Eintrag in PROJECTS)
+    s.rivalsActive = true;
+    advance(s, MAP, 24 * 60);
+    expect(s.works.filter((w) => w.id === CANAL_ID).length).toBe(1);
   });
 
   it('Fortschritt wächst stetig über die Abschnitte', () => {
