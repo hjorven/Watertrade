@@ -46,6 +46,13 @@ export function goalProgress(state: GameState, goal: Goal): { value: number; tar
       return { value: state.works.some((w) => w.id === goal.id && w.done) ? 1 : 0, target: 1 };
     case 'routes':
       return { value: state.ships.filter((s) => s.route?.active && s.captain).length, target: goal.count };
+    case 'share': {
+      // eigene Tonnen gegen die nötige Menge: so viel, dass der eigene Anteil mindestens percent erreicht
+      const mine = soldBy(state, goal.good);
+      const theirs = state.stats.rivalSold?.[goal.good] ?? 0;
+      const p = Math.min(99, Math.max(1, goal.percent)) / 100;
+      return { value: mine, target: Math.max(goal.min, Math.ceil((theirs * p) / (1 - p))) };
+    }
     case 'allTowns': {
       const n = Object.values(state.towns).filter((t) => levelOf(t.population) >= goal.level).length;
       return { value: n, target: Object.keys(state.towns).length };
@@ -55,6 +62,11 @@ export function goalProgress(state: GameState, goal: Goal): { value: number; tar
     case 'canalStage':
       return { value: canalStagesDone(state), target: goal.stage };
   }
+}
+
+/** Vom Spieler insgesamt verkaufte Tonnen einer Ware, über alle Städte */
+export function soldBy(state: GameState, good: string): number {
+  return Object.values(state.stats.delivered).reduce((sum, d) => sum + (d[good] ?? 0), 0);
 }
 
 export function goalDone(state: GameState, goal: Goal): boolean {

@@ -1,10 +1,35 @@
+import type { WorldEventKind } from '../sim/state.ts';
 import type { Chapter } from './campaign.ts';
+
+/** Ein festes Ereignis, das mit der Herausforderung beginnt und `days` Tage dauert */
+export interface ChallengeEvent {
+  kind: WorldEventKind;
+  days: number;
+  /** Zoll oder Sperre: ein Abschnitt oder 'alle' */
+  seg?: string;
+  /** Fieber oder Stadtfest: betroffene Städte */
+  towns?: string[];
+  /** Pegel in m (Dürre negativ, Hochwasser positiv) oder Zoll in Talern */
+  value?: number;
+}
 
 /**
  * Herausforderungen: kurze Szenarien mit Zeitlimit. Sie haben dieselbe Form wie Kampagnenkapitel,
- * zählen aber nicht zur Geschichte und sind von Anfang an offen.
+ * zählen aber nicht zur Geschichte und sind von Anfang an offen. Sonderregeln baut sim/challenge.ts ein.
+ * Jede ist mit dem Prüf-Bot (sim/challenge-bot.ts) auf Machbarkeit getestet.
  */
-export const CHALLENGES: Chapter[] = [
+export interface Challenge extends Chapter {
+  /** Spielbeginn an diesem Tag des Jahres (0 = erster Frühlingstag, 90 = erster Wintertag) */
+  startDayOfYear?: number;
+  /** Höchstzahl eigener Schiffe */
+  shipLimit?: number;
+  /** feste Ereignisse ab Spielbeginn */
+  events?: ChallengeEvent[];
+  /** Marktbestände zu Spielbeginn abweichend setzen, z. B. leere Apotheken */
+  stock?: { town: string | 'alle'; good: string; amount: number }[];
+}
+
+export const CHALLENGES: Challenge[] = [
   {
     id: 'h-floss',
     number: 1,
@@ -17,7 +42,7 @@ export const CHALLENGES: Chapter[] = [
     allowedShips: ['floss', 'treidelkahn'],
     rivals: false,
     epoch: 1,
-    deadlineDays: 120,
+    deadlineDays: 30,
     goals: [
       { type: 'rafts', count: 5, text: 'Zerlege fünf Flöße am Ziel' },
       { type: 'money', amount: 3000, text: 'Besitze 3000 Taler' },
@@ -36,7 +61,7 @@ export const CHALLENGES: Chapter[] = [
     rivals: true,
     epoch: 1,
     startYear: 2,
-    deadlineDays: 240,
+    deadlineDays: 120,
     goals: [
       { type: 'contracts', count: 6, text: 'Erfülle sechs Aufträge' },
       { type: 'worth', amount: 12000, text: 'Komme auf ein Vermögen von 12 000 Talern' },
@@ -55,7 +80,7 @@ export const CHALLENGES: Chapter[] = [
     rivals: true,
     epoch: 1,
     startYear: 3,
-    deadlineDays: 240,
+    deadlineDays: 100,
     goals: [
       { type: 'kontore', count: 4, text: 'Unterhalte vier Kontore' },
       { type: 'betriebe', count: 4, text: 'Lass vier eigene Betriebe arbeiten' },
@@ -78,7 +103,7 @@ export const CHALLENGES: Chapter[] = [
     deadlineDays: 120,
     goals: [
       { type: 'ships', count: 3, text: 'Besitze drei Schiffe' },
-      { type: 'worth', amount: 30000, text: 'Komme auf ein Vermögen von 30 000 Talern' },
+      { type: 'worth', amount: 15000, text: 'Komme auf ein Vermögen von 15 000 Talern' },
     ],
   },
   {
@@ -95,7 +120,339 @@ export const CHALLENGES: Chapter[] = [
     epoch: 1,
     startYear: 2,
     deadlineDays: 240,
-    goals: [{ type: 'rank', place: 1, text: 'Sei das reichste Handelshaus am Fluss' }],
+    // ein Vermögensziel dazu, sonst reicht ein einziger teurer Einkauf am ersten Tag für Platz 1
+    goals: [
+      { type: 'worth', amount: 15000, text: 'Komme auf ein Vermögen von 15 000 Talern' },
+      { type: 'rank', place: 1, text: 'Sei das reichste Handelshaus am Fluss' },
+    ],
+  },
+  {
+    id: 'h-duerre',
+    number: 6,
+    title: 'Trockener Sommer',
+    intro: [
+      'Seit dem Frühjahr kein Tropfen. Der Weißstrom liegt einen halben Meter unter dem üblichen Sommerpegel, auf dem Erzbach kratzen die Kiele über den Grund.',
+      'Nur flache Boote kommen noch durch: Plätten und Flöße. Fahr leicht beladen und bring das Korn talwärts, bevor die Bäcker in Niedermünd aufgeben.',
+    ],
+    outro: 'Als der Regen endlich kommt, ist dein Name in jeder Backstube am Fluss bekannt.',
+    startTown: 'muehlheim',
+    money: 900,
+    startShip: 'plaette',
+    allowedShips: ['floss', 'plaette'],
+    rivals: true,
+    epoch: 1,
+    startYear: 2,
+    startDayOfYear: 30,
+    deadlineDays: 120,
+    events: [{ kind: 'duerre', days: 120, value: -0.5 }],
+    goals: [
+      { type: 'deliver', town: 'niedermuend', good: 'getreide', amount: 150, text: 'Bring 150 t Getreide nach Niedermünd' },
+      { type: 'money', amount: 4000, text: 'Besitze 4000 Taler' },
+    ],
+  },
+  {
+    id: 'h-monopol',
+    number: 7,
+    title: 'Holzmonopol',
+    intro: [
+      'Haus Steinbrück hält seit Generationen die Holzroute vom Oberlauf zur Mündung. Noch.',
+      'Verkaufe mehr Holz als alle anderen Häuser zusammen, bis dir sieben von zehn Tonnen am Fluss gehören. Gezählt wird jede verkaufte Tonne, deine und die der Konkurrenz.',
+    ],
+    outro: 'Wer im Tal ein Brett braucht, fragt jetzt zuerst bei dir.',
+    startTown: 'oberau',
+    money: 2000,
+    startShip: 'treidelkahn',
+    allowedShips: [],
+    rivals: true,
+    epoch: 1,
+    startYear: 2,
+    deadlineDays: 120,
+    goals: [{ type: 'share', good: 'holz', percent: 70, min: 1500, text: 'Verkaufe 70 % allen Holzes am Fluss, mindestens 1500 t' }],
+  },
+  {
+    id: 'h-einschiff',
+    number: 8,
+    title: 'Ein Schiff',
+    intro: [
+      'Ein Kahn, ein Kapitän, kein zweites Schiff. Die Werften nehmen deine Bestellungen nicht an.',
+      'Kontore, Betriebe und Ausbauten sind erlaubt. Aber alles, was auf dem Wasser bewegt wird, bewegt dieses eine Schiff.',
+    ],
+    outro: 'Zwanzigtausend Taler, verdient mit einem einzigen Rumpf. Am Kai erzählt man sich die Geschichte noch lange.',
+    startTown: 'muehlheim',
+    money: 1000,
+    startShip: 'treidelkahn',
+    allowedShips: [],
+    rivals: true,
+    epoch: 1,
+    startYear: 2,
+    shipLimit: 1,
+    deadlineDays: 300,
+    goals: [{ type: 'money', amount: 20000, text: 'Besitze 20 000 Taler' }],
+  },
+  {
+    id: 'h-pest',
+    number: 9,
+    title: 'Das Fieber',
+    intro: [
+      'In Kesselbrück, Mühlheim und Altenfurt geht ein Fieber um. Die Apotheken sind leer, und Arznei gibt es nur unten in Niedermünd.',
+      'Bring Arznei flussauf, so schnell es geht. Wer klug ist, sorgt auch für Glas und Salz, damit die Apotheken nachkommen.',
+    ],
+    outro: 'Das Fieber klingt ab. In drei Städten zünden sie Kerzen für den Schiffer, der die Arznei brachte.',
+    startTown: 'niedermuend',
+    money: 3000,
+    startShip: 'treidelkahn',
+    allowedShips: [],
+    rivals: true,
+    epoch: 1,
+    startYear: 2,
+    startDayOfYear: 70,
+    kontore: ['niedermuend'],
+    deadlineDays: 25,
+    // die Apotheken im ganzen Tal sind leergekauft
+    stock: [{ town: 'alle', good: 'arznei', amount: 0 }],
+    events: [{ kind: 'seuche', days: 25, towns: ['kesselbrueck', 'muehlheim', 'altenfurt'] }],
+    goals: [
+      { type: 'deliver', town: 'kesselbrueck', good: 'arznei', amount: 40, text: 'Bring 40 t Arznei nach Kesselbrück' },
+      { type: 'deliver', town: 'muehlheim', good: 'arznei', amount: 40, text: 'Bring 40 t Arznei nach Mühlheim' },
+      { type: 'deliver', town: 'altenfurt', good: 'arznei', amount: 40, text: 'Bring 40 t Arznei nach Altenfurt' },
+    ],
+  },
+  {
+    id: 'h-eisgang',
+    number: 10,
+    title: 'Eisgang',
+    intro: [
+      'Ende des Herbstes. In wenigen Tagen frieren der Erzbach und der Oberlauf zu, und mit ihnen die Wege zu Kohle und Holz.',
+      'Niedermünd wird beides brauchen. Hol, was du vor dem Frost noch holen kannst, oder warte auf das Tauwetter und die Schmelzflut danach.',
+    ],
+    outro: 'Die Öfen in Niedermünd sind nicht ausgegangen. Der Winter gehört dir.',
+    startTown: 'altenfurt',
+    money: 1500,
+    startShip: 'treidelkahn',
+    allowedShips: [],
+    rivals: true,
+    epoch: 1,
+    startYear: 3,
+    startDayOfYear: 90,
+    kontore: ['altenfurt'],
+    deadlineDays: 60,
+    goals: [
+      { type: 'deliver', town: 'niedermuend', good: 'kohle', amount: 100, text: 'Bring 100 t Kohle nach Niedermünd' },
+      { type: 'deliver', town: 'niedermuend', good: 'holz', amount: 100, text: 'Bring 100 t Holz nach Niedermünd' },
+    ],
+  },
+  {
+    id: 'h-zollkrieg',
+    number: 11,
+    title: 'Zollkrieg',
+    intro: [
+      'Die Uferherren haben sich zerstritten. Auf jedem Abschnitt des Flusses steht jetzt ein Zollhaus, und jedes will 30 Taler.',
+      'Kurze Fahrten werden teuer, volle Laderäume lohnen sich. Ein Kapitän, der Schleichwege kennt, ist Gold wert.',
+    ],
+    outro: 'Die Zollhäuser stehen noch, aber an dir haben sie nicht viel verdient.',
+    startTown: 'muehlheim',
+    money: 1500,
+    startShip: 'treidelkahn',
+    allowedShips: [],
+    rivals: true,
+    epoch: 1,
+    startYear: 2,
+    deadlineDays: 180,
+    events: [{ kind: 'zoll', days: 180, seg: 'alle', value: 30 }],
+    goals: [{ type: 'worth', amount: 10000, text: 'Komme auf ein Vermögen von 10 000 Talern' }],
+  },
+  {
+    id: 'h-flut',
+    number: 12,
+    title: 'Jahrhundertflut',
+    intro: [
+      'Die Schneeschmelze kommt mit Macht. Der Fluss steht so hoch wie seit hundert Jahren nicht, die Strömung reißt alles talwärts.',
+      'Oberau und Kesselbrück warten auf Korn und Brot von unten. Bergwärts wird jede Meile zur Plackerei, und unter der alten Brücke passen bald nur noch flache Boote durch. Zum Glück liegt neben deinem Kahn eine Plätte.',
+    ],
+    outro: 'Gegen den Strom, durch die Flut, und die Vorräte sind angekommen.',
+    startTown: 'muehlheim',
+    money: 2000,
+    startShip: 'treidelkahn',
+    extraShips: ['plaette'],
+    allowedShips: [],
+    rivals: true,
+    epoch: 1,
+    startYear: 2,
+    startDayOfYear: 0,
+    deadlineDays: 28,
+    events: [{ kind: 'hochwasser', days: 28, value: 0.6 }],
+    goals: [
+      { type: 'deliver', town: 'oberau', good: 'getreide', amount: 350, text: 'Bring 350 t Getreide nach Oberau' },
+      { type: 'deliver', town: 'kesselbrueck', good: 'brot', amount: 140, text: 'Bring 140 t Brot nach Kesselbrück' },
+    ],
+  },
+  {
+    id: 'h-bruecke',
+    number: 13,
+    title: 'Die neue Brücke',
+    intro: [
+      'Die alte Steinbrücke in Kesselbrück ist eingestürzt. Trümmer sperren den Fluss, und der Rat sucht jemanden, der den Neubau bezahlt.',
+      'Verdiene das Geld für eine hohe Bogenbrücke und lass sie bauen, bevor der Rat sich anders entscheidet.',
+    ],
+    outro: 'Die neue Brücke trägt deinen Namen, und darunter passen jetzt auch Segel.',
+    startTown: 'muehlheim',
+    money: 1500,
+    startShip: 'treidelkahn',
+    allowedShips: [],
+    rivals: true,
+    epoch: 1,
+    startYear: 2,
+    deadlineDays: 100,
+    events: [{ kind: 'bruecke', days: 45, seg: 'kessel-muehl' }],
+    goals: [{ type: 'project', id: 'bruecke-kessel', text: 'Lass die neue Brücke in Kesselbrück bauen' }],
+  },
+  {
+    id: 'h-kohle',
+    number: 14,
+    title: 'Schwarzes Gold',
+    intro: [
+      'Die Dampfer fressen Kohle, die Schmieden auch. Wer die Kohle aus den Bergen an den Strom bringt, hält das Tal am Laufen.',
+      'Der Erzbach ist seicht, und dein Raddampfer verbrennt selbst, was er fährt. Rechne gut.',
+    ],
+    outro: 'Rauch über Kesselbrück, Rauch über Niedermünd. Und alles läuft mit deiner Kohle.',
+    startTown: 'altenfurt',
+    money: 2500,
+    startShip: 'raddampfer',
+    allowedShips: [],
+    rivals: true,
+    epoch: 2,
+    startYear: 6,
+    deadlineDays: 120,
+    goals: [
+      { type: 'deliver', town: 'niedermuend', good: 'kohle', amount: 200, text: 'Bring 200 t Kohle nach Niedermünd' },
+      { type: 'deliver', town: 'kesselbrueck', good: 'kohle', amount: 150, text: 'Bring 150 t Kohle nach Kesselbrück' },
+    ],
+  },
+  {
+    id: 'h-motor',
+    number: 15,
+    title: 'Diesel und Stahl',
+    intro: ['Neue Zeiten: Motorschiffe fahren gegen jede Strömung, aber Diesel kostet bei jeder Fahrstunde. Bau eine moderne Flotte auf.'],
+    outro: 'Drei Motorschiffe unter deiner Flagge, und keines von ihnen braucht ein Pferd.',
+    startTown: 'niedermuend',
+    money: 3000,
+    startShip: 'motorschiff',
+    allowedShips: [],
+    rivals: true,
+    epoch: 3,
+    startYear: 10,
+    deadlineDays: 180,
+    goals: [
+      { type: 'ships', count: 3, shipType: 'motorschiff', text: 'Besitze drei Motorschiffe' },
+      { type: 'worth', amount: 25000, text: 'Komme auf ein Vermögen von 25 000 Talern' },
+    ],
+  },
+  {
+    id: 'h-frisch',
+    number: 16,
+    title: 'Frischer Fang',
+    intro: [
+      'Fisch aus Weidenhof und Niedermünd, Brot aus den Backstuben: alles verdirbt, wenn es zu lange auf dem Wasser ist.',
+      'Ein Kühlschiff hält die Ware frisch. Versorge die Städte am mittleren Strom, bevor der Fang verdirbt.',
+    ],
+    outro: 'Der Fisch in Mühlheim schmeckt, als käme er direkt aus dem Netz.',
+    startTown: 'niedermuend',
+    money: 2000,
+    startShip: 'kuehlschiff',
+    allowedShips: [],
+    rivals: true,
+    epoch: 3,
+    startYear: 10,
+    deadlineDays: 40,
+    goals: [
+      { type: 'deliver', town: 'muehlheim', good: 'fisch', amount: 400, text: 'Bring 400 t Fisch nach Mühlheim' },
+      { type: 'deliver', town: 'altenfurt', good: 'fisch', amount: 400, text: 'Bring 400 t Fisch nach Altenfurt' },
+      { type: 'deliver', town: 'oberau', good: 'brot', amount: 150, text: 'Bring 150 t Brot nach Oberau' },
+    ],
+  },
+  {
+    id: 'h-aufschwung',
+    number: 17,
+    title: 'Aufschwung',
+    intro: [
+      'Mühlheim ist knapp davor, ein Marktflecken zu werden. Es fehlt nur eines: Ware, lange und reichlich.',
+      'Eine Stadt wächst nur, solange sie satt ist. Halte die Lager voll, aber wirf dein Geld nicht zum Fenster hinaus: Am Ende soll auch dein Haus gewachsen sein.',
+    ],
+    outro: 'Neue Häuser am Ufer, ein Markt auf dem Platz. Mühlheim ist kein Dorf mehr, und dein Haus ist mitgewachsen.',
+    startTown: 'muehlheim',
+    money: 4000,
+    startShip: 'treidelkahn',
+    allowedShips: [],
+    rivals: true,
+    epoch: 1,
+    startYear: 2,
+    deadlineDays: 100,
+    goals: [
+      { type: 'townLevel', town: 'muehlheim', level: 1, text: 'Lass Mühlheim zum Marktflecken wachsen' },
+      { type: 'worth', amount: 10000, text: 'Komme auf ein Vermögen von 10 000 Talern' },
+    ],
+  },
+  {
+    id: 'h-pfennig',
+    number: 18,
+    title: 'Mit leeren Taschen',
+    intro: ['Eine Plätte, 80 Taler und ein Sommer. Jeder Taler muss zweimal arbeiten.'],
+    outro: 'Aus 80 Talern wurden 3000. Der alte Kahnführer in Oberau nickt anerkennend.',
+    startTown: 'oberau',
+    money: 80,
+    startShip: 'plaette',
+    allowedShips: [],
+    rivals: true,
+    epoch: 1,
+    startYear: 2,
+    deadlineDays: 150,
+    goals: [{ type: 'money', amount: 3000, text: 'Besitze 3000 Taler' }],
+  },
+  {
+    id: 'h-kapitaene',
+    number: 19,
+    title: 'Fahrplan',
+    intro: [
+      'Ein Handelshaus, das nur fährt, wenn der Herr an Bord ist, bleibt klein.',
+      'Stell Kapitäne ein und gib ihnen feste Routen. Drei Schiffe sollen allein fahren.',
+    ],
+    outro: 'Drei Schiffe, drei Fahrpläne, und du sitzt im Kontor und liest die Abrechnungen.',
+    startTown: 'muehlheim',
+    money: 3000,
+    startShip: 'treidelkahn',
+    allowedShips: [],
+    rivals: true,
+    epoch: 1,
+    startYear: 3,
+    deadlineDays: 120,
+    goals: [
+      { type: 'routes', count: 3, text: 'Lass drei Schiffe Routen allein fahren' },
+      { type: 'worth', amount: 8000, text: 'Komme auf ein Vermögen von 8000 Talern' },
+    ],
+  },
+  {
+    id: 'h-erzbach',
+    number: 20,
+    title: 'Hinauf nach Erzgrube',
+    intro: [
+      'Hochsommer. Der Erzbach ist zum Rinnsal geworden, und die Bergleute in Erzgrube haben kaum noch Brot.',
+      'Nur flache Boote kommen hinauf. Versorge die Grube, bevor die Knappen in den Streik treten.',
+    ],
+    outro: 'Die Grube fördert weiter. Und die Knappen wissen, wem sie das verdanken.',
+    startTown: 'altenfurt',
+    money: 1500,
+    startShip: 'plaette',
+    allowedShips: [],
+    rivals: true,
+    epoch: 1,
+    startYear: 2,
+    startDayOfYear: 35,
+    deadlineDays: 50,
+    goals: [
+      { type: 'deliver', town: 'erzgrube', good: 'brot', amount: 80, text: 'Bring 80 t Brot nach Erzgrube' },
+      { type: 'deliver', town: 'erzgrube', good: 'bier', amount: 50, text: 'Bring 50 t Bier nach Erzgrube' },
+      { type: 'deliver', town: 'erzgrube', good: 'werkzeug', amount: 25, text: 'Bring 25 t Werkzeug nach Erzgrube' },
+    ],
   },
 ];
 

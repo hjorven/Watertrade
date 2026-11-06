@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { CHALLENGES, DAILY_DAYS, DAILY_TOWNS, dailySetup } from '../data/challenges.ts';
 import { VALLEY } from '../data/maps/valley.ts';
 import { ACHIEVEMENTS, newAchievements } from './achievements.ts';
+import { challengeGame } from './challenge.ts';
 import { advance, newGame } from './game.ts';
 import { goalDone } from './goals.ts';
 import { deserialize, serialize, SAVE_VERSION } from './save.ts';
@@ -9,18 +10,9 @@ import { deserialize, serialize, SAVE_VERSION } from './save.ts';
 describe('Herausforderungen', () => {
   it('starten mit Zeitlimit und noch offenen Zielen', () => {
     for (const c of CHALLENGES) {
-      const s = newGame(VALLEY, {
-        startTown: c.startTown,
-        money: c.money,
-        startShip: c.startShip,
-        allowedShips: c.allowedShips,
-        rivals: c.rivals ?? false,
-        seed: 7,
-        epoch: c.epoch ?? 1,
-        startYear: c.startYear,
-      });
+      const s = challengeGame(VALLEY, c, 7);
       expect(c.deadlineDays, c.id).toBeGreaterThan(0);
-      expect(s.ships.length, c.id).toBe(1);
+      expect(s.ships.length, c.id).toBe(1 + (c.extraShips?.length ?? 0));
       expect(c.goals.some((g) => !goalDone(s, g)), c.id).toBe(true);
     }
   });
