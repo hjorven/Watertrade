@@ -16,10 +16,16 @@ import { startProject } from './works.ts';
 import { FUEL_DEALER_FACTOR, sailingHours, wearRate } from './voyage.ts';
 import { steamDays } from './steam.ts';
 import { capacityOf } from './state.ts';
+import { canalAccepts, canalDone, canalOf, deliverToCanal, startCanalStage, stageNeeds } from './canal.ts';
+import { NORTH_TOWN_IDS } from '../data/maps/zwei-taeler.ts';
+import { load } from './trade.ts';
 import { advance, buy, bunkerPlan, buyShip, cargoLoad, day, depart, dismantleRaft, kontorBuy, kontorSell, newGame, planVoyage, sell, shipClass, type GameState } from './game.ts';
 import { betriebeIn, buildBetrieb, buildingAllowed, buildKontor, dailyUpkeep, playerWorth, sellBetrieb } from './house.ts';
 import { rivalWorth } from './rivals.ts';
 import { netFlow } from './towns.ts';
+
+/** Städte hinter dem Waldrücken (Karte mit Kanal) */
+const NORTH = new Set(NORTH_TOWN_IDS);
 
 export interface BalanceReport {
   days: number;
@@ -184,6 +190,10 @@ export interface GrowthOptions {
   build?: boolean;
   /** Waren, die im Kontor bleiben (z. B. Kohle für die eigenen Dampfer) */
   keep?: string[];
+  /** Geld, das beim Bauen zusätzlich übrig bleiben soll (z. B. für den nächsten Kanalabschnitt) */
+  reserve?: number;
+  /** nur in diesen Städten neu bauen */
+  only?: (town: string) => boolean;
   seed?: number;
 }
 
@@ -221,10 +231,11 @@ function manageHouse(state: GameState, map: MapDef, opts: GrowthOptions): void {
   }
   if (!opts.build) return;
   // Rücklage: 15 Tage Löhne und Unterhalt, sonst geht der Bot in einer Flaute pleite
-  const reserve = Math.max(600, 15 * (dailyUpkeep(state) + state.betriebe.reduce((s, b) => s + BUILDINGS.find((x) => x.id === b.type)!.wage, 0)));
+  const reserve = Math.max(600, 15 * (dailyUpkeep(state) + state.betriebe.reduce((s, b) => s + BUILDINGS.find((x) => x.id === b.type)!.wage, 0))) + (opts.reserve ?? 0);
   // Kontor in der Stadt mit dem besten Betrieb, den man dort bauen kann
   let best: { town: string; type: BuildingType; days: number } | null = null;
   for (const t of map.towns) {
+    if (opts.only && !opts.only(t.id)) continue;
     const k = state.kontore[t.id];
     if (k && betriebeIn(state, t.id).length >= KONTOR_SLOTS[k.level]) continue;
     const market = state.markets[t.id];
@@ -486,10 +497,116 @@ export function runSteamChapter(map: MapDef, chapter: Chapter, maxDays: number, 
       manageHouse(state, map, { build: !lockStarted, keep: ['kohle'] });
       const m = state.markets.niedermuend.kohle;
       coalPrice.push(m ? price(GOOD_BY_ID.get('kohle')!.base, m.stock, m.target) : 0);
-      if ((globalThis as any).DBG && (d - startDay) % 25 === 0) console.log('D', d - startDay, Math.round(state.money), Math.round(playerWorth(state)), state.ships.map((s) => `${s.type}@${s.port ?? '~'}`).join(' '), state.stats.steamDays ?? 0, state.betriebe.map((b) => b.town + ':' + b.type).join(','));
       if (trackGoals(state, chapter, startDay, goalDays)) break;
     }
   }
   const doneOn = goalDays.every((d) => d !== null) ? Math.max(...(goalDays as number[])) : null;
   return { goalDays, doneOn, coalPrice };
+}
+
+/**
+ * Kapitel 5 wie ein Spieler, der den Kanal baut: Die Flotte handelt und baut lohnende Betriebe,
+ * ab genug Geld wird der nächste Abschnitt bezahlt. Fehlen der Baustelle Waren, holt das nächste
+ * freie Schiff sie dort, wo sie am billigsten sind, und liefert sie in einer Kanalstadt ab.
+ * Ist der Kanal offen, fährt ein Schiff Getreide nach Nordhafen.
+ */
+export function runCanalChapter(map: MapDef, chapter: Chapter, maxDays: number, seed = 1): ChapterRun & { stageDays: number[] } {
+  const state = newGame(map, {
+    startTown: chapter.startTown,
+    money: chapter.money,
+    startShip: chapter.startShip,
+    allowedShips: chapter.allowedShips,
+    rivals: chapter.rivals ?? false,
+    epoch: chapter.epoch,
+    startYear: chapter.startYear,
+    extraShips: chapter.extraShips,
+    kontore: chapter.kontore,
+    works: chapter.works,
+    seed,
+  });
+  const def = canalOf(map)!;
+  const site = def.sites[0];
+  const north = chapter.goals.find((g) => g.type === 'deliver');
+  const canalGoods = [...new Set(def.stages.flatMap((st) => Object.keys(st.goods)))];
+  // Werkzeug gibt es im Tal kaum zu kaufen: eigene Schmiede dort, wo Erz und Kohle billig sind
+  const smithy = map.towns.find((t) => buildingAllowed(map, t.id, 'schmiede') && state.markets[t.id].erz && state.markets[t.id].kohle && !NORTH.has(t.id));
+  const startDay = day(state);
+  const goalDays: (number | null)[] = chapter.goals.map(() => null);
+  const stageDays: number[] = [];
+  let lastDay = startDay;
+  while (day(state) - startDay < maxDays) {
+    const c = state.canal;
+    const next = def.stages[c?.stage ?? 0];
+    const open = canalDone(state);
+    if (next && !c?.active && state.money > next.cost + 6000) startCanalStage(state, map);
+    if (smithy && !open && (c?.stage ?? 0) >= 1 && betriebeIn(state, smithy.id).filter((b) => b.type === 'schmiede').length < 2 && state.money > 5000) {
+      if (!state.kontore[smithy.id]) buildKontor(state, smithy.id);
+      buildBetrieb(state, map, smithy.id, 'schmiede');
+    }
+    // mehr Schiffe verdienen mehr: bis fünf Treidelkähne und Dampfer, solange Geld übrig ist
+    const yard = state.ships.find((s) => s.port && map.towns.find((t) => t.id === s.port)?.shipyard.includes('treidelkahn'));
+    if (yard && state.ships.length < 5 && state.money > SHIPS.treidelkahn.price + 3000) buyShip(state, map, yard.port!, 'treidelkahn');
+    // was die Baustelle noch braucht, abzüglich dessen, was schon unterwegs ist
+    const needs = open ? {} : stageNeeds(state, def);
+    for (const s of state.ships) for (const [g, slot] of Object.entries(s.cargo)) if (needs[g]) needs[g] -= slot.amount;
+    for (const ship of state.ships) {
+      if (!ship.port) continue;
+      // Dampfer fahren nur Häfen mit Kohle an, sonst liegen sie dort fest
+      const coalOk = (town: string) => !shipClass(ship).coal || !!state.markets[town].kohle || (state.kontore[town]?.stock.kohle?.amount ?? 0) > 20;
+      if (def.sites.includes(ship.port)) for (const g of Object.keys(ship.cargo)) deliverToCanal(state, map, { ship: ship.id }, g, Infinity);
+      for (const good of Object.keys(ship.cargo)) sell(state, ship.id, good, Infinity);
+      if (ship.condition < 0.6 && hasYard(map, ship.port)) repair(state, map, ship.id);
+      if (c?.active) {
+        const want = Object.entries(needs).filter(([, n]) => n >= 1);
+        // erst aus dem eigenen Kontor, dann vom Markt
+        for (const [g, n] of want) {
+          const room = capacityOf(ship) - cargoLoad(ship);
+          if (state.kontore[ship.port]?.stock[g]) needs[g] -= load(state, ship.id, g, Math.min(Math.ceil(n), room)).amount;
+          const here = state.markets[ship.port][g];
+          const amount = Math.min(Math.ceil(needs[g]), capacityOf(ship) - cargoLoad(ship), Math.floor(here?.stock ?? 0) - 5);
+          if (here && amount > 0 && buyCost(GOOD_BY_ID.get(g)!.base, here, amount) < state.money - 1500) {
+            buy(state, ship.id, g, amount);
+            needs[g] -= amount;
+          }
+        }
+        if (cargoLoad(ship) > 0 && depart(state, map, ship.id, site)) continue;
+        for (const good of Object.keys(ship.cargo)) sell(state, ship.id, good, Infinity);
+        // sonst zum nächsten Ort mit einer fehlenden Ware (Markt oder eigenes Kontor), wenn noch keiner dorthin fährt
+        const has = (t: string, g: string) => (state.markets[t][g]?.stock ?? 0) > 20 || (state.kontore[t]?.stock[g]?.amount ?? 0) >= 5;
+        const source = map.towns
+          .filter((t) => t.id !== ship.port && coalOk(t.id) && want.some(([g]) => has(t.id, g)) && !state.ships.some((s) => s.voyage?.to === t.id))
+          .map((t) => ({ id: t.id, plan: planVoyage(state, map, ship.id, t.id) }))
+          .filter((x) => x.plan?.ok)
+          .sort((x, y) => (x.plan as { voyage: { hours: number } }).voyage.hours - (y.plan as { voyage: { hours: number } }).voyage.hours)[0];
+        if (source && state.money > 1500 && depart(state, map, ship.id, source.id)) continue;
+      }
+      // Kanal offen: Getreide aus dem Tal nach Nordhafen
+      if (open && north?.type === 'deliver' && (state.stats.delivered[north.town]?.[north.good] ?? 0) < north.amount && coalOk(north.town)) {
+        const g = state.markets[ship.port][north.good];
+        if (g && g.stock > 20) {
+          buy(state, ship.id, north.good, Math.min(capacityOf(ship), Math.floor(g.stock) - 5, north.amount));
+          if (cargoLoad(ship) > 0 && depart(state, map, ship.id, north.town)) continue;
+          for (const good of Object.keys(ship.cargo)) sell(state, ship.id, good, Infinity);
+        }
+      }
+      const t = bestTrade(state, map, ship.id, coalOk);
+      if (t && t.perHour > 0) {
+        buy(state, ship.id, t.good, t.amount);
+        while (cargoLoad(ship) > 0 && !depart(state, map, ship.id, t.to)) sell(state, ship.id, t.good, 5);
+      }
+    }
+    advance(state, map, 1);
+    const d = day(state);
+    if (d !== lastDay) {
+      lastDay = d;
+      while (stageDays.length < (state.canal?.stage ?? 0)) stageDays.push(d - startDay);
+      // vor dem Kanal baut der Bot nur im Tal, das er mit Schiffen erreicht
+      // im Kontor bleibt nur, was die Baustelle noch abnimmt; der Rest wird verkauft
+      const keep = open ? [] : canalGoods.filter((g) => canalAccepts(state, def, g) > Object.values(state.kontore).reduce((n, k) => n + (k.stock[g]?.amount ?? 0), 0));
+      manageHouse(state, map, { build: open, reserve: open ? 0 : 3000, keep, only: open ? undefined : (id) => !NORTH.has(id) });
+      if (trackGoals(state, chapter, startDay, goalDays)) break;
+    }
+  }
+  const doneOn = goalDays.every((d) => d !== null) ? Math.max(...(goalDays as number[])) : null;
+  return { goalDays, doneOn, stageDays };
 }

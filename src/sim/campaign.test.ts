@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { CHAPTERS } from '../data/campaign.ts';
 import { VALLEY } from '../data/maps/valley.ts';
 import { chapterOneHint } from '../ui/tutorial.ts';
-import { runChapterOne, runSteamChapter } from './balance.ts';
+import { runCanalChapter, runChapterOne, runSteamChapter } from './balance.ts';
+import { NORTH_TOWN_IDS, ZWEI_TAELER } from '../data/maps/zwei-taeler.ts';
+import { SCHEITELKANAL } from '../data/canal.ts';
 import { addShip, advance, buy, buyShip, depart, dismantleRaft, fillBunker, hoursToArrival, newGame, sell } from './game.ts';
 import { bunkerPlan, planVoyage, sailingHours } from './voyage.ts';
 import type { Voyage } from './state.ts';
@@ -181,6 +183,43 @@ const startK6 = () =>
     kontore: k6.kontore,
     works: k6.works,
   });
+
+describe('Kapitel 5: Kanal über den Rücken', () => {
+  const k5 = CHAPTERS.find((c) => c.id === 'k5')!;
+
+  it('spielt auf der Karte mit Kanal und endet mit der Einweihung', () => {
+    expect(k5.map).toBe(ZWEI_TAELER.id);
+    expect(ZWEI_TAELER.towns.some((t) => t.id === k5.startTown)).toBe(true);
+    expect(SCHEITELKANAL.sites).toContain(k5.startTown);
+    expect(k5.goals.map((g) => g.type)).toEqual(['canalStage', 'canalStage', 'project', 'deliver']);
+    expect(k5.goals.find((g) => g.type === 'project')).toMatchObject({ id: SCHEITELKANAL.id });
+    // das Startgeld reicht für die ersten beiden Abschnitte, nicht für den ganzen Kanal
+    const cost = SCHEITELKANAL.stages.reduce((n, st) => n + st.cost, 0);
+    expect(k5.money).toBeGreaterThan(SCHEITELKANAL.stages[0].cost + SCHEITELKANAL.stages[1].cost);
+    expect(k5.money).toBeLessThan(cost);
+  });
+
+  it('nach Nordhafen kommt man erst durch den Kanal', () => {
+    const north = k5.goals.find((g) => g.type === 'deliver')!;
+    expect(north.type === 'deliver' && NORTH_TOWN_IDS.includes(north.town)).toBe(true);
+    const s = newGame(ZWEI_TAELER, { startTown: k5.startTown, money: k5.money, startShip: 'treidelkahn', rivals: false, epoch: k5.epoch });
+    expect(planVoyage(s, ZWEI_TAELER, s.ships[0].id, 'nordhafen')?.ok ?? false).toBe(false);
+    s.works.push({ id: SCHEITELKANAL.id, started: 1, done: true, owner: 'spieler', fee: 'frei' });
+    expect(planVoyage(s, ZWEI_TAELER, s.ships[0].id, 'nordhafen')?.ok).toBe(true);
+  });
+
+  it('Bot: der Kanal ist im Median nach 300 bis 550 Tagen eingeweiht', () => {
+    const runs = [1, 2, 3, 4].map((seed) => runCanalChapter(ZWEI_TAELER, k5, 900, seed));
+    for (const r of runs) {
+      expect(r.doneOn).not.toBeNull();
+      // Abschnitte der Reihe nach, mindestens die Arbeitstage
+      expect(r.stageDays).toHaveLength(SCHEITELKANAL.stages.length);
+    }
+    const days = runs.map((r) => r.doneOn!);
+    expect(median(days)).toBeGreaterThanOrEqual(300);
+    expect(median(days)).toBeLessThan(550);
+  }, 120_000);
+});
 
 describe('Kapitel 6: Übernahme als Höhepunkt', () => {
   it('endet mit einer Übernahme statt nur mit Vermögenszielen', () => {
