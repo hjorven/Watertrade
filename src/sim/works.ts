@@ -1,5 +1,5 @@
 import type { MapDef, SegmentDef } from '../data/maps/valley.ts';
-import { PROJECT_BY_ID, PROJECTS, type ProjectDef } from '../data/projects.ts';
+import { PROJECT_BY_ID, projectOn, projectsOf, type ProjectDef } from '../data/projects.ts';
 import { addNews, day, fail, type GameState, type NewsItem, type TradeResult, type WorkPartner } from './state.ts';
 
 /** Abschnitte mit allen fertigen Wasserbauten */
@@ -17,7 +17,7 @@ export function effectiveSegments(state: GameState, map: MapDef): SegmentDef[] {
   const segs = map.segments.map((seg) => {
     const s: SegmentDef = { ...seg };
     for (const id of done) {
-      const p = PROJECT_BY_ID.get(id);
+      const p = projectOn(map, id);
       if (!p || p.seg !== seg.id) continue;
       if (p.effect.depth) s.baseDepth += p.effect.depth * (1 - (silt.get(id) ?? 0));
       if (p.effect.current) s.current = Math.max(0.3, s.current + p.effect.current);
@@ -35,8 +35,9 @@ export function projectState(state: GameState, id: string): 'offen' | 'bau' | 'f
   return !w ? 'offen' : w.done ? 'fertig' : 'bau';
 }
 
-export function availableProjects(state: GameState): ProjectDef[] {
-  return PROJECTS.filter((p) => p.epoch <= state.epoch);
+/** Wasserbauten, für die die Technik schon reicht; `map` für Karten mit eigener Liste */
+export function availableProjects(state: GameState, map?: MapDef): ProjectDef[] {
+  return projectsOf(map).filter((p) => p.epoch <= state.epoch);
 }
 
 /** Bauvorhaben beginnen. Mit Partner (Gemeinschaftsbau) zahlt der Spieler nur seinen Anteil. */
@@ -53,9 +54,9 @@ export function startProject(state: GameState, id: string, partner?: WorkPartner
   return { ok: true, message: `${p.name}: Die Arbeiten beginnen.`, amount: 0, taler: cost };
 }
 
-export function daysLeft(state: GameState, id: string): number {
+export function daysLeft(state: GameState, id: string, map?: MapDef): number {
   const w = state.works.find((x) => x.id === id);
-  const p = PROJECT_BY_ID.get(id);
+  const p = projectOn(map, id);
   if (!w || !p || w.done) return 0;
   return Math.max(0, w.started + p.days - day(state));
 }
@@ -65,7 +66,7 @@ export function tickWorks(state: GameState, map: MapDef): NewsItem[] {
   const out: NewsItem[] = [];
   for (const w of state.works) {
     if (w.done) continue;
-    const p = PROJECT_BY_ID.get(w.id);
+    const p = projectOn(map, w.id);
     if (!p || day(state) < w.started + p.days) continue;
     w.done = true;
     const seg = map.segments.find((s) => s.id === p.seg);
@@ -76,11 +77,11 @@ export function tickWorks(state: GameState, map: MapDef): NewsItem[] {
 }
 
 /** Anzahl fertiger Pegelstationen: eine kündigt Hochwasser und Dürre an, ab zwei mit genauem Tag und Pegel */
-export function gaugeCount(state: GameState): number {
-  return (state.works ?? []).filter((w) => w.done && PROJECT_BY_ID.get(w.id)?.effect.gauge).length;
+export function gaugeCount(state: GameState, map?: MapDef): number {
+  return (state.works ?? []).filter((w) => w.done && projectOn(map, w.id)?.effect.gauge).length;
 }
 
 /** Abschnitte mit fertigem Leuchtfeuer, für die Nachtfahrt */
-export function litSegments(state: GameState): string[] {
-  return (state.works ?? []).filter((w) => w.done && PROJECT_BY_ID.get(w.id)?.effect.light).map((w) => PROJECT_BY_ID.get(w.id)!.seg);
+export function litSegments(state: GameState, map?: MapDef): string[] {
+  return (state.works ?? []).filter((w) => w.done && projectOn(map, w.id)?.effect.light).map((w) => projectOn(map, w.id)!.seg);
 }

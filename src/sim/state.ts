@@ -345,6 +345,8 @@ export interface GameState {
   harbors?: Record<string, Harbor>;
   /** Gebühren und Unterhalt des Wasserbaus seit Mitternacht (+ Einnahmen, − Ausgaben) */
   worksToday?: { income: number; cost: number };
+  /** Karte des Spielstands; fehlt bei älteren Ständen und heißt dann: Tal der zwei Flüsse */
+  map?: { id: string; seed?: number };
 }
 
 export function shipClass(ship: { type: string }): ShipClass {

@@ -1,4 +1,5 @@
 import type { Segment } from '../../sim/river.ts';
+import type { ProjectDef } from '../projects.ts';
 
 export interface RiverDef {
   id: string;
@@ -32,6 +33,8 @@ export interface TownDef {
   consumes: Record<string, number>; // Tonnen pro Tag bei Zielbestand
   industries: Industry[];
   shipyard: string[]; // Schiffstypen, die hier gebaut werden
+  /** Baustil aus render/townstyles.ts, wenn er nicht der Stadt-Id entspricht (erzeugte Karten) */
+  style?: string;
 }
 
 /** Abschnitt mit Lage auf der Karte */
@@ -42,14 +45,24 @@ export interface SegmentDef extends Segment {
 }
 
 export interface MapDef {
+  /** Kennung für Spielstände: 'tal', 'zufall-<seed>' oder die Id einer weiteren Karte */
+  id?: string;
+  /** Startwert, aus dem eine Zufallskarte erzeugt wurde */
+  seed?: number;
   name: string;
   rivers: RiverDef[];
   towns: TownDef[];
   segments: SegmentDef[];
+  /** Wasserbauten dieser Karte; ohne Angabe gilt die Liste des Tals (data/projects.ts) */
+  projects?: ProjectDef[];
+  /** Starthafen im freien Spiel */
+  start?: string;
 }
 
 export const VALLEY: MapDef = {
+  id: 'tal',
   name: 'Das Tal der zwei Flüsse',
+  start: 'oberau',
   rivers: [
     {
       id: 'strom',

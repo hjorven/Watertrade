@@ -178,7 +178,7 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
   const g = new THREE.Group();
   const rand = mulberry32(seed);
   const def = place.def;
-  const style: TownStyle = TOWN_STYLES[def.id] ?? DEFAULT_STYLE;
+  const style: TownStyle = TOWN_STYLES[def.style ?? def.id] ?? DEFAULT_STYLE;
   const hw = land.halfWidth(def.river);
   const river0 = land.pointAt(def.river, def.riverT);
   const out = land.normalAt(def.river, def.riverT).multiplyScalar(def.side);

@@ -6,6 +6,10 @@ import { newAchievements, ACHIEVEMENTS } from './sim/achievements.ts';
 import { OnlineScreens } from './ui/online-screens.ts';
 import { GOOD_BY_ID, GOODS } from './data/goods.ts';
 import { VALLEY } from './data/maps/valley.ts';
+import { mapFor, mapIdOf, randomMap, randomMapResult } from './data/maps/index.ts';
+import { CHECK_DAYS } from './sim/mapcheck.ts';
+import { mapPreviewSvg } from './ui/mappreview.ts';
+import { projectsOf } from './data/projects.ts';
 import { Landscape } from './render/landscape.ts';
 import { Stage } from './render/scene.ts';
 import { ambient, getVolume, isMuted, mute, playSfx, setMusic, setVolume, unlockAudioOnGesture, type SfxName } from './audio/index.ts';
@@ -65,16 +69,33 @@ const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = '<div class="viewport"></div>';
 const viewport = app.querySelector<HTMLDivElement>('.viewport')!;
 
+// --- Karte ---
+// Die Welt wird einmal beim Laden aufgebaut. Startet ein Spiel auf einer anderen Karte (Zufallsfluss),
+// legt startGame den Spielstand in den sessionStorage und lädt die Seite neu; hier geht es dann weiter.
+const PENDING_KEY = 'flussreich.pending';
+const pending = takePending();
+const MAP = pending ? mapFor(pending.state) : VALLEY;
+
+function takePending(): SaveGame | null {
+  try {
+    const text = sessionStorage.getItem(PENDING_KEY);
+    sessionStorage.removeItem(PENDING_KEY);
+    return text ? deserialize(text) : null;
+  } catch {
+    return null;
+  }
+}
+
 // --- Welt (einmal aufgebaut, gilt für jedes Spiel auf dieser Karte) ---
 const stage = new Stage(viewport);
-const land = new Landscape(VALLEY.rivers);
-const towns = VALLEY.towns.map((def) => placeTown(land, def));
+const land = new Landscape(MAP.rivers);
+const towns = MAP.towns.map((def) => placeTown(land, def));
 land.build([
   ...towns.map((t) => ({ pos: t.center, radius: t.radius * 1.4, fields: !!t.def.fields })),
   // Bauplätze am Ufer frei von Bäumen halten
   ...towns.flatMap((t) => t.lots.map((l) => ({ pos: l.pos, radius: 0.5, fields: false }))),
 ]);
-land.buildIce(VALLEY.segments.filter((s) => s.freezes).map((s) => ({ river: s.river, from: s.fromT, to: s.toT })));
+land.buildIce(MAP.segments.filter((s) => s.freezes).map((s) => ({ river: s.river, from: s.fromT, to: s.toT })));
 stage.scene.add(land.group);
 const townViews = new Map<string, TownView>();
 const townLabels = new Map<string, HTMLDivElement>();
@@ -85,19 +106,19 @@ towns.forEach((t, i) => {
   townLabels.set(t.def.id, stage.addLabel(t.def.name, t.center.clone().setY(land.heightAt(t.center.x, t.center.z) + 6)));
 });
 const oldBridges = new Map<string, THREE.Object3D>();
-for (const seg of VALLEY.segments) {
+for (const seg of MAP.segments) {
   if (seg.bridgeHeight === undefined) continue;
   const b = buildBridge(land, seg);
   oldBridges.set(seg.id, b);
   stage.scene.add(b);
 }
-const waterWorks = new WaterWorks(stage.scene, land, VALLEY.segments, oldBridges);
+const waterWorks = new WaterWorks(stage.scene, land, MAP.segments, oldBridges, projectsOf(MAP));
 const estates = new Estates(stage.scene, towns);
 
 // Papierkarte: Flussläufe in Kartenkoordinaten (x nach rechts, z nach unten)
 function setupMapData(): void {
   const all: THREE.Vector3[] = [];
-  const rivers = VALLEY.rivers.map((r) => {
+  const rivers = MAP.rivers.map((r) => {
     const pts = land.curve(r.id).getSpacedPoints(80);
     all.push(...pts);
     return { pts, width: r.halfWidth * 0.9 };
@@ -113,7 +134,7 @@ function setupMapData(): void {
     rivers: rivers.map((r) => ({ path: 'M' + r.pts.map((p) => `${f(p.x)} ${f(p.z)}`).join(' L'), width: r.width })),
     towns: Object.fromEntries(towns.map((t) => [t.def.id, { x: t.mooring.x, y: t.mooring.z }])),
     segMid: Object.fromEntries(
-      VALLEY.segments.map((sg) => {
+      MAP.segments.map((sg) => {
         const p = land.pointAt(sg.river, (sg.fromT + sg.toT) / 2);
         return [sg.id, { x: p.x + 6, y: p.z + 2 }];
       }),
@@ -134,7 +155,7 @@ function setupMapData(): void {
   });
 }
 const placeOf = (id: string) => towns.find((t) => t.def.id === id)!;
-const segOf = (id: string) => VALLEY.segments.find((s) => s.id === id)!;
+const segOf = (id: string) => MAP.segments.find((s) => s.id === id)!;
 const townName = (id: string) => placeOf(id).def.name;
 
 // --- Einstellungen und Fortschritt ---
@@ -177,7 +198,7 @@ interface Session {
   dailyDay?: string;
 }
 
-let state: GameState = newGame(VALLEY, 'oberau');
+let state: GameState = newGame(MAP, MAP.start ?? MAP.towns[0].id);
 let session: Session = { mode: 'frei', completed: new Set(), finished: false };
 let selected = state.ships[0].id;
 let running = false; // läuft die Zeit
@@ -194,7 +215,7 @@ function feedback(r: TradeResult, ok: SfxName = 'klick'): void {
 
 const current = (): Ship | undefined => state.ships.find((s) => s.id === selected);
 
-const hud = new Hud(app, VALLEY, {
+const hud = new Hud(app, MAP, {
   select(id) {
     selected = id;
     follow = true;
@@ -212,8 +233,8 @@ const hud = new Hud(app, VALLEY, {
   depart(to) {
     const ship = current();
     if (ship?.route?.active) ship.route.active = false;
-    const problem = departProblem(state, VALLEY, selected, to);
-    if (problem || !depart(state, VALLEY, selected, to)) {
+    const problem = departProblem(state, MAP, selected, to);
+    if (problem || !depart(state, MAP, selected, to)) {
       hud.toast(problem ?? 'Diese Fahrt ist nicht möglich.', 'warn');
       sfx('fehler');
     } else sfx('ablegen');
@@ -221,14 +242,14 @@ const hud = new Hud(app, VALLEY, {
     refresh();
   },
   wait() {
-    handleEvents(advance(state, VALLEY, 24));
+    handleEvents(advance(state, MAP, 24));
     hud.toast('Ein Tag vergeht.');
     refresh();
   },
   buyShip(type) {
     const ship = current();
     if (!ship?.port) return;
-    const r = buyShip(state, VALLEY, ship.port, type);
+    const r = buyShip(state, MAP, ship.port, type);
     hud.toast(r.message, r.ok ? 'info' : 'warn');
     sfx(r.ok ? 'erfolg' : 'fehler');
     if (r.ship) selected = r.ship.id;
@@ -273,7 +294,7 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
       ok = 'erfolg';
       break;
     case 'buildBetrieb':
-      r = buildBetrieb(state, VALLEY, town, String(d.type));
+      r = buildBetrieb(state, MAP, town, String(d.type));
       ok = 'erfolg';
       break;
     case 'toggleBetrieb':
@@ -321,11 +342,11 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
       ok = 'kauf';
       break;
     case 'repair':
-      r = repair(state, VALLEY, selected);
+      r = repair(state, MAP, selected);
       ok = 'erfolg';
       break;
     case 'upgrade':
-      r = upgrade(state, VALLEY, selected, String(d.id));
+      r = upgrade(state, MAP, selected, String(d.id));
       ok = 'erfolg';
       break;
     case 'hire':
@@ -339,7 +360,7 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
       r = setCaptainWage(state, selected, n('wage'));
       break;
     case 'project':
-      r = startProjectWith(state, VALLEY, String(d.id), d.partner === 'stadt' || d.partner === 'haus' ? d.partner : undefined);
+      r = startProjectWith(state, MAP, String(d.id), d.partner === 'stadt' || d.partner === 'haus' ? d.partner : undefined);
       ok = 'glocke';
       break;
     case 'workFee':
@@ -353,7 +374,7 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
       ok = 'erfolg';
       break;
     case 'harbor':
-      r = buildHarbor(state, VALLEY, String(d.town), d.partner === 'stadt');
+      r = buildHarbor(state, MAP, String(d.town), d.partner === 'stadt');
       ok = 'glocke';
       break;
     case 'accept':
@@ -453,8 +474,19 @@ const menu = new Menu(
         { mode: 'kampagne', chapter: c, completed: new Set(), finished: false },
       );
     },
-    startFree() {
-      startGame(newGame(VALLEY, { startTown: 'oberau', seed: Date.now() % 100000 }), { mode: 'frei', completed: new Set(), finished: false });
+    startFree(seed) {
+      // ohne Startwert das Tal der zwei Flüsse, sonst eine Zufallskarte
+      const map = seed === null ? VALLEY : randomMap(seed);
+      startGame(newGame(map, { startTown: map.start ?? map.towns[0].id, seed: Date.now() % 100000 }), { mode: 'frei', completed: new Set(), finished: false });
+    },
+    mapPreview(seed) {
+      const r = randomMapResult(seed);
+      const bridges = r.map.segments.filter((x) => x.bridgeHeight !== undefined).length;
+      const facts = `${r.map.towns.length} Städte an ${r.map.rivers.length} Flüssen, ${bridges} ${bridges === 1 ? 'Brücke' : 'Brücken'}.`;
+      const test = r.report.ok
+        ? `Probefahrt: Ein Händler mit einem Treidelkahn hatte nach ${CHECK_DAYS} Tagen ${fmtNum(r.report.money ?? 0)} Taler.`
+        : 'Diese Karte hat die Probefahrt nicht ganz bestanden und kann schwer sein.';
+      return { svg: mapPreviewSvg(r.map), name: r.map.name, text: `${facts} ${test}` };
     },
     save(slot) {
       saveSlot(slot);
@@ -564,6 +596,10 @@ document.body.classList.add('no-game');
 const canSave = () => session.mode !== 'tagesmarkt' && session.mode !== 'herausforderung';
 
 function startGame(s: GameState, sess: Session): void {
+  if (mapIdOf(s) !== MAP.id) {
+    reloadWithMap(s, sess);
+    return;
+  }
   for (const view of [...views.values(), ...rivalViews.values()]) view.removeFrom(stage.scene);
   views.clear();
   rivalViews.clear();
@@ -582,6 +618,29 @@ function startGame(s: GameState, sess: Session): void {
   saveSlot('auto');
 }
 
+/** Spielstand auf einer anderen Karte: übergeben und die Seite mit der neuen Welt neu laden */
+function reloadWithMap(s: GameState, sess: Session): void {
+  const save: SaveGame = {
+    version: SAVE_VERSION,
+    savedAt: new Date().toISOString(),
+    mode: sess.mode,
+    chapter: sess.chapter?.id,
+    completedGoals: [...sess.completed],
+    startHour: sess.startHour ?? s.hour,
+    dailyDay: sess.dailyDay,
+    state: s,
+  };
+  try {
+    sessionStorage.setItem(PENDING_KEY, serialize(save));
+  } catch {
+    hud.toast('Diese Karte lässt sich nicht laden: Der Browser erlaubt keinen Sitzungsspeicher.', 'warn');
+    menu.showMain();
+    return;
+  }
+  menu.show('<div class="card-head">Neue Karte</div><h2>Der Fluss wird vermessen …</h2><p>Gleich geht es los.</p>');
+  location.reload();
+}
+
 /** Die Kampagne führt Reiter und Bücher nach und nach ein, alle anderen Modi zeigen alles */
 function featuresFor(sess: Session): HudFeatures {
   const n = sess.mode === 'kampagne' ? (sess.chapter?.number ?? 99) : 99;
@@ -593,10 +652,10 @@ function featuresFor(sess: Session): HudFeatures {
 /** Nächstgelegene erreichbare Stadt mit Bedarf an einer Ware */
 function buyerFor(ship: Ship, good: string): string | null {
   let best: { town: string; hours: number } | null = null;
-  for (const def of VALLEY.towns) {
+  for (const def of MAP.towns) {
     if (def.id === ship.port || !state.markets[def.id][good]) continue;
     if (netFlow(def, good, state.towns[def.id]) >= 0) continue;
-    const plan = planVoyage(state, VALLEY, ship.id, def.id);
+    const plan = planVoyage(state, MAP, ship.id, def.id);
     if (!plan?.ok) continue;
     if (!best || plan.voyage.hours < best.hours) best = { town: def.id, hours: plan.voyage.hours };
   }
@@ -605,7 +664,7 @@ function buyerFor(ship: Ship, good: string): string | null {
 
 /** Erster Handel: Überschussware hier, mit einem nahen Abnehmer */
 function bestFirstTrade(ship: Ship): { good: string; town: string } | null {
-  const here = VALLEY.towns.find((t) => t.id === ship.port);
+  const here = MAP.towns.find((t) => t.id === ship.port);
   if (!here) return null;
   for (const g of GOODS) {
     if (!state.markets[here.id][g.id] || netFlow(here, g.id, state.towns[here.id]) <= 0) continue;
@@ -691,7 +750,7 @@ function startSave(save: SaveGame): boolean {
   if (!save?.state || !Array.isArray(save.state.ships)) return false;
   const chapter = [...CHAPTERS, ...CHALLENGES].find((c) => c.id === save.chapter);
   const daysPlayed = save.startHour !== undefined ? (save.state.hour - save.startHour) / 24 : 0;
-  startGame(upgradeState(save.state, VALLEY), {
+  startGame(upgradeState(save.state, mapFor(save.state)), {
     mode: save.mode,
     chapter,
     completed: new Set(save.completedGoals),
@@ -937,7 +996,7 @@ function syncEstates(): void {
 }
 
 function syncTowns(): void {
-  for (const def of VALLEY.towns) {
+  for (const def of MAP.towns) {
     const t = state.towns[def.id];
     townViews.get(def.id)!.setPopulation(t.population);
     const label = townLabels.get(def.id)!;
@@ -1061,7 +1120,7 @@ function frame(): void {
   const dt = Math.min(0.1, timer.getDelta());
 
   if (inGame && running && !menu.open && timeScale > 0) {
-    handleEvents(advance(state, VALLEY, dt * HOURS_PER_SECOND * timeScale));
+    handleEvents(advance(state, MAP, dt * HOURS_PER_SECOND * timeScale));
     uiTick += dt;
     if (uiTick > 0.25) {
       uiTick = 0;
@@ -1117,7 +1176,7 @@ if (new URLSearchParams(location.search).has('debug')) {
   (window as unknown as Record<string, unknown>).flussreich = {
     state: () => state,
     skipDays(n: number) {
-      handleEvents(advance(state, VALLEY, n * 24));
+      handleEvents(advance(state, MAP, n * 24));
       refresh();
     },
     money(n: number) {
@@ -1128,5 +1187,5 @@ if (new URLSearchParams(location.search).has('debug')) {
 }
 
 refresh();
-menu.showMain();
+if (!pending || !startSave(pending)) menu.showMain();
 requestAnimationFrame(frame);

@@ -1827,3 +1827,34 @@ body.no-game .toasts {
 .tripbook .num {
   font-size: 15px;
 }
+
+/* --- Zufallsflüsse: Auswahl und Vorschau im freien Spiel --- */
+.map-preview {
+  display: block;
+  margin: 8px 0 4px;
+}
+
+.map-preview .m-label {
+  font-size: 7px;
+}
+
+.map-preview .m-bridge {
+  stroke: var(--ink);
+  stroke-width: 1.6;
+}
+
+.map-preview .m-start {
+  fill: var(--stamp);
+}
+
+.seed-form input {
+  width: 9ch;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 720px) {
+  /* die Vorschau im Menü passt sich der Kartenbreite an, statt seitlich zu rollen */
+  .paper-map.map-preview {
+    min-width: 0;
+  }
+}

@@ -15,7 +15,7 @@ import { observe, tickMarketInfo, tripArrive, tripSail } from './market-info.ts'
 import { initialMarket, initialTown, tickTown } from './towns.ts';
 import { movingHours, wearFactor, wearRate } from './voyage.ts';
 import { tickWaterworks } from './wasserbau.ts';
-import { PROJECT_BY_ID } from '../data/projects.ts';
+import { PROJECT_BY_ID, registerProjects } from '../data/projects.ts';
 
 export * from './state.ts';
 export * from './trade.ts';
@@ -88,6 +88,8 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
     works: (opts.works ?? []).map((id) => ({ id, started: 0, done: true })),
     fuelToday: 0,
   };
+  registerProjects(map);
+  if (map.id) state.map = map.seed === undefined ? { id: map.id } : { id: map.id, seed: map.seed };
   if (opts.startYear && opts.startYear > 1) {
     state.hour += (opts.startYear - 1) * YEAR_DAYS * 24;
     state.waterLevel = waterLevel(state.hour / 24 + 1);
@@ -108,6 +110,7 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
 
 /** Ältere Spielstände auf den aktuellen Aufbau bringen */
 export function upgradeState(state: GameState, map: MapDef): GameState {
+  registerProjects(map);
   const s = state as Partial<GameState> & GameState;
   s.stats.contracts ??= 0;
   s.kontore ??= {};

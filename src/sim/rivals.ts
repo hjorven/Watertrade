@@ -19,12 +19,22 @@ export const MAX_RIVAL_SHIPS = 3;
 export function initialRivals(state: GameState): RivalState[] {
   // In späteren Kapiteln sind die Häuser schon gewachsen
   const years = Math.max(0, Math.floor(state.hour / 24 / 120));
-  return RIVALS.map((def) => {
+  return RIVALS.map((def, i) => {
+    const home = homeOf(state, def.home, i);
     const r: RivalState = { id: def.id, money: Math.round(def.money * (1 + years * 1.5)), ships: [], kontore: [], profit: 0 };
-    for (const type of def.startShips) addRivalShip(state, r, preferredShip(type, state.epoch), def.home);
-    for (let i = 0; i < Math.min(2, Math.floor(years / 3)); i++) addRivalShip(state, r, preferredShip(def.preferredShip, state.epoch), def.home);
+    for (const type of def.startShips) addRivalShip(state, r, preferredShip(type, state.epoch), home);
+    for (let i = 0; i < Math.min(2, Math.floor(years / 3)); i++) addRivalShip(state, r, preferredShip(def.preferredShip, state.epoch), home);
     return r;
   });
+}
+
+/** Heimathafen eines Hauses; liegt er nicht auf dieser Karte (Zufallsflüsse), nimmt es eine der größten Städte */
+function homeOf(state: GameState, home: string, index: number): string {
+  if (state.towns[home]) return home;
+  const big = Object.entries(state.towns)
+    .sort((a, b) => b[1].population - a[1].population || a[0].localeCompare(b[0]))
+    .map(([id]) => id);
+  return big[index % Math.min(3, big.length)];
 }
 
 function addRivalShip(state: GameState, r: RivalState, type: string, port: string): RivalShip {
@@ -170,7 +180,7 @@ function decide(state: GameState, map: MapDef, r: RivalState, ship: RivalShip): 
   const def = RIVAL_BY_ID.get(r.id)!;
   if (rand(state) < 0.5) {
     const others = map.towns.filter((t) => t.id !== here);
-    const target = rand(state) < 0.4 ? def.home : others[Math.floor(rand(state) * others.length)].id;
+    const target = rand(state) < 0.4 ? homeOf(state, def.home, state.rivals.indexOf(r)) : others[Math.floor(rand(state) * others.length)].id;
     if (target !== here && sailTo(state, map, ship, target, r)) return;
   }
   ship.idleUntil = state.hour + 18 + Math.floor(rand(state) * 12);

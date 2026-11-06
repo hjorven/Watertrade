@@ -1,5 +1,6 @@
 import { CHAPTERS, type Chapter } from '../data/campaign.ts';
 import { CHALLENGES } from '../data/challenges.ts';
+import { MAX_SEED } from '../data/maps/random.ts';
 
 export interface SlotInfo {
   slot: string; // 'auto' | '1' | '2' | '3'
@@ -11,7 +12,10 @@ export interface SlotInfo {
 export interface MenuActions {
   continueGame(): void;
   startChapter(id: string): void;
-  startFree(): void;
+  /** Freies Spiel: null im Tal der zwei Flüsse, sonst auf der Zufallskarte zu diesem Startwert */
+  startFree(seed: number | null): void;
+  /** Vorschau einer Zufallskarte für das Menü (Papierkarte als SVG und eine Zeile zum Prüfergebnis) */
+  mapPreview(seed: number): { svg: string; name: string; text: string };
   save(slot: string): void;
   load(slot: string): void;
   setTiltShift(on: boolean): void;
@@ -48,6 +52,9 @@ export interface MenuInfo {
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+/** Zufälliger Startwert für eine neue Karte */
+const randomSeed = () => 1 + Math.floor(Math.random() * MAX_SEED);
 
 /** Haupt- und Spielmenü sowie Kapitelkarten, alles im Stil von Frachtbriefen */
 export class Menu {
@@ -98,9 +105,28 @@ export class Menu {
           this.actions.startChapter(id!);
           break;
         case 'free':
-          this.close();
-          this.actions.startFree();
+          this.showFree();
           break;
+        case 'freeValley':
+          this.close();
+          this.actions.startFree(null);
+          break;
+        case 'freeDice':
+          this.showFree(randomSeed());
+          break;
+        case 'freePreview':
+          this.showFree(this.seed() ?? randomSeed());
+          break;
+        case 'freeRandom': {
+          const seed = this.seed();
+          if (seed === null) {
+            this.showFree(randomSeed(), true);
+            break;
+          }
+          this.close();
+          this.actions.startFree(seed);
+          break;
+        }
         case 'save':
           this.actions.save(id!);
           this.showGameMenu();
@@ -246,6 +272,40 @@ export class Menu {
       <div class="menu-buttons"><button class="btn wide" data-menu="sound">${info.sound ? 'Stumm schalten' : 'Ton wieder einschalten'}</button></div>
       <p class="fine"><button class="link" data-menu="back">Zurück</button></p>`);
   }
+
+  /** Startwert aus dem Eingabefeld, oder null */
+  private seed(): number | null {
+    const n = Number(this.value('seed'));
+    return this.value('seed') !== '' && Number.isInteger(n) && n >= 1 && n <= MAX_SEED ? n : null;
+  }
+
+  /** Freies Spiel: bekanntes Tal oder Zufallsfluss mit Startwert und Vorschau */
+  showFree(seed = this.lastSeed ?? randomSeed(), invalid = false): void {
+    this.lastSeed = seed;
+    const p = this.actions.mapPreview(seed);
+    this.show(`
+      <div class="card-head">Freies Spiel</div>
+      <h2>Welcher Fluss?</h2>
+      <div class="menu-buttons">
+        <button class="btn wide" data-menu="freeValley">Das Tal der zwei Flüsse<small>Weißstrom und Erzbach, acht Städte, wie in der Kampagne</small></button>
+      </div>
+      <h3>Zufallsfluss: ${esc(p.name)}</h3>
+      ${p.svg}
+      <p class="fine">${esc(p.text)}</p>
+      <form class="inline-form seed-form">
+        <label>Kartennummer<input name="seed" type="number" min="1" max="${MAX_SEED}" step="1" inputmode="numeric" value="${seed}"></label>
+        <button type="button" class="btn" data-menu="freePreview">Zeigen</button>
+        <button type="button" class="btn" data-menu="freeDice">Würfeln</button>
+      </form>
+      <div class="menu-buttons"><button class="btn primary wide" data-menu="freeRandom">Diesen Fluss befahren</button></div>
+      ${invalid ? `<p class="fine">Bitte eine Kartennummer von 1 bis ${MAX_SEED.toLocaleString('de-DE')} eingeben.</p>` : '<p class="fine">Gleiche Nummer, gleicher Fluss: So lässt sich ein Tal mit anderen teilen.</p>'}
+      <p class="fine"><button class="link" data-menu="main">Zurück</button></p>`);
+    // die Nummer im Feld soll zur gezeigten Karte passen, auch wenn vorher etwas anderes darin stand
+    const input = this.el.querySelector<HTMLInputElement>('input[name="seed"]');
+    if (input) input.value = String(seed);
+  }
+
+  private lastSeed: number | null = null;
 
   showChallenges(): void {
     const done = this.info().challenges;
