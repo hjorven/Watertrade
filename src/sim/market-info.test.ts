@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { VALLEY } from '../data/maps/valley.ts';
-import { advance, buy, day, depart, newGame, sell, type GameState } from './game.ts';
+import { advance, buy, day, depart, newGame, sell, store, type GameState } from './game.ts';
 import {
   dayHash,
   isLive,
@@ -168,6 +168,23 @@ describe('Schiffsbuch', () => {
     expect(trips(ship)[0].from).toBe('kesselbrueck');
     expect(trips(ship)[0].tons).toBe(5);
     expect(ship.tripLog![0].tons).toBe(0);
+  });
+});
+
+describe('Schiffsbuch mit Kontor', () => {
+  it('Einlagern im Zielhafen zählt zum Marktwert', () => {
+    const s = start();
+    const ship = s.ships[0];
+    s.kontore.kesselbrueck = { level: 1, stock: {} };
+    const b = buy(s, ship.id, 'getreide', 10);
+    sailTo(s, ship.id, 'kesselbrueck');
+    const q = quote(s, 'kesselbrueck', 'getreide')!;
+    const r = store(s, ship.id, 'getreide', 10);
+    expect(r.ok).toBe(true);
+    const t = trips(ship)[0];
+    expect(t.stored).toBe(10);
+    expect(t.cost).toBe(b.taler);
+    expect(t.sell).toBe(q.sell * 10);
   });
 });
 

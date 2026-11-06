@@ -53,6 +53,10 @@ export interface TripRecord {
   toll: number;
   /** Kapitänslohn für die Fahrzeit */
   wage: number;
+  /** davon ins eigene Kontor eingelagert (Tonnen), zum Marktwert als Erlös gebucht */
+  stored?: number;
+  /** Teillieferung für einen noch offenen Auftrag: Einstand gebucht, Belohnung kommt später */
+  partial?: boolean;
 }
 
 /** Gewinn einer Fahrt nach allen Kosten */
@@ -246,6 +250,29 @@ export function tripSale(ship: Ship, revenue: number, cost: number, tons: number
   t.sell += revenue;
   t.cost += cost;
   t.tons += tons;
+}
+
+/**
+ * Einlagern im Zielhafen zählt wie ein Verkauf zum aktuellen Marktwert, damit Kontor-Routen
+ * im Schiffsbuch nicht als Verlust erscheinen. Der Einstand wandert mit ins Lager.
+ */
+export function tripStore(state: GameState, ship: Ship, good: string, tons: number, cost: number, fresh = 1): void {
+  const t = ship.trip;
+  if (!t || t.arrived === undefined || ship.port !== t.to) return;
+  const q = quote(state, t.to, good);
+  t.sell += Math.round((q?.sell ?? 0) * tons * fresh);
+  t.cost += cost;
+  t.tons += tons;
+  t.stored = (t.stored ?? 0) + tons;
+}
+
+/** Teillieferung eines Auftrags: Einstand buchen und die Fahrt kennzeichnen */
+export function tripPartialDelivery(ship: Ship, cost: number, tons: number): void {
+  const t = ship.trip;
+  if (!t || t.arrived === undefined || ship.port !== t.to) return;
+  t.cost += cost;
+  t.tons += tons;
+  t.partial = true;
 }
 
 /** Fahrten eines Schiffs, neueste zuerst, die laufende vorne */

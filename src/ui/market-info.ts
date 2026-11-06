@@ -111,7 +111,7 @@ function tripRow(map: MapDef, t: TripRecord, inPort: boolean): string {
   if (t.wage >= 0.5) parts.push(`Lohn ${fmt(t.wage)}`);
   const when = open ? `seit Tag ${t.day} unterwegs` : `Tag ${t.day}${t.arrived !== t.day ? ` bis ${t.arrived}` : ''}${inPort ? ', Verkäufe im Hafen zählen noch dazu' : ''}`;
   return `<tr>
-      <th scope="row">${townName(map, t.from)} → ${townName(map, t.to)}<small>${when}${t.tons ? ` · ${fmt(t.tons)} t verkauft` : ''}</small></th>
+      <th scope="row">${townName(map, t.from)} → ${townName(map, t.to)}<small>${when}${t.tons ? ` · ${fmt(t.tons)} t ${t.stored ? `abgesetzt, ${fmt(t.stored)} t davon ins Kontor (zum Marktwert)` : 'verkauft'}` : ''}${t.partial ? ' · Teillieferung, Auftrag noch offen' : ''}</small></th>
       <td class="num">${fmt(t.sell)}</td>
       <td class="num">${fmt(t.sell - p)}<small>${parts.join(' · ')}</small></td>
       <td class="num ${p > 0 ? 'gain' : p < 0 ? 'loss' : ''}">${p > 0 ? '+' : p < 0 ? '−' : ''}${fmt(Math.abs(p))}</td>
@@ -127,7 +127,7 @@ export function shipBook(map: MapDef, ship: Ship): string {
   const done = list.filter((t) => t.arrived !== undefined);
   const sum = done.reduce((s, t) => s + tripProfit(t), 0);
   return `<h3>Schiffsbuch der ${ship.name}</h3>
-    <p class="note">Gewinn je Fahrt: Erlös im Zielhafen minus Einkaufswert der verkauften Ware, Brennstoff, Zoll und Kapitänslohn. Verkäufe zählen zur Fahrt, bis das Schiff wieder ablegt.</p>
+    <p class="note">Gewinn je Fahrt: Erlös im Zielhafen minus Einkaufswert der verkauften Ware, Brennstoff, Zoll und Kapitänslohn für die Fahrzeit. Ware, die ins eigene Kontor geht, zählt zum Marktwert. Verkäufe zählen zur Fahrt, bis das Schiff wieder ablegt.</p>
     <table class="market tripbook"><thead><tr><th>Fahrt</th><th>Erlös</th><th>Kosten</th><th>Gewinn</th></tr></thead><tbody>${list.map((t) => tripRow(map, t, t === ship.trip && t.arrived !== undefined && ship.port === t.to)).join('')}</tbody></table>
     <p class="note">${done.length} ${done.length === 1 ? 'Fahrt' : 'Fahrten'} im Buch, zusammen <b class="${sum >= 0 ? 'gain' : 'loss'}">${sum >= 0 ? '+' : '−'}${fmt(Math.abs(sum))} Taler</b>${done.length ? `, im Schnitt ${sum >= 0 ? '+' : '−'}${fmt(Math.abs(sum / done.length))}` : ''}.</p>`;
 }
