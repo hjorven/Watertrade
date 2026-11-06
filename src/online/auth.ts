@@ -90,3 +90,19 @@ export async function setUsername(name: string): Promise<Result<string>> {
   if (error) return error.code === '23505' ? { ok: false, error: 'Der Name ist schon vergeben.', offline: false } : fail(error);
   return { ok: true, data: clean };
 }
+
+/** Eigener Anzeigename, null wenn noch keiner gesetzt ist */
+export async function getUsername(): Promise<Result<string | null>> {
+  const sb = getClient();
+  if (!sb) return offline();
+  try {
+    const { data } = await sb.auth.getSession();
+    const id = data.session?.user.id;
+    if (!id) return { ok: true, data: null };
+    const { data: row, error } = await sb.from('profiles').select('username').eq('id', id).maybeSingle();
+    if (error) return fail(error);
+    return { ok: true, data: (row as { username: string | null } | null)?.username ?? null };
+  } catch (e) {
+    return fail(e);
+  }
+}

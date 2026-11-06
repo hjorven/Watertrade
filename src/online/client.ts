@@ -18,9 +18,19 @@ let initialised = false;
 let status: OnlineStatus = 'offline';
 const listeners = new Set<(s: OnlineStatus) => void>();
 
+/**
+ * Öffentliche Verbindungsdaten des Flussreich-Servers. Der Publishable Key ist für den Browser gedacht,
+ * die Daten schützt Row Level Security. Vite-Variablen haben Vorrang, im Testlauf bleibt alles offline.
+ */
+export const DEFAULT_ONLINE: Required<OnlineConfig> = {
+  url: 'https://qkcvqzzaxmoktaqsiujv.supabase.co',
+  key: 'sb_publishable_GGtXWtbiTHxS2ussD2egxw_RvzhgPfO',
+};
+
 function readEnv(): OnlineConfig {
   const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {};
-  return { url: env.VITE_SUPABASE_URL, key: env.VITE_SUPABASE_KEY };
+  if (env.MODE === 'test' || env.VITEST) return { url: env.VITE_SUPABASE_URL, key: env.VITE_SUPABASE_KEY };
+  return { url: env.VITE_SUPABASE_URL || DEFAULT_ONLINE.url, key: env.VITE_SUPABASE_KEY || DEFAULT_ONLINE.key };
 }
 
 function isUsable(cfg: OnlineConfig): cfg is Required<OnlineConfig> {
