@@ -13,7 +13,7 @@ import {
   runGrowth,
 } from './balance.ts';
 import { waterLevel } from './calendar.ts';
-import { advance, buyShip, depart, dismantleRaft, newGame } from './game.ts';
+import { advance, buyShip, depart, dismantleRaft, hoursToArrival, newGame } from './game.ts';
 import { blockReason, type ShipType } from './river.ts';
 import { TIGHT_DEPTH, WEAR_PER_HOUR, wearFactor } from './voyage.ts';
 
@@ -74,7 +74,8 @@ describe('Balance: Schiffe', () => {
     expect(wood - s.markets.oberau.holz.stock).toBe(SHIPS.floss.timber);
     expect(1000 - s.money).toBeGreaterThan(SHIPS.floss.price); // Lohn und Holz
     const v = depart(s, VALLEY, r.ship!.id, 'niedermuend')!;
-    advance(s, VALLEY, v.hours);
+    expect(v.hours).toBeGreaterThan(0);
+    advance(s, VALLEY, hoursToArrival(s, r.ship!));
     const before = s.markets.niedermuend.holz.stock;
     expect(dismantleRaft(s, r.ship!.id).amount).toBe(SHIPS.floss.timber);
     expect(s.markets.niedermuend.holz.stock - before).toBe(SHIPS.floss.timber);

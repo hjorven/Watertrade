@@ -35,6 +35,7 @@ import {
   sell,
   shipClass,
   store,
+  transship,
   upgradeState,
   voyagePosition,
   wind,
@@ -285,6 +286,9 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
       break;
     case 'load':
       r = load(state, selected, String(d.good), n('n'));
+      break;
+    case 'transship':
+      r = transship(state, selected, n('to'), String(d.good), n('n'));
       break;
     case 'kontorBuy':
       r = kontorBuy(state, town, String(d.good), n('n'));

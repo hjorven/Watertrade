@@ -7,6 +7,7 @@ import { available, buyCost, sellRevenue } from './economy.ts';
 import { withWind, type ShipType } from './river.ts';
 import { addNews, rand, wind, type GameState, type NewsItem, type RivalShip, type RivalState } from './state.ts';
 import { planRoute } from './voyage.ts';
+import { sail } from './navigation.ts';
 
 const RIVAL_SHIP_NAMES = ['Adler', 'Zuversicht', 'Merkur', 'Stolz', 'Treue', 'Sturmvogel', 'Hanse', 'Glück', 'Kranich', 'Neptun'];
 
@@ -176,8 +177,9 @@ export function moveRivals(state: GameState, map: MapDef, hours: number): void {
     for (const ship of r.ships) {
       const v = ship.voyage;
       if (v) {
-        v.elapsed = Math.min(v.hours, v.elapsed + hours);
-        if (v.elapsed >= v.hours) {
+        // auch die Konkurrenz fährt nachts ohne Leuchtfeuer langsamer
+        v.elapsed = Math.min(v.hours, v.elapsed + sail(state, ship.type, v, state.hour - hours, hours).progress);
+        if (v.elapsed >= v.hours - 1e-6) {
           ship.port = v.to;
           ship.voyage = null;
           ship.idleUntil = state.hour + 3 + Math.floor(rand(state) * 4); // Liegezeit zum Laden

@@ -40,6 +40,12 @@ export interface Voyage {
   hours: number;
   elapsed: number;
   toll?: number;
+  /** Stunden, die das Schiff nach einer Grundberührung noch festsitzt */
+  aground?: number;
+  /** Fortschritt (Stunden voller Fahrt), bei dem das Schiff auf Grund laufen wird */
+  groundAt?: number;
+  /** letzter Abschnitt, für den auf Grundberührung gewürfelt wurde */
+  checked?: number;
 }
 
 export interface Captain {

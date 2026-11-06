@@ -536,6 +536,15 @@ body {
   opacity: 0.5;
 }
 
+/* knappe Tiefe: Gefahr einer Grundberührung */
+.btn.dest.risky {
+  border-left: 3px solid var(--loss);
+}
+
+.note.warn {
+  color: var(--loss);
+}
+
 .yard-row {
   display: flex;
   gap: 8px;
