@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { VALLEY } from '../data/maps/valley.ts';
 import { buyShip } from './fleet.ts';
-import { advance, depart, newGame, planVoyage, upgradeState, type GameState } from './game.ts';
+import { advance, depart, departProblem, newGame, planVoyage, upgradeState, type GameState } from './game.ts';
 import { dueEpoch, EPOCH_RULES, epochProgress, epochProgressText, TOW_FEE_PER_HOUR } from './epochs.ts';
 
 const free = () => newGame(VALLEY, { startTown: 'niedermuend', money: 50000, rivals: false });
@@ -91,33 +91,57 @@ describe('Epochen nach Fortschritt (freies Spiel)', () => {
   });
 });
 
-describe('Treidelgeld ab der Motorzeit', () => {
-  function towTrip(epoch: number) {
-    const s = newGame(VALLEY, { startTown: 'niedermuend', startShip: 'treidelkahn', money: 5000, rivals: false, epoch });
-    return { s, plan: planVoyage(s, VALLEY, s.ships[0].id, 'oberau') };
+describe('Treidelgeld ab der Motorzeit (freies Spiel)', () => {
+  function towGame(epoch: number, startTown = 'niedermuend', startShip = 'treidelkahn') {
+    const s = newGame(VALLEY, { startTown, startShip, money: 5000, rivals: false });
+    s.epoch = epoch;
+    return s;
   }
+  const upHours = (legs: { downstream: boolean; hours: number }[]) => legs.filter((l) => !l.downstream).reduce((n, l) => n + l.hours, 0);
 
   it('bergauf treideln kostet in Epoche 3 je Fahrstunde', () => {
-    const before = towTrip(2);
-    const after = towTrip(3);
-    expect(before.plan?.ok && after.plan?.ok).toBe(true);
-    if (!before.plan?.ok || !after.plan?.ok) return;
-    expect(before.plan.voyage.towFee).toBeUndefined();
-    const up = after.plan.voyage.legs.filter((l) => !l.downstream).reduce((n, l) => n + l.hours, 0);
+    const b = towGame(2);
+    const a = towGame(3);
+    const before = planVoyage(b, VALLEY, b.ships[0].id, 'oberau');
+    const after = planVoyage(a, VALLEY, a.ships[0].id, 'oberau');
+    if (!before?.ok || !after?.ok) throw new Error('Fahrt nicht möglich');
+    expect(before.voyage.towFee).toBeUndefined();
+    const up = upHours(after.voyage.legs);
     expect(up).toBeGreaterThan(0);
-    expect(after.plan.voyage.towFee).toBe(Math.round(up * TOW_FEE_PER_HOUR));
-    expect(after.plan.voyage.toll).toBe((before.plan.voyage.toll ?? 0) + after.plan.voyage.towFee!);
-    const money = after.s.money;
-    depart(after.s, VALLEY, after.s.ships[0].id, 'oberau');
-    expect(after.s.money).toBe(money - after.plan.voyage.toll!);
+    expect(after.voyage.towFee).toBe(Math.round(up * TOW_FEE_PER_HOUR));
+    expect(after.voyage.toll).toBe((before.voyage.toll ?? 0) + after.voyage.towFee!);
+    const money = a.money;
+    depart(a, VALLEY, a.ships[0].id, 'oberau');
+    expect(a.money).toBe(money - after.voyage.toll!);
   });
 
   it('talwärts und mit Motorschiff kein Treidelgeld', () => {
-    const s = newGame(VALLEY, { startTown: 'oberau', startShip: 'treidelkahn', money: 5000, rivals: false, epoch: 3 });
+    const s = towGame(3, 'oberau');
     const down = planVoyage(s, VALLEY, s.ships[0].id, 'niedermuend');
     expect(down?.ok && down.voyage.towFee).toBeFalsy();
-    const m = newGame(VALLEY, { startTown: 'niedermuend', startShip: 'motorschiff', money: 5000, rivals: false, epoch: 3 });
+    const m = towGame(3, 'niedermuend', 'motorschiff');
     const up = planVoyage(m, VALLEY, m.ships[0].id, 'oberau');
     expect(up?.ok && up.voyage.towFee).toBeFalsy();
+  });
+
+  it('auch der Schmuggler zahlt Treidelgeld, aber keinen Zoll', () => {
+    const s = towGame(3);
+    s.ships[0].captain = { id: 1, name: 'Test', trait: 'schmuggler', wage: 0, hire: 0 };
+    const p = planVoyage(s, VALLEY, s.ships[0].id, 'oberau');
+    if (!p?.ok) throw new Error('Fahrt nicht möglich');
+    expect(p.voyage.towFee).toBeGreaterThan(0);
+    expect(p.voyage.toll).toBe(p.voyage.towFee);
+  });
+
+  it('ohne Geld nennt die Abfahrt das Treidelgeld', () => {
+    const s = towGame(3);
+    s.money = 0;
+    expect(departProblem(s, VALLEY, s.ships[0].id, 'oberau')).toMatch(/^Das Treidelgeld kostet \d+ Taler\.$/);
+  });
+
+  it('Kampagne mit fester Motorzeit bleibt ohne Treidelgeld', () => {
+    const s = newGame(VALLEY, { startTown: 'niedermuend', startShip: 'treidelkahn', money: 5000, rivals: false, epoch: 3 });
+    const p = planVoyage(s, VALLEY, s.ships[0].id, 'oberau');
+    expect(p?.ok && p.voyage.towFee).toBeFalsy();
   });
 });

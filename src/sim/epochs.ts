@@ -36,13 +36,16 @@ export const EPOCH_RULES: EpochRule[] = [
   { epoch: 3, population: 4500, good: 'kohle', goodName: 'Kohle', amount: 300, minDays: 120 },
 ];
 
-/** Treidelgeld ab der Motorzeit: Die Treidelpfade verfallen, Pferde und Treidler kosten je Fahrstunde bergauf */
+/**
+ * Treidelgeld ab der Motorzeit im freien Spiel: Die Treidelpfade verfallen, Pferde und Treidler kosten
+ * je Fahrstunde bergauf. Die Kampagne hat feste Epochen und eigene Balance, dort gilt es nicht.
+ */
 export const TOW_FEE_EPOCH = 3;
 export const TOW_FEE_PER_HOUR = 3;
 
 /** Taler Treidelgeld für eine Fahrt mit diesen Stunden bergauf */
 export function towFee(state: GameState, propulsion: string, upstreamHours: number): number {
-  if (propulsion !== 'tow' || state.epoch < TOW_FEE_EPOCH || upstreamHours <= 0) return 0;
+  if (!state.epochAuto || propulsion !== 'tow' || state.epoch < TOW_FEE_EPOCH || upstreamHours <= 0) return 0;
   return Math.round(upstreamHours * TOW_FEE_PER_HOUR);
 }
 

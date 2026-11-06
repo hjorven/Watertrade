@@ -613,11 +613,11 @@ export class Hud {
           })
           .join('')}${later
           .map((id) => `<div class="yard-row muted"><div><b>${SHIPS[id].name}</b> <small>kommt in der Epoche „${EPOCHS[SHIPS[id].epoch - 1].name}“</small></div></div>`)
-          .join('')}</div>${later.length ? epochNote(state) : ''}`
+          .join('')}</div>`
       : '';
     return `${this.portHead(town, 'Werft')}${state_}
       ${ship.type === 'floss' ? '' : `<button class="btn wide ${cost > 0 ? 'primary' : ''}" data-act="cmd" data-cmd="repair" ${cost > 0 && state.money >= cost ? '' : 'disabled'}>Überholen<small>${cost > 0 ? `${fmt(cost)} Taler` : 'nicht nötig'}</small></button>`}
-      ${ups}${newShips}`;
+      ${ups}${newShips}${epochNote(state)}`;
   }
 
   private renderTavern(state: GameState, ship: Ship): string {

@@ -74,7 +74,8 @@ const gradeShader = {
       c.rgb = mix(vec3(l), c.rgb, saturation * moodSaturation);
       // Kontrast im linearen Licht um ein mittleres Grau
       c.rgb = 0.18 * pow(max(c.rgb, vec3(0.0)) / 0.18, vec3(contrast));
-      c.rgb += vec3(0.04, 0.015, -0.03) * warmth + tint;
+      // nie unter 0, sonst färbt die Tonkurve dunkle Stellen falsch ein
+      c.rgb = max(c.rgb + vec3(0.04, 0.015, -0.03) * warmth + tint, vec3(0.0));
       vec2 p = vUv - 0.5;
       c.rgb *= 1.0 - dot(p, p) * vignette * 1.6;
       gl_FragColor = c;

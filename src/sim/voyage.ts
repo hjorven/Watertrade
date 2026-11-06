@@ -135,7 +135,17 @@ export function departProblem(state: GameState, map: MapDef, shipId: number, to:
   const toll = plan.voyage.toll ?? 0;
   const coal = bunkerPlan(state, ship, plan.voyage.hours, toll);
   if (coal.problem) return `${coal.problem}.`;
-  if (toll + coal.cost > state.money) return coal.cost ? `Zoll und Kohle kosten ${toll + coal.cost} Taler.` : `Der Zoll kostet ${toll} Taler.`;
+  if (toll + coal.cost > state.money) {
+    const fee = plan.voyage.towFee ?? 0;
+    const parts: string[] = [];
+    if (toll - fee > 0) parts.push('Zoll');
+    if (fee > 0) parts.push('Treidelgeld');
+    if (coal.cost) parts.push('Kohle');
+    const total = toll + coal.cost;
+    if (parts.length > 1) return `${parts.slice(0, -1).join(', ')} und ${parts[parts.length - 1]} kosten ${total} Taler.`;
+    const one = { Zoll: 'Der Zoll', Treidelgeld: 'Das Treidelgeld', Kohle: 'Die Kohle' }[parts[0] ?? 'Zoll'];
+    return `${one} kostet ${total} Taler.`;
+  }
   return null;
 }
 
