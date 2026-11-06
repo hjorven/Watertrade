@@ -3,6 +3,7 @@ import { PERISH, SHIPS, type ShipClass } from '../data/ships.ts';
 import { windOfDay, withWind, type Conditions, type ShipType } from './river.ts';
 import type { PriceBookPage, PricePoint, TripRecord } from './market-info.ts';
 import type { TownMarket, TownState } from './towns.ts';
+import type { Season } from './calendar.ts';
 
 /** Datentypen des Spielstands und kleine Helfer, die alle Simulationsmodule brauchen */
 
@@ -91,6 +92,18 @@ export interface RouteOrder {
 export interface RouteStop {
   town: string;
   orders: RouteOrder[];
+  /** Erst ablegen, wenn der Laderaum zu diesem Anteil voll ist (0..1), sonst warten und nachkaufen */
+  minLoad?: number;
+  /** Halt überspringen, wenn der Pegel unter diesem Wert liegt (m über Normalwasser) */
+  levelMin?: number;
+  /** Halt überspringen, wenn der Pegel über diesem Wert liegt (m über Normalwasser) */
+  levelMax?: number;
+}
+
+/** Ein Tag im Routenbuch: Gewinn der Route an diesem Tag in Talern */
+export interface RouteBookDay {
+  day: number;
+  taler: number;
 }
 
 export interface TradeRoute {
@@ -100,7 +113,21 @@ export interface TradeRoute {
   /** Spielstunde, ab der der Kapitän es erneut versucht */
   retryAt?: number;
   note?: string; // letzter Hinweis, z. B. warum gewartet wird
+  /** Zweite Halte-Liste (Winterplan); `stops` ist dann der Sommerplan */
+  winterStops?: RouteStop[];
+  /** Jahreszeiten, in denen der Winterplan gilt */
+  winterSeasons?: Season[];
+  /** Plan, nach dem gerade gefahren wird */
+  plan?: RoutePlan;
+  /** Spielstunde, seit der der Kapitän auf Ladung wartet (Bedingung Mindestladung) */
+  loadingSince?: number;
+  /** Gewinn der letzten Tage, höchstens ROUTE_BOOK_DAYS Einträge */
+  book?: RouteBookDay[];
+  /** Erster Tag, an dem die Route gebucht hat (für den Tagesschnitt) */
+  bookSince?: number;
 }
+
+export type RoutePlan = 'sommer' | 'winter';
 
 export interface Ship {
   id: number;

@@ -19,7 +19,9 @@ import {
   type RouteOrder,
   type Ship,
   type TradeResult,
+  type TradeRoute,
 } from './state.ts';
+import { activeStops, bookRoute, bookValue, fmtLevel, LOAD_RETRY_HOURS, MAX_LOAD_WAIT_HOURS, stopSkipped, syncPlan } from './routes.ts';
 import { buy, load, sell, store } from './trade.ts';
 import { depart, departProblem, planVoyage } from './voyage.ts';
 
@@ -251,33 +253,79 @@ function execOrder(state: GameState, ship: Ship, o: RouteOrder): TradeResult {
 /**
  * Ein Schiff mit Kapitän und aktiver Route arbeitet seinen Halt ab und legt zum nächsten ab.
  * Erst wird verkauft und eingelagert, dann gekauft, damit Platz im Laderaum ist.
+ * Bedingungen je Halt: Mindestladung vor dem Ablegen, Halt überspringen bei zu niedrigem oder hohem Pegel.
+ * Zur Jahreszeit passend gilt der Sommer- oder Winterplan. Was der Halt einbringt, kommt ins Routenbuch.
  */
 export function runRoute(state: GameState, map: MapDef, ship: Ship): string | null {
   const r = ship.route;
-  if (!r || !r.active || !ship.port || ship.voyage || !ship.captain || r.stops.length < 2) return null;
+  if (!r || !r.active || !ship.port || ship.voyage || !ship.captain) return null;
+  syncPlan(state, r, ship.port);
   if (r.retryAt !== undefined && state.hour < r.retryAt) return null;
-  const stopIndex = r.stops.findIndex((s, i) => i === r.next && s.town === ship.port);
-  const here = stopIndex >= 0 ? r.stops[stopIndex] : null;
+  const before = bookValue(state, ship);
+  const log = runStop(state, map, ship, r);
+  bookRoute(state, r, bookValue(state, ship) - before);
+  return log;
+}
+
+const isLoading = (o: RouteOrder) => o.kind === 'kaufen' || o.kind === 'auslagern';
+
+function runStop(state: GameState, map: MapDef, ship: Ship, r: TradeRoute): string | null {
+  const stops = activeStops(state, r);
+  if (stops.length < 2) return null;
+  if (r.next >= stops.length) r.next = 0;
+  const port = ship.port!;
+  const townName = (id: string) => map.towns.find((t) => t.id === id)?.name ?? id;
+  const here = stops[r.next].town === port ? stops[r.next] : null;
+  const waitingForLoad = r.loadingSince !== undefined;
   let log: string | null = null;
-  if (here && r.retryAt === undefined) {
+  if (here && (r.retryAt === undefined || waitingForLoad)) {
     const order = (k: RouteOrder['kind']) => (k === 'verkaufen' || k === 'einlagern' ? 0 : 1);
-    const sorted = [...here.orders].sort((a, b) => order(a.kind) - order(b.kind));
+    // beim Warten auf Ladung nur noch nachkaufen und aus dem Kontor holen
+    const list = waitingForLoad ? here.orders.filter(isLoading) : here.orders;
+    const sorted = [...list].sort((a, b) => order(a.kind) - order(b.kind));
     const done = sorted.map((o) => execOrder(state, ship, o)).filter((x) => x.ok);
     if (done.length) log = done.map((x) => x.message).join(' ');
   }
-  // nächstes Ziel: der folgende Halt, oder der aktuelle, falls das Schiff woanders liegt
-  const nextIndex = here ? (r.next + 1) % r.stops.length : r.next;
-  const target = r.stops[nextIndex].town;
-  if (target === ship.port) {
-    r.next = (nextIndex + 1) % r.stops.length;
+  // Bedingung: erst ablegen, wenn genug geladen ist (höchstens MAX_LOAD_WAIT_HOURS lang warten)
+  if (here && here.minLoad) {
+    const cap = capacityOf(ship);
+    const loaded = cargoLoad(ship);
+    const since = r.loadingSince ?? state.hour;
+    if (loaded < cap * here.minLoad - 1e-6 && state.hour - since < MAX_LOAD_WAIT_HOURS) {
+      r.loadingSince = since;
+      r.retryAt = state.hour + LOAD_RETRY_HOURS;
+      r.note = `wartet in ${townName(port)} auf Ladung: ${Math.floor(loaded)} von ${Math.ceil(cap * here.minLoad)} t`;
+      return log;
+    }
+  }
+  r.loadingSince = undefined;
+  // nächstes Ziel: der folgende Halt, oder der aktuelle, falls das Schiff woanders liegt;
+  // Halte, deren Pegelbedingung nicht passt, werden übersprungen
+  let nextIndex = here ? (r.next + 1) % stops.length : r.next;
+  const skipped: string[] = [];
+  while (skipped.length < stops.length && stopSkipped(state, stops[nextIndex])) {
+    skipped.push(townName(stops[nextIndex].town));
+    nextIndex = (nextIndex + 1) % stops.length;
+  }
+  if (skipped.length >= stops.length) {
+    r.note = `wartet in ${townName(port)}: bei diesem Pegel wird jeder Halt übersprungen`;
+    r.retryAt = state.hour + 12;
+    return log;
+  }
+  const skipText = skipped.length ? `, ${skipped.join(' und ')} übersprungen (Pegel ${fmtLevel(state.waterLevel)})` : '';
+  const target = stops[nextIndex].town;
+  if (target === port) {
+    // der nächste gültige Halt ist dieser Hafen: dort beim nächsten Durchlauf handeln
+    r.next = nextIndex;
     r.retryAt = undefined;
+    if (skipText) r.note = `bleibt in ${townName(port)}${skipText}`;
     return log;
   }
   const plan = planVoyage(state, map, ship.id, target);
   if (!plan) return log;
   if (!plan.ok) {
     const why = plan.reasons.map((x) => BLOCK_TEXT[x.reason]).join(', ') || 'keine Verbindung';
-    r.note = `wartet in ${map.towns.find((t) => t.id === ship.port)?.name}: ${why}`;
+    r.note = `wartet in ${townName(port)}: ${why}`;
     // Halt gilt als erledigt, damit beim nächsten Versuch nicht noch einmal gehandelt wird
     r.next = nextIndex;
     r.retryAt = state.hour + 12;
@@ -292,7 +340,7 @@ export function runRoute(state: GameState, map: MapDef, ship: Ship): string | nu
   }
   r.next = nextIndex;
   r.retryAt = undefined;
-  r.note = `unterwegs nach ${map.towns.find((t) => t.id === target)?.name}`;
+  r.note = `unterwegs nach ${townName(target)}${skipText}`;
   return log;
 }
 

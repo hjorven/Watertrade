@@ -49,6 +49,8 @@ import {
 } from './sim/game.ts';
 import { buildHarbor, dredge, setFee, setUpkeep, startProjectWith } from './sim/wasserbau.ts';
 import type { FeeLevel } from './sim/state.ts';
+import { activePlan, resetBook, stopsOf, winterSeasonsOf } from './sim/routes.ts';
+import type { RoutePlan } from './sim/state.ts';
 import { EPOCHS } from './data/ships.ts';
 import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
 import { goalDone, goalProgress } from './sim/goals.ts';
@@ -370,6 +372,10 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
     case 'routeDelOrder':
     case 'routeToggle':
     case 'routeClear':
+    case 'routeStopCond':
+    case 'routeWinterSeason':
+    case 'routeCopyPlan':
+    case 'routeResetBook':
       if (ship) r = editRoute(ship, cmd, d);
       break;
   }
@@ -379,21 +385,33 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
 
 function editRoute(ship: Ship, cmd: string, d: Record<string, string | number>): TradeResult | null {
   const okMsg = (message: string): TradeResult => ({ ok: true, message, amount: 0, taler: 0 });
+  const failMsg = (message: string): TradeResult => ({ ok: false, message, amount: 0, taler: 0 });
   const r = (ship.route ??= { stops: [], next: 0, active: false });
+  // Sommerplan ist die Haupt-Liste, der Winterplan die zweite
+  const plan: RoutePlan = d.plan === 'winter' ? 'winter' : 'sommer';
+  const stops = plan === 'winter' ? (r.winterStops ??= []) : r.stops;
+  // Änderungen am Plan, nach dem gerade gefahren wird: beim ersten Halt neu anfangen
+  const touchesActive = () => r.active && plan === (r.plan ?? 'sommer');
+  const restart = () => {
+    r.next = 0;
+    r.retryAt = undefined;
+    r.loadingSince = undefined;
+  };
   switch (cmd) {
     case 'routeAddStop': {
       const town = String(d.town);
-      if (r.stops.length && r.stops[r.stops.length - 1].town === town) return { ok: false, message: 'Diese Stadt ist schon der letzte Halt.', amount: 0, taler: 0 };
-      r.stops.push({ town, orders: [] });
+      if (stops.length && stops[stops.length - 1].town === town) return failMsg('Diese Stadt ist schon der letzte Halt.');
+      stops.push({ town, orders: [] });
       return null;
     }
-    case 'routeDelStop':
-      r.stops.splice(Number(d.stop), 1);
-      r.next = 0;
+    case 'routeDelStop': {
+      stops.splice(Number(d.stop), 1);
+      if (touchesActive()) restart();
       if (r.stops.length < 2) r.active = false;
       return null;
+    }
     case 'routeAddOrder': {
-      const stop = r.stops[Number(d.stop)];
+      const stop = stops[Number(d.stop)];
       if (!stop) return null;
       stop.orders.push({
         kind: String(d.kind) as OrderKind,
@@ -404,17 +422,53 @@ function editRoute(ship: Ship, cmd: string, d: Record<string, string | number>):
       return null;
     }
     case 'routeDelOrder':
-      r.stops[Number(d.stop)]?.orders.splice(Number(d.order), 1);
+      stops[Number(d.stop)]?.orders.splice(Number(d.order), 1);
       return null;
+    case 'routeStopCond': {
+      const stop = stops[Number(d.stop)];
+      if (!stop) return null;
+      // leeres Feld heißt: keine Bedingung
+      const num = (v: string | number | undefined) => (v === undefined || String(v).trim() === '' ? undefined : Number(String(v).replace(',', '.')));
+      const load = num(d.minLoad);
+      const lo = num(d.levelMin);
+      const hi = num(d.levelMax);
+      if ([load, lo, hi].some((x) => x !== undefined && !Number.isFinite(x))) return failMsg('Bitte Zahlen eintragen, z. B. 80 oder -0,5.');
+      if (lo !== undefined && hi !== undefined && lo >= hi) return failMsg('Die untere Pegelgrenze muss unter der oberen liegen.');
+      stop.minLoad = load ? Math.min(1, Math.max(0, load / 100)) : undefined;
+      stop.levelMin = lo === undefined ? undefined : Math.round(lo * 10) / 10;
+      stop.levelMax = hi === undefined ? undefined : Math.round(hi * 10) / 10;
+      if (!stop.minLoad) delete stop.minLoad;
+      if (stop.levelMin === undefined) delete stop.levelMin;
+      if (stop.levelMax === undefined) delete stop.levelMax;
+      return okMsg(`Bedingungen für ${VALLEY.towns.find((t) => t.id === stop.town)?.name ?? stop.town} gespeichert.`);
+    }
+    case 'routeWinterSeason': {
+      const s = String(d.season) as Season;
+      if (!SEASONS.includes(s)) return null;
+      const list = winterSeasonsOf(r);
+      r.winterSeasons = list.includes(s) ? list.filter((x) => x !== s) : SEASONS.filter((x) => x === s || list.includes(x));
+      return null;
+    }
+    case 'routeCopyPlan': {
+      // Sommerplan als Vorlage für den Winterplan übernehmen
+      r.winterStops = structuredClone(r.stops);
+      if (touchesActive()) restart();
+      return okMsg('Sommerplan in den Winterplan übernommen.');
+    }
+    case 'routeResetBook':
+      resetBook(r);
+      return okMsg('Routenbuch geleert.');
     case 'routeToggle':
-      if (!r.active && !ship.captain) return { ok: false, message: 'Erst einen Kapitän anheuern.', amount: 0, taler: 0 };
-      if (!r.active && r.stops.length < 2) return { ok: false, message: 'Eine Route braucht mindestens zwei Halte.', amount: 0, taler: 0 };
+      if (!r.active && !ship.captain) return failMsg('Erst einen Kapitän anheuern.');
+      if (!r.active && r.stops.length < 2) return failMsg('Eine Route braucht mindestens zwei Halte.');
       r.active = !r.active;
       r.retryAt = undefined;
+      r.loadingSince = undefined;
       r.note = undefined;
       // beginnt am Halt, an dem das Schiff gerade liegt, sonst beim ersten
       if (r.active) {
-        const here = r.stops.findIndex((s) => s.town === ship.port);
+        r.plan = activePlan(state, r);
+        const here = stopsOf(r, r.plan).findIndex((s) => s.town === ship.port);
         r.next = here >= 0 ? here : 0;
       }
       return okMsg(r.active ? `${ship.captain!.name} übernimmt die Route.` : 'Route angehalten.');
