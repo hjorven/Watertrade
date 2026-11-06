@@ -15,7 +15,7 @@ import {
   sell,
   voyagePosition,
 } from './game.ts';
-import { STOCK_CAP, tickTown, tradedGoods } from './towns.ts';
+import { marketTarget, STOCK_CAP, tickTown, tradedGoods } from './towns.ts';
 
 const start = () => newGame(VALLEY, 'oberau');
 
@@ -44,7 +44,7 @@ describe('Karte', () => {
         const m = s.markets[town.id][g];
         expect(Number.isFinite(m.stock)).toBe(true);
         expect(m.stock).toBeGreaterThanOrEqual(0);
-        expect(m.stock).toBeLessThanOrEqual(town.target * STOCK_CAP + 1e-9);
+        expect(m.stock).toBeLessThanOrEqual(marketTarget(town, s.towns[town.id]) * STOCK_CAP + 1e-9);
       }
     }
   });
@@ -56,14 +56,14 @@ describe('Karte', () => {
     m.getreide.stock = 0;
     m.mehl.stock = m.mehl.target;
     // Produktion 12 reicht für eine volle Mühle (4 -> 3 Mehl), danach gleicht das Umland 8 % aus
-    tickTown(muehl, m);
+    tickTown(muehl, m, s.towns.muehlheim);
     expect(m.mehl.stock).toBeCloseTo(m.mehl.target + 3 * 0.92);
 
     // ohne Getreide steht die Mühle still
     const empty = { ...muehl, produces: {} };
     m.getreide.stock = 0;
     m.mehl.stock = m.mehl.target;
-    tickTown(empty, m);
+    tickTown(empty, m, s.towns.muehlheim);
     expect(m.mehl.stock).toBeCloseTo(m.mehl.target);
   });
 });
@@ -83,12 +83,14 @@ describe('Routen', () => {
 
   it('nur flache Boote kommen zur Erzgrube', () => {
     const s = start();
+    s.waterLevel = 0;
+    s.money = 5000;
     const kahn = s.ships[0];
+    buy(s, kahn.id, 'holz', 40); // voll beladen liegt der Kahn tief
     const plan = planVoyage(s, VALLEY, kahn.id, 'erzgrube')!;
     expect(plan.ok).toBe(false);
     if (!plan.ok) expect(plan.reasons[0].reason).toBe('tiefgang');
 
-    s.money = 5000;
     const plaette = buyShip(s, VALLEY, 'muehlheim', 'plaette').ship!;
     const p2 = planVoyage(s, VALLEY, plaette.id, 'erzgrube')!;
     expect(p2.ok).toBe(true);
@@ -164,5 +166,40 @@ describe('Balance', () => {
     expect(r.trips).toBeGreaterThan(5);
     expect(r.money).toBeGreaterThan(1500);
     expect(r.money).toBeLessThan(100000);
+  });
+});
+
+describe('Jahreszeiten und Wachstum', () => {
+  it('leere Schiffe liegen höher und kommen über seichte Stellen', () => {
+    const s = start();
+    s.waterLevel = 0;
+    expect(planVoyage(s, VALLEY, s.ships[0].id, 'erzgrube')!.ok).toBe(true);
+  });
+
+  it('im Winter friert der Erzbach zu', () => {
+    const s = start();
+    advance(s, VALLEY, 24 * 99);
+    expect(s.ice).toBe(true);
+    const plan = planVoyage(s, VALLEY, s.ships[0].id, 'glashuette')!;
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.reasons.map((r) => r.reason)).toContain('eis');
+  });
+
+  it('gut versorgte Städte wachsen, vernachlässigte nicht', () => {
+    const s = start();
+    const before = s.towns.oberau.population;
+    advance(s, VALLEY, 24 * 60);
+    expect(s.towns.oberau.population).toBeLessThan(before * 1.1);
+
+    const s2 = start();
+    const events = [];
+    for (let d = 0; d < 120; d++) {
+      for (const m of Object.values(s2.markets.oberau)) m.stock = Math.max(m.stock, m.target * 1.3);
+      events.push(...advance(s2, VALLEY, 24));
+    }
+    expect(s2.towns.oberau.population).toBeGreaterThan(800);
+    const up = events.find((e) => e.type === 'townLevel' && e.town === 'oberau');
+    expect(up).toBeDefined();
+    if (up && up.type === 'townLevel') expect(up.newGoods.length).toBeGreaterThan(0);
   });
 });

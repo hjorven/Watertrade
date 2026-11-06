@@ -25,6 +25,7 @@ export interface TownDef {
   riverT: number; // 0 = Quelle, 1 = Mündung
   side: -1 | 1; // Uferseite in Fließrichtung: -1 links, 1 rechts
   houses: number;
+  population: number; // Einwohner zu Spielbeginn
   fields?: boolean; // Äcker rund um die Stadt
   target: number; // Zielbestand je Ware (Größe des Marktes)
   produces: Record<string, number>; // Tonnen pro Tag
@@ -89,6 +90,7 @@ export const VALLEY: MapDef = {
       riverT: 0.06,
       side: 1,
       houses: 11,
+      population: 350,
       target: 60,
       produces: { holz: 14, wolle: 3 },
       consumes: { getreide: 3, salz: 1.5, werkzeug: 0.5, brot: 2, bier: 1 },
@@ -103,6 +105,7 @@ export const VALLEY: MapDef = {
       riverT: 0.22,
       side: -1,
       houses: 16,
+      population: 900,
       target: 70,
       produces: {},
       consumes: { getreide: 3, brot: 2, bier: 2, moebel: 0.4, glas: 0.6 },
@@ -117,6 +120,7 @@ export const VALLEY: MapDef = {
       riverT: 0.38,
       side: 1,
       houses: 15,
+      population: 700,
       fields: true,
       target: 80,
       produces: { getreide: 12 },
@@ -135,6 +139,7 @@ export const VALLEY: MapDef = {
       riverT: 0.55,
       side: -1,
       houses: 18,
+      population: 1000,
       target: 80,
       produces: {},
       consumes: { brot: 3, fisch: 2, bier: 2, salz: 2, glas: 0.5, kohle: 2 },
@@ -152,6 +157,7 @@ export const VALLEY: MapDef = {
       riverT: 0.74,
       side: 1,
       houses: 12,
+      population: 450,
       fields: true,
       target: 70,
       produces: { getreide: 8, fisch: 6, wolle: 3 },
@@ -167,6 +173,7 @@ export const VALLEY: MapDef = {
       riverT: 0.93,
       side: -1,
       houses: 26,
+      population: 1800,
       target: 110,
       produces: { salz: 12, fisch: 8 },
       consumes: { holz: 4, bretter: 3, moebel: 1, werkzeug: 1, glas: 1, stoff: 2, kohle: 3 },
@@ -184,6 +191,7 @@ export const VALLEY: MapDef = {
       riverT: 0.1,
       side: -1,
       houses: 9,
+      population: 300,
       target: 50,
       produces: { erz: 10, kohle: 8 },
       consumes: { brot: 3, werkzeug: 1, bier: 2, holz: 3, salz: 1 },
@@ -198,6 +206,7 @@ export const VALLEY: MapDef = {
       riverT: 0.55,
       side: 1,
       houses: 10,
+      population: 320,
       target: 50,
       produces: { wolle: 3 },
       consumes: { brot: 2, salz: 1, fisch: 1, stoff: 1 },
@@ -206,14 +215,14 @@ export const VALLEY: MapDef = {
     },
   ],
   segments: [
-    { id: 'oberau-kessel', river: 'strom', fromT: 0.06, toT: 0.22, from: 'oberau', to: 'kesselbrueck', length: 40, current: 2.2, baseDepth: 1.8 },
+    { id: 'oberau-kessel', river: 'strom', fromT: 0.06, toT: 0.22, from: 'oberau', to: 'kesselbrueck', length: 40, current: 2.2, baseDepth: 1.8, freezes: true },
     // Die alte Steinbrücke liegt direkt unterhalb von Kesselbrück
     { id: 'kessel-muehl', river: 'strom', fromT: 0.22, toT: 0.38, from: 'kesselbrueck', to: 'muehlheim', length: 35, current: 1.8, baseDepth: 2, bridgeHeight: 4.5 },
     { id: 'muehl-alten', river: 'strom', fromT: 0.38, toT: 0.55, from: 'muehlheim', to: 'altenfurt', length: 30, current: 1.5, baseDepth: 2.2 },
     { id: 'alten-weiden', river: 'strom', fromT: 0.55, toT: 0.74, from: 'altenfurt', to: 'weidenhof', length: 45, current: 1.3, baseDepth: 3 },
     { id: 'weiden-nieder', river: 'strom', fromT: 0.74, toT: 0.93, from: 'weidenhof', to: 'niedermuend', length: 40, current: 1.0, baseDepth: 3.5 },
     // Erzbach: oben sehr seicht, nur flache Boote
-    { id: 'grube-glas', river: 'erzbach', fromT: 0.1, toT: 0.55, from: 'erzgrube', to: 'glashuette', length: 25, current: 2.4, baseDepth: 0.8 },
-    { id: 'glas-alten', river: 'erzbach', fromT: 0.55, toT: 1, from: 'glashuette', to: 'altenfurt', length: 30, current: 2.0, baseDepth: 1.3 },
+    { id: 'grube-glas', river: 'erzbach', fromT: 0.1, toT: 0.55, from: 'erzgrube', to: 'glashuette', length: 25, current: 2.4, baseDepth: 0.8, freezes: true },
+    { id: 'glas-alten', river: 'erzbach', fromT: 0.55, toT: 1, from: 'glashuette', to: 'altenfurt', length: 30, current: 2.0, baseDepth: 1.3, freezes: true },
   ],
 };

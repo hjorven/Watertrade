@@ -1,10 +1,14 @@
 import { GOOD_BY_ID, GOODS } from '../data/goods.ts';
-import type { MapDef } from '../data/maps/valley.ts';
+import type { MapDef, TownDef } from '../data/maps/valley.ts';
+import { dayInSeason, season, SEASON_NAME, year } from '../sim/calendar.ts';
+import { GROWTH_THRESHOLD, LEVELS, levelOf, netFlow, nextLevelNeeds } from '../sim/towns.ts';
 import { SHIPS } from '../data/ships.ts';
 import { buyPrice, sellPrice } from '../sim/economy.ts';
 import {
   cargoLoad,
   day,
+  effectiveDraft,
+  shipAllowed,
   planVoyage,
   RAFT_TIMBER,
   shipClass,
@@ -15,7 +19,6 @@ import {
   type TradeResult,
 } from '../sim/game.ts';
 import { BLOCK_TEXT } from '../sim/river.ts';
-import { netFlow } from '../sim/towns.ts';
 
 export interface HudActions {
   select(shipId: number): void;
@@ -26,7 +29,7 @@ export interface HudActions {
   buyShip(type: string): void;
   dismantle(): void;
   speed(factor: number): void;
-  start(): void;
+  menu(): void;
 }
 
 const fmtHours = (h: number) => {
@@ -59,7 +62,7 @@ export class Hud {
   private readonly body: HTMLElement;
   private readonly root: HTMLElement;
   private readonly toasts: HTMLElement;
-  private readonly intro: HTMLElement;
+  private readonly goals: HTMLElement;
   private readonly map: MapDef;
   private readonly actions: HudActions;
   private speedFactor = 1;
@@ -73,32 +76,27 @@ export class Hud {
       <header class="topbar">
         <div class="brand">Flussreich</div>
         <div class="stats"></div>
+        <button class="btn menu-btn" data-act="menu" aria-label="Menü">Menü</button>
         <div class="speed" role="group" aria-label="Tempo">
+          <button class="btn" data-act="speed" data-factor="0" aria-label="Pause">II</button>
           <button class="btn on" data-act="speed" data-factor="1">1×</button>
           <button class="btn" data-act="speed" data-factor="4">4×</button>
         </div>
       </header>
       <aside class="ledger">
+        <section class="goals"></section>
         <nav class="fleet" aria-label="Flotte"></nav>
         <div class="ledger-body" aria-live="polite"></div>
       </aside>
       <div class="toasts"></div>
-      <div class="intro">
-        <div class="intro-card">
-          <div class="intro-head">Frachtbrief Nr. 1</div>
-          <h1>Flussreich</h1>
-          <p>Dein Handelshaus beginnt mit einem <b>Treidelkahn</b> und <b>500 Talern</b> im Holzfällerdorf <b>Oberau</b>. Acht Städte liegen am Weißstrom und am Erzbach, jede braucht etwas anderes.</p>
-          <p>Talwärts trägt dich die Strömung, bergwärts ziehen Pferde. Unter der Brücke von Kesselbrück passt kein Mast, und der obere Erzbach ist nur für flache Boote tief genug.</p>
-          <button class="btn primary" data-act="start">Leinen los</button>
-        </div>
-      </div>`,
+`,
     );
     this.top = root.querySelector('.topbar .stats')!;
     this.fleet = root.querySelector('.fleet')!;
     this.body = root.querySelector('.ledger-body')!;
     this.root = root;
     this.toasts = root.querySelector('.toasts')!;
-    this.intro = root.querySelector('.intro')!;
+    this.goals = root.querySelector('.goals')!;
 
     root.addEventListener('click', (ev) => {
       const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-act]');
@@ -134,19 +132,41 @@ export class Hud {
           );
           this.actions.speed(this.speedFactor);
           break;
-        case 'start':
-          this.intro.remove();
-          this.actions.start();
+        case 'menu':
+          this.actions.menu();
+          break;
+        case 'goals':
+          this.goalsOpen = !this.goalsOpen;
+          this.goals.classList.toggle('closed', !this.goalsOpen);
           break;
       }
     });
+  }
+
+  private goalsOpen = true;
+
+  /** Ziele des Kapitels; null blendet die Liste aus (freies Spiel) */
+  renderGoals(title: string | null, goals: { text: string; done: boolean; progress: string }[]): void {
+    if (!title) {
+      setHtml(this.goals, '');
+      return;
+    }
+    const done = goals.filter((g) => g.done).length;
+    setHtml(
+      this.goals,
+      `<button class="goals-head" data-act="goals"><span>${title}</span><small>${done}/${goals.length} Ziele</small></button>
+      <ul class="goal-list">${goals
+        .map((g) => `<li class="${g.done ? 'done' : ''}">${g.text}${g.done ? '' : `<small>${g.progress}</small>`}</li>`)
+        .join('')}</ul>`,
+    );
   }
 
   render(state: GameState, selected: number): void {
     const w = wind(state);
     this.top.innerHTML = `
       <span><small>Kasse</small><b>${state.money}</b> Taler</span>
-      <span><small>Tag</small><b>${day(state)}</b> ${clock(state.hour)}</span>
+      <span><small>${SEASON_NAME[season(day(state))]} · Jahr ${year(day(state))}</small><b>${dayInSeason(day(state))}. Tag</b> ${clock(state.hour)}</span>
+      <span class="hide-narrow"><small>Pegel</small><b>${state.waterLevel >= 0 ? '+' : '−'}${Math.abs(state.waterLevel).toFixed(1).replace('.', ',')} m</b>${state.ice ? ' Eis' : ''}</span>
       <span class="hide-narrow"><small>Wind</small><b>${windText(w)}</b></span>`;
 
     const ship = state.ships.find((s) => s.id === selected) ?? state.ships[0];
@@ -199,7 +219,7 @@ export class Hud {
         const sp = sellPrice(g.base, m);
         const margin = avg === null ? '' : sp > avg ? 'gain' : sp < avg ? 'loss' : '';
         const canBuy = !full && m.stock >= 1 && state.money >= bp;
-        const flow = netFlow(town, g.id);
+        const flow = netFlow(town, g.id, state.towns[town.id]);
         const role = flow > 0 ? 'Überschuss' : flow < 0 ? 'Bedarf' : '';
         return `
         <tr>
@@ -243,8 +263,9 @@ export class Hud {
           .join(', ')} pro Tag</p>`
       : '';
 
-    const yard = town.shipyard.length
-      ? `<h3>Werft</h3><div class="yard">${town.shipyard
+    const buildable = town.shipyard.filter((id) => shipAllowed(state, id));
+    const yard = buildable.length
+      ? `<h3>Werft</h3><div class="yard">${buildable
           .map((id) => {
             const c = SHIPS[id];
             return `<div class="yard-row">
@@ -268,7 +289,8 @@ export class Hud {
         <h2>${town.name}</h2>
         <p>${town.description}</p>
       </div>
-      <p class="note">${ship.name} (${cls.name}): ${load}/${cls.capacity} t geladen</p>
+      ${this.renderTownInfo(state, town)}
+      <p class="note">${ship.name} (${cls.name}): ${load}/${cls.capacity} t geladen, Tiefgang ${effectiveDraft(ship).toFixed(1).replace('.', ',')} m</p>
       <table class="market">
         <thead><tr><th>Ware</th><th>Kauf</th><th>Verkauf</th><th>Bord</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
@@ -279,6 +301,20 @@ export class Hud {
       <div class="dests">${departures}</div>
       <button class="btn wide" data-act="wait">Einen Tag warten<small>Städte produzieren und verbrauchen</small></button>
       ${yard}`;
+  }
+
+  private renderTownInfo(state: GameState, town: TownDef): string {
+    const t = state.towns[town.id];
+    const level = levelOf(t.population);
+    const next = LEVELS[level + 1];
+    const wants = nextLevelNeeds(town, t).map((g) => GOOD_BY_ID.get(g)!.name);
+    const sat = Math.round(t.satisfaction * 100);
+    const trend = t.satisfaction > GROWTH_THRESHOLD ? 'wächst' : 'stagniert';
+    return `<div class="town-info">
+      <span><b>${LEVELS[level].name}</b> · ${Math.round(t.population)} Einwohner · ${trend}</span>
+      <div class="meter" title="Versorgung ${sat} %"><div style="width:${sat}%"></div><i style="left:${GROWTH_THRESHOLD * 100}%"></i></div>
+      <small>Versorgung ${sat} %${next ? `, ab ${next.from} Einwohnern ${next.name}${wants.length ? ` (will dann auch ${wants.join(', ')})` : ''}` : ''}</small>
+    </div>`;
   }
 
   private renderVoyage(ship: Ship): string {
@@ -340,7 +376,25 @@ export class Hud {
     while (this.toasts.children.length > 4) this.toasts.lastElementChild!.remove();
   }
 
+  private stampQueue: [string, string][] = [];
+  private stampBusy = false;
+
+  /** Stempel nacheinander zeigen, nie mehrere übereinander */
   stamp(title: string, sub: string): void {
+    if (this.stampQueue.length >= 3) return;
+    this.stampQueue.push([title, sub]);
+    if (!this.stampBusy) this.nextStamp();
+  }
+
+  private nextStamp(): void {
+    const item = this.stampQueue.shift();
+    if (!item) {
+      this.stampBusy = false;
+      return;
+    }
+    this.stampBusy = true;
+    const [title, sub] = item;
+    setTimeout(() => this.nextStamp(), 3000);
     const el = document.createElement('div');
     el.className = 'stamp';
     el.innerHTML = `<div>${title}</div><small>${sub}</small>`;

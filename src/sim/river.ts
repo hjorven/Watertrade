@@ -6,6 +6,21 @@ export interface Segment {
   current: number; // Strömung in km/h
   baseDepth: number; // Tiefe bei Normalwasser in m
   bridgeHeight?: number; // Durchfahrtshöhe bei Normalwasser in m
+  freezes?: boolean; // friert im Winter zu
+}
+
+/** Lage am Fluss: Wasserstand relativ zum Normalwasser in m und ob Eis auf den Nebenflüssen liegt */
+export interface Conditions {
+  level: number;
+  ice?: boolean;
+}
+
+const asCond = (c: number | Conditions): Conditions => (typeof c === 'number' ? { level: c } : c);
+
+/** Hochwasser macht die Strömung schneller */
+export function effectiveCurrent(seg: Segment, c: number | Conditions): number {
+  const { level } = asCond(c);
+  return seg.current * (1 + Math.max(0, level) * 0.35);
 }
 
 export type Propulsion = 'drift' | 'tow' | 'sail';
@@ -24,9 +39,10 @@ export interface ShipType {
 /** Mindestgeschwindigkeit über Grund, darunter gilt ein Abschnitt als nicht befahrbar */
 const MIN_GROUND_SPEED = 0.5;
 
-export type BlockReason = 'nurTalwaerts' | 'tiefgang' | 'bruecke' | 'stroemung';
+export type BlockReason = 'nurTalwaerts' | 'tiefgang' | 'bruecke' | 'stroemung' | 'eis';
 
 export const BLOCK_TEXT: Record<BlockReason, string> = {
+  eis: 'zugefroren',
   nurTalwaerts: 'fährt nur talwärts',
   tiefgang: 'zu seicht für den Tiefgang',
   bruecke: 'passt nicht unter die Brücke',
@@ -38,13 +54,15 @@ export function blockReason(
   seg: Segment,
   ship: ShipType,
   downstream: boolean,
-  waterLevel: number,
+  conditions: number | Conditions,
 ): BlockReason | null {
+  const c = asCond(conditions);
+  if (c.ice && seg.freezes) return 'eis';
   if (!downstream && !ship.canGoUpstream) return 'nurTalwaerts';
-  if (seg.baseDepth + waterLevel < ship.draft) return 'tiefgang';
+  if (seg.baseDepth + c.level < ship.draft) return 'tiefgang';
   // Hochwasser verringert die Durchfahrtshöhe unter Brücken
-  if (seg.bridgeHeight !== undefined && seg.bridgeHeight - waterLevel < ship.height) return 'bruecke';
-  if (groundSpeed(seg, ship, downstream) <= MIN_GROUND_SPEED) return 'stroemung';
+  if (seg.bridgeHeight !== undefined && seg.bridgeHeight - c.level < ship.height) return 'bruecke';
+  if (groundSpeed(seg, ship, downstream, c) <= MIN_GROUND_SPEED) return 'stroemung';
   return null;
 }
 
@@ -53,10 +71,10 @@ export function travelTime(
   seg: Segment,
   ship: ShipType,
   downstream: boolean,
-  waterLevel: number, // Abweichung vom Normalwasser in m, z. B. -0.8 im Sommer
+  conditions: number | Conditions, // Wasserstand als Abweichung vom Normalwasser in m, z. B. -0.8 im Sommer
 ): number | null {
-  if (blockReason(seg, ship, downstream, waterLevel)) return null;
-  return seg.length / groundSpeed(seg, ship, downstream);
+  if (blockReason(seg, ship, downstream, conditions)) return null;
+  return seg.length / groundSpeed(seg, ship, downstream, conditions);
 }
 
 /** Segelschiffe hängen vom Wind ab (0 = Flaute, 1 = guter Wind), alle anderen nicht */
@@ -75,8 +93,9 @@ export function windOfDay(day: number): number {
 }
 
 /** Geschwindigkeit über Grund in km/h */
-export function groundSpeed(seg: Segment, ship: ShipType, downstream: boolean): number {
-  return downstream ? ship.speed + seg.current : ship.speed - seg.current;
+export function groundSpeed(seg: Segment, ship: ShipType, downstream: boolean, conditions: number | Conditions = 0): number {
+  const current = effectiveCurrent(seg, conditions);
+  return downstream ? ship.speed + current : ship.speed - current;
 }
 
 /**
@@ -88,7 +107,7 @@ export function explainBlock(
   start: string,
   goal: string,
   ship: ShipType,
-  waterLevel: number,
+  conditions: number | Conditions,
 ): { seg: Segment; reason: BlockReason }[] {
   const anyShip: ShipType = { ...ship, propulsion: 'tow', speed: 1000, draft: 0, height: 0, canGoUpstream: true };
   const route = findRoute(
@@ -104,7 +123,7 @@ export function explainBlock(
   for (const id of route.path) {
     const seg = segments.find((s) => s.id === id)!;
     const downstream = seg.from === node;
-    const reason = blockReason(seg, ship, downstream, waterLevel);
+    const reason = blockReason(seg, ship, downstream, conditions);
     if (reason) out.push({ seg, reason });
     node = downstream ? seg.to : seg.from;
   }
@@ -117,7 +136,7 @@ export function findRoute(
   start: string,
   goal: string,
   ship: ShipType,
-  waterLevel: number,
+  conditions: number | Conditions,
 ): { path: string[]; hours: number } | null {
   type Edge = { to: string; hours: number; seg: string };
   const adj = new Map<string, Edge[]>();
@@ -129,8 +148,8 @@ export function findRoute(
   };
 
   for (const s of segments) {
-    add(s.from, s.to, travelTime(s, ship, true, waterLevel), s.id);
-    add(s.to, s.from, travelTime(s, ship, false, waterLevel), s.id);
+    add(s.from, s.to, travelTime(s, ship, true, conditions), s.id);
+    add(s.to, s.from, travelTime(s, ship, false, conditions), s.id);
   }
 
   const dist = new Map<string, number>([[start, 0]]);

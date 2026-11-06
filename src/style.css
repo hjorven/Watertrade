@@ -585,3 +585,248 @@ body {
     display: none !important;
   }
 }
+
+/* --- M3: Menüs, Ziele, Stadtinfo --- */
+.town-label small {
+  display: block;
+  font-size: 10px;
+  font-variant: normal;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  text-align: center;
+  font-weight: 400;
+}
+
+.menu-btn {
+  margin-left: 4px;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(43 33 24 / 0.38);
+  padding: 16px;
+  z-index: 10;
+  overflow-y: auto;
+}
+
+.overlay[hidden] {
+  display: none;
+}
+
+.card {
+  position: relative;
+  width: min(480px, 100%);
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 27px, rgb(184 156 108 / 0.2) 27px 28px),
+    var(--paper);
+  border: 1px solid var(--line);
+  border-left: 6px double var(--line);
+  padding: 22px 26px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+}
+
+.card-head {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-soft);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 6px;
+}
+
+.card h1.title {
+  font-size: 46px;
+  font-variant: small-caps;
+  margin: 12px 0 4px;
+  letter-spacing: 0.03em;
+}
+
+.card h2 {
+  font-size: 28px;
+  font-variant: small-caps;
+  margin: 10px 0 6px;
+}
+
+.card h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-soft);
+  margin: 14px 0 6px;
+}
+
+.card p {
+  line-height: 1.5;
+}
+
+.lead {
+  color: var(--ink-soft);
+}
+
+.menu-buttons {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.menu-buttons .btn.wide {
+  margin-top: 0;
+}
+
+.btn.chapter .num {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  opacity: 0.7;
+}
+
+.slot-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.slot-grid .btn small {
+  display: block;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.fine {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-top: 14px;
+}
+
+.link {
+  font: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--ink);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.stamp-big {
+  position: absolute;
+  right: 18px;
+  top: 30px;
+  color: var(--stamp);
+  border: 4px double var(--stamp);
+  padding: 4px 14px;
+  font-size: 26px;
+  font-weight: 700;
+  font-variant: small-caps;
+  transform: rotate(-9deg);
+  animation: stamp-in 0.35s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+.goal-list {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.goal-list li {
+  position: relative;
+  padding: 3px 0 3px 22px;
+}
+
+.goal-list li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 6px;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--ink-soft);
+}
+
+.goal-list li.done {
+  color: var(--ink-soft);
+  text-decoration: line-through;
+}
+
+.goal-list li.done::before {
+  background: var(--gain);
+  border-color: var(--gain);
+}
+
+.goal-list small {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.goals {
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.goals:empty {
+  display: none;
+}
+
+.goals-head {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: baseline;
+  font: inherit;
+  font-weight: 700;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--ink);
+  text-align: left;
+}
+
+.goals-head small {
+  font-weight: 400;
+  color: var(--ink-soft);
+}
+
+.goals.closed .goal-list {
+  display: none;
+}
+
+.town-info {
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+
+.town-info small {
+  display: block;
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.meter {
+  position: relative;
+  height: 6px;
+  margin: 4px 0 2px;
+  background: var(--paper-dark);
+  border: 1px solid var(--line);
+}
+
+.meter div {
+  height: 100%;
+  background: var(--gain);
+}
+
+.meter i {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--ink);
+}

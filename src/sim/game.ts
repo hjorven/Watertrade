@@ -2,8 +2,9 @@ import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef, SegmentDef } from '../data/maps/valley.ts';
 import { SHIPS, type ShipClass } from '../data/ships.ts';
 import { available, buyCost, sellRevenue } from './economy.ts';
-import { explainBlock, findRoute, travelTime, windOfDay, withWind, type BlockReason } from './river.ts';
-import { initialMarket, tickTown, type TownMarket } from './towns.ts';
+import { isIce, waterLevel } from './calendar.ts';
+import { explainBlock, findRoute, travelTime, windOfDay, withWind, type BlockReason, type Conditions } from './river.ts';
+import { initialMarket, initialTown, tickTown, type TownMarket, type TownState } from './towns.ts';
 
 export interface CargoSlot {
   amount: number;
@@ -40,15 +41,32 @@ export interface GameState {
   hour: number; // Spielstunden seit Start
   ships: Ship[];
   markets: Record<string, TownMarket>;
+  towns: Record<string, TownState>;
   waterLevel: number;
+  ice: boolean;
   totalProfit: number;
   firstProfitDone: boolean;
   nextShipId: number;
+  /** Erlaubte Schiffstypen (Kampagne schränkt ein), leer = alle */
+  allowedShips: string[];
+  stats: {
+    delivered: Record<string, Record<string, number>>; // Stadt -> Ware -> verkaufte Tonnen
+    rafts: number; // zerlegte Flöße
+    trips: number;
+  };
+}
+
+export interface NewGameOptions {
+  startTown: string;
+  startShip?: string;
+  money?: number;
+  allowedShips?: string[];
 }
 
 export type GameEvent =
   | { type: 'arrived'; ship: number; town: string }
-  | { type: 'newDay'; day: number };
+  | { type: 'newDay'; day: number }
+  | { type: 'townLevel'; town: string; level: number; up: boolean; newGoods: string[] };
 
 export interface TradeResult {
   ok: boolean;
@@ -63,18 +81,30 @@ export const START_MONEY = 500;
 
 const SHIP_NAMES = ['Anna', 'Greta', 'Hoffnung', 'Lotte', 'Möwe', 'Fortuna', 'Elise', 'Biber', 'Wilhelmine', 'Otter', 'Marie', 'Eintracht'];
 
-export function newGame(map: MapDef, startTown: string, startShip = 'treidelkahn'): GameState {
+export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions): GameState {
+  const opts: NewGameOptions =
+    typeof startTownOrOptions === 'string' ? { startTown: startTownOrOptions } : startTownOrOptions;
+  const startTown = opts.startTown;
+  const startShip = opts.startShip ?? 'treidelkahn';
   const markets: GameState['markets'] = {};
-  for (const town of map.towns) markets[town.id] = initialMarket(town);
+  const towns: GameState['towns'] = {};
+  for (const def of map.towns) {
+    towns[def.id] = initialTown(def);
+    markets[def.id] = initialMarket(def, towns[def.id]);
+  }
   const state: GameState = {
-    money: START_MONEY,
+    money: opts.money ?? START_MONEY,
     hour: 8,
     ships: [],
     markets,
-    waterLevel: 0,
+    towns,
+    waterLevel: waterLevel(1),
+    ice: isIce(1),
     totalProfit: 0,
     firstProfitDone: false,
     nextShipId: 1,
+    allowedShips: opts.allowedShips ?? [],
+    stats: { delivered: {}, rafts: 0, trips: 0 },
   };
   addShip(state, startShip, startTown);
   return state;
@@ -110,6 +140,16 @@ export function day(state: GameState): number {
 
 export function wind(state: GameState): number {
   return windOfDay(day(state));
+}
+
+export function conditions(state: GameState): Conditions {
+  return { level: state.waterLevel, ice: state.ice };
+}
+
+/** Leicht beladene Schiffe liegen höher im Wasser: Tiefgang zwischen 60 % (leer) und 100 % (voll) */
+export function effectiveDraft(ship: Ship): number {
+  const cls = shipClass(ship);
+  return cls.draft * (0.6 + 0.4 * Math.min(1, cargoLoad(ship) / cls.capacity));
 }
 
 export function cargoLoad(ship: Ship): number {
@@ -167,6 +207,8 @@ export function sell(state: GameState, shipId: number, goodId: string, wanted: n
 
   const profit = revenue - costShare;
   state.totalProfit += profit;
+  const town = (state.stats.delivered[ship.port] ??= {});
+  town[goodId] = (town[goodId] ?? 0) + amount;
   const firstProfit = profit > 0 && !state.firstProfitDone;
   if (firstProfit) state.firstProfitDone = true;
 
@@ -185,10 +227,11 @@ export type VoyagePlan = { ok: true; voyage: Voyage } | { ok: false; reasons: { 
 export function planVoyage(state: GameState, map: MapDef, shipId: number, to: string): VoyagePlan | null {
   const ship = getShip(state, shipId);
   if (!ship.port || ship.port === to) return null;
-  const type = withWind(shipClass(ship), wind(state));
-  const route = findRoute(map.segments, ship.port, to, type, state.waterLevel);
+  const type = { ...withWind(shipClass(ship), wind(state)), draft: effectiveDraft(ship) };
+  const cond = conditions(state);
+  const route = findRoute(map.segments, ship.port, to, type, cond);
   if (!route) {
-    const reasons = explainBlock(map.segments, ship.port, to, type, state.waterLevel);
+    const reasons = explainBlock(map.segments, ship.port, to, type, cond);
     return { ok: false, reasons: reasons as { seg: SegmentDef; reason: BlockReason }[] };
   }
   const legs: Leg[] = [];
@@ -197,7 +240,7 @@ export function planVoyage(state: GameState, map: MapDef, shipId: number, to: st
     const seg = map.segments.find((s) => s.id === id)!;
     const downstream = seg.from === node;
     const next = downstream ? seg.to : seg.from;
-    legs.push({ seg: id, from: node, to: next, downstream, hours: travelTime(seg, type, downstream, state.waterLevel)! });
+    legs.push({ seg: id, from: node, to: next, downstream, hours: travelTime(seg, type, downstream, cond)! });
     node = next;
   }
   return { ok: true, voyage: { from: ship.port, to, legs, hours: route.hours, elapsed: 0 } };
@@ -209,6 +252,7 @@ export function depart(state: GameState, map: MapDef, shipId: number, to: string
   const ship = getShip(state, shipId);
   ship.voyage = plan.voyage;
   ship.port = null;
+  state.stats.trips++;
   return plan.voyage;
 }
 
@@ -227,10 +271,15 @@ export function buyShip(state: GameState, map: MapDef, town: string, type: strin
   const def = map.towns.find((t) => t.id === town);
   const cls = SHIPS[type];
   if (!def || !cls || !def.shipyard.includes(type)) return { ok: false, message: 'Hier wird dieser Schiffstyp nicht gebaut.' };
+  if (!shipAllowed(state, type)) return { ok: false, message: `${cls.name} gibt es in diesem Kapitel noch nicht.` };
   if (state.money < cls.price) return { ok: false, message: `Ein ${cls.name} kostet ${cls.price} Taler.` };
   state.money -= cls.price;
   const ship = addShip(state, type, town);
   return { ok: true, message: `${cls.name} „${ship.name}" liegt in ${def.name} bereit.`, ship };
+}
+
+export function shipAllowed(state: GameState, type: string): boolean {
+  return state.allowedShips.length === 0 || state.allowedShips.includes(type);
 }
 
 /** Holzmenge, die ein zerlegtes Floß ergibt */
@@ -247,6 +296,7 @@ export function dismantleRaft(state: GameState, shipId: number): TradeResult {
   if (m) m.stock += RAFT_TIMBER;
   state.money += revenue;
   state.ships = state.ships.filter((s) => s.id !== shipId);
+  state.stats.rafts++;
   return {
     ok: true,
     message: m ? `Floß zerlegt, ${RAFT_TIMBER} t Holz für ${revenue} Taler verkauft.` : 'Floß zerlegt. Hier kauft niemand Holz.',
@@ -262,9 +312,17 @@ export function advance(state: GameState, map: MapDef, hours: number): GameEvent
   state.hour += hours;
   const after = day(state);
   for (let d = before + 1; d <= after; d++) {
-    for (const town of map.towns) tickTown(town, state.markets[town.id]);
+    for (const def of map.towns) {
+      const r = tickTown(def, state.markets[def.id], state.towns[def.id]);
+      if (r.levelUp !== undefined || r.levelDown !== undefined) {
+        const up = r.levelUp !== undefined;
+        events.push({ type: 'townLevel', town: def.id, level: (r.levelUp ?? r.levelDown)!, up, newGoods: r.newGoods });
+      }
+    }
+    state.ice = isIce(d);
     events.push({ type: 'newDay', day: d });
   }
+  state.waterLevel = waterLevel(state.hour / 24 + 1);
 
   for (const ship of state.ships) {
     const v = ship.voyage;
