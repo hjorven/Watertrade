@@ -451,3 +451,477 @@ $$;
 revoke execute on function public.league_recover() from public, anon, authenticated;
 
 select cron.schedule('markt-erholung', '*/10 * * * *', 'select public.league_recover()');
+
+------------------------------------------------------------------------------
+-- 7. Handelsliga 5.10 (Migration 20261106210000_liga_saisons.sql, unverändert übernommen)
+------------------------------------------------------------------------------
+
+-- Handelsliga 5.10: Saisons mit Ruhmeshalle, serverweite Ereignisse,
+-- Ratenbegrenzung und kaufbare Schiffstypen.
+-- Signaturen von league_join/league_travel/league_trade bleiben gleich, die Rückgaben
+-- bekommen nur zusätzliche Felder. Alte Clients laufen also weiter.
+-- Die Zahlen hier müssen zu src/online/rules.ts passen (LEAGUE_SHIPS, LEAGUE_EVENTS, ...).
+
+------------------------------------------------------------------------------
+-- 1. Schiffe
+------------------------------------------------------------------------------
+
+create table public.league_ships (
+  id text primary key,
+  name text not null,
+  price integer not null check (price >= 0),
+  capacity integer not null check (capacity > 0),
+  travel_seconds integer not null check (travel_seconds > 0),
+  -- Reisezeit während eines Hochwassers
+  flood_seconds integer not null check (flood_seconds > 0),
+  sort smallint not null default 0
+);
+
+insert into public.league_ships (id, name, price, capacity, travel_seconds, flood_seconds, sort) values
+  ('treidelkahn', 'Treidelkahn',   0, 40, 45,  75, 1),
+  ('plaette',     'Plätte',      280, 30, 25,  30, 2),
+  ('segelkahn',   'Segelkahn',   950, 60, 40, 100, 3);
+
+alter table public.league_players
+  add column ship text not null default 'treidelkahn' references public.league_ships(id),
+  add column departed_at timestamptz not null default now(),
+  -- Ratenbegrenzung: Aktionen im laufenden 60-Sekunden-Fenster
+  add column rate_window timestamptz not null default now(),
+  add column rate_count integer not null default 0;
+
+------------------------------------------------------------------------------
+-- 2. Saisons und Ruhmeshalle
+------------------------------------------------------------------------------
+
+create table public.league_seasons (
+  id integer primary key,
+  starts_at timestamptz not null,
+  ends_at timestamptz not null,
+  check (ends_at > starts_at)
+);
+
+-- Erste Saison endet am übernächsten Montag 00:00 UTC, danach immer 14 Tage
+insert into public.league_seasons (id, starts_at, ends_at)
+values (1, now(), (date_trunc('week', now() at time zone 'UTC') + interval '14 days') at time zone 'UTC');
+
+create table public.league_hall_of_fame (
+  season_id integer not null references public.league_seasons(id) on delete cascade,
+  rank smallint not null check (rank between 1 and 3),
+  user_id uuid references public.profiles(id) on delete set null,
+  -- Name zum Saisonende festgehalten, damit spätere Umbenennungen die Halle nicht ändern
+  username text,
+  wealth integer not null,
+  players integer not null,
+  primary key (season_id, rank)
+);
+
+------------------------------------------------------------------------------
+-- 3. Ereignisse
+------------------------------------------------------------------------------
+
+-- hochwasser: alle Fahrten dauern länger (flood_seconds), gilt im ganzen Tal
+-- zollstreit: in einer Stadt kostet Kaufen 15 % mehr und Verkaufen bringt 15 % weniger
+-- markttag:   in einer Stadt bringt Verkaufen 20 % mehr
+create table public.league_events (
+  id bigint generated always as identity primary key,
+  kind text not null check (kind in ('hochwasser', 'zollstreit', 'markttag')),
+  town_id text,
+  starts_at timestamptz not null default now(),
+  ends_at timestamptz not null,
+  check (ends_at > starts_at),
+  check ((kind = 'hochwasser') = (town_id is null))
+);
+
+create index league_events_ends_idx on public.league_events (ends_at desc);
+
+------------------------------------------------------------------------------
+-- 4. Zeilensicherheit: alles lesbar, geschrieben wird nur über Funktionen
+------------------------------------------------------------------------------
+
+alter table public.league_ships        enable row level security;
+alter table public.league_seasons      enable row level security;
+alter table public.league_hall_of_fame enable row level security;
+alter table public.league_events       enable row level security;
+
+create policy "schiffe lesbar"      on public.league_ships        for select using (true);
+create policy "saisons lesbar"      on public.league_seasons      for select using (true);
+create policy "ruhmeshalle lesbar"  on public.league_hall_of_fame for select using (true);
+create policy "ereignisse lesbar"   on public.league_events       for select using (true);
+
+------------------------------------------------------------------------------
+-- 5. Helfer (nicht von außen aufrufbar)
+------------------------------------------------------------------------------
+
+-- Höchstens 40 Aktionen (Handel, Reise, Schiffskauf) pro 60 Sekunden.
+-- Schlägt die aufrufende Funktion fehl, wird auch die Zählung zurückgerollt.
+create or replace function public.league_rate_check()
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_count integer;
+begin
+  update public.league_players
+     set rate_count  = case when rate_window <= now() - interval '60 seconds' then 1 else rate_count + 1 end,
+         rate_window = case when rate_window <= now() - interval '60 seconds' then now() else rate_window end
+   where user_id = auth.uid()
+  returning rate_count into v_count;
+  if v_count > 40 then
+    raise exception 'zu viele aktionen';
+  end if;
+end;
+$$;
+
+-- Preisaufschlag in Prozent durch ein laufendes Ereignis in dieser Stadt (100 = keiner)
+create or replace function public.league_event_percent(p_town text, p_buy boolean)
+returns integer
+language sql
+stable
+set search_path = ''
+as $$
+  select coalesce((
+    select case
+             when e.kind = 'zollstreit' then case when p_buy then 115 else 85 end
+             when e.kind = 'markttag'   then case when p_buy then 100 else 120 end
+             else 100
+           end
+      from public.league_events e
+     where e.town_id = p_town and e.starts_at <= now() and e.ends_at > now()
+     order by e.starts_at desc
+     limit 1
+  ), 100);
+$$;
+
+-- Vermögen = Taler + Ladung zum Grundpreis + halber Schiffspreis (Wiederverkaufswert)
+create or replace function public.league_player_wealth(p_gold integer, p_cargo jsonb, p_ship text)
+returns integer
+language sql
+stable
+set search_path = ''
+as $$
+  select public.league_wealth(p_gold, p_cargo)
+       + coalesce((select s.price / 2 from public.league_ships s where s.id = p_ship), 0);
+$$;
+
+------------------------------------------------------------------------------
+-- 6. Liga-Funktionen neu
+------------------------------------------------------------------------------
+
+-- Reisen: Dauer hängt vom Schiff ab und verlängert sich bei Hochwasser
+create or replace function public.league_travel(p_town text)
+returns public.league_players
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_row public.league_players;
+  v_secs integer;
+  v_flood boolean;
+begin
+  if auth.uid() is null then
+    raise exception 'nicht angemeldet';
+  end if;
+  if not exists (select 1 from public.league_market where town_id = p_town) then
+    raise exception 'unbekannte stadt';
+  end if;
+
+  perform public.league_rate_check();
+
+  v_flood := exists (
+    select 1 from public.league_events
+     where kind = 'hochwasser' and starts_at <= now() and ends_at > now()
+  );
+  select case when v_flood then s.flood_seconds else s.travel_seconds end
+    into v_secs
+    from public.league_players p
+    join public.league_ships s on s.id = p.ship
+   where p.user_id = auth.uid();
+
+  -- Rechts vom = stehen die alten Werte der Zeile
+  update public.league_players
+     set town_id = p_town,
+         departed_at = case when town_id = p_town then departed_at else now() end,
+         arrives_at = case when town_id = p_town then arrives_at else now() + make_interval(secs => v_secs) end,
+         updated_at = now()
+   where user_id = auth.uid()
+     and arrives_at <= now()
+  returning * into v_row;
+
+  if not found then
+    if exists (select 1 from public.league_players where user_id = auth.uid()) then
+      raise exception 'noch unterwegs';
+    end if;
+    raise exception 'nicht in der liga';
+  end if;
+
+  return v_row;
+end;
+$$;
+
+-- Handel: positive Menge = an die Stadt verkaufen, negative = kaufen.
+-- Laderaum nach Schiffstyp, Zollstreit und Markttag verändern den Betrag.
+create or replace function public.league_trade(p_town text, p_good text, p_amount integer)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_player public.league_players;
+  v_market public.league_market;
+  v_capacity integer;
+  v_have integer;
+  v_load integer;
+  v_taler integer;
+  v_n integer := abs(p_amount);
+begin
+  if auth.uid() is null then
+    raise exception 'nicht angemeldet';
+  end if;
+
+  if p_amount is null or p_amount = 0 or v_n > 200 then
+    raise exception 'ungueltige menge';
+  end if;
+
+  perform public.league_rate_check();
+
+  select * into v_player from public.league_players where user_id = auth.uid() for update;
+  if not found then
+    raise exception 'nicht in der liga';
+  end if;
+  if v_player.town_id <> p_town or v_player.arrives_at > now() then
+    raise exception 'nicht in dieser stadt';
+  end if;
+
+  select capacity into v_capacity from public.league_ships where id = v_player.ship;
+
+  -- Zeile sperren, damit gleichzeitige Käufe den Bestand nicht doppelt verbrauchen
+  select * into v_market from public.league_market
+   where town_id = p_town and good_id = p_good
+   for update;
+  if not found then
+    raise exception 'unbekannter markt';
+  end if;
+
+  v_have := coalesce((v_player.cargo ->> p_good)::integer, 0);
+  select coalesce(sum(value::integer), 0) into v_load from jsonb_each_text(v_player.cargo);
+
+  if p_amount < 0 then
+    if v_market.stock < v_n then
+      raise exception 'nicht genug bestand';
+    end if;
+    if v_load + v_n > v_capacity then
+      raise exception 'laderaum voll';
+    end if;
+    select sum(public.league_price(v_market.base_price, v_market.stock - i, v_market.target_stock))
+      into v_taler from generate_series(1, v_n) i;
+    v_taler := ceil(v_taler * public.league_event_percent(p_town, true) / 100.0)::integer;
+    if v_taler > v_player.gold then
+      raise exception 'nicht genug taler';
+    end if;
+    v_player.gold := v_player.gold - v_taler;
+    v_have := v_have + v_n;
+  else
+    if v_have < v_n then
+      raise exception 'nicht genug ladung';
+    end if;
+    select sum(floor(public.league_price(v_market.base_price, v_market.stock + i, v_market.target_stock) * 0.9))
+      into v_taler from generate_series(1, v_n) i;
+    v_taler := floor(v_taler * public.league_event_percent(p_town, false) / 100.0)::integer;
+    v_player.gold := v_player.gold + v_taler;
+    v_have := v_have - v_n;
+  end if;
+
+  update public.league_market
+     set stock = stock + p_amount,
+         updated_at = now()
+   where town_id = p_town and good_id = p_good
+  returning stock into v_market.stock;
+
+  v_player.cargo := case when v_have = 0 then v_player.cargo - p_good
+                         else jsonb_set(v_player.cargo, array[p_good], to_jsonb(v_have)) end;
+
+  update public.league_players
+     set gold = v_player.gold,
+         cargo = v_player.cargo,
+         wealth = public.league_player_wealth(v_player.gold, v_player.cargo, v_player.ship),
+         updated_at = now()
+   where user_id = auth.uid()
+  returning * into v_player;
+
+  insert into public.league_trades (user_id, town_id, good_id, amount, taler)
+  values (auth.uid(), p_town, p_good, p_amount, v_taler);
+
+  return jsonb_build_object(
+    'stock', v_market.stock,
+    'taler', v_taler,
+    'gold', v_player.gold,
+    'cargo', v_player.cargo,
+    'wealth', v_player.wealth
+  );
+end;
+$$;
+
+-- Schiff wechseln: das alte geht für den halben Preis zurück, nur im Hafen
+create or replace function public.league_buy_ship(p_ship text)
+returns public.league_players
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_player public.league_players;
+  v_old public.league_ships;
+  v_new public.league_ships;
+  v_load integer;
+  v_cost integer;
+begin
+  if auth.uid() is null then
+    raise exception 'nicht angemeldet';
+  end if;
+
+  perform public.league_rate_check();
+
+  select * into v_player from public.league_players where user_id = auth.uid() for update;
+  if not found then
+    raise exception 'nicht in der liga';
+  end if;
+  if v_player.arrives_at > now() then
+    raise exception 'noch unterwegs';
+  end if;
+
+  select * into v_new from public.league_ships where id = p_ship;
+  if not found then
+    raise exception 'unbekanntes schiff';
+  end if;
+  if v_player.ship = p_ship then
+    raise exception 'schon dein schiff';
+  end if;
+  select * into v_old from public.league_ships where id = v_player.ship;
+
+  select coalesce(sum(value::integer), 0) into v_load from jsonb_each_text(v_player.cargo);
+  if v_load > v_new.capacity then
+    raise exception 'ladung passt nicht';
+  end if;
+
+  v_cost := v_new.price - v_old.price / 2;
+  if v_cost > v_player.gold then
+    raise exception 'nicht genug taler';
+  end if;
+
+  update public.league_players
+     set ship = p_ship,
+         gold = gold - v_cost,
+         wealth = public.league_player_wealth(gold - v_cost, cargo, p_ship),
+         updated_at = now()
+   where user_id = auth.uid()
+  returning * into v_player;
+
+  return v_player;
+end;
+$$;
+
+------------------------------------------------------------------------------
+-- 7. Zeitgesteuert: Saisonwechsel und Ereignisse
+------------------------------------------------------------------------------
+
+-- Stündlich: ist die Saison vorbei, kommen die besten drei in die Ruhmeshalle,
+-- dann starten alle neu (Spieler und Handelsbuch gelöscht, Märkte auf Ruhebestand).
+create or replace function public.league_season_tick()
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_season public.league_seasons;
+  v_players integer;
+begin
+  -- Handelsbuch klein halten (Free-Tier-Speicher)
+  delete from public.league_trades where created_at < now() - interval '3 days';
+  delete from public.league_events where ends_at < now() - interval '7 days';
+
+  loop
+    select * into v_season from public.league_seasons order by id desc limit 1 for update;
+    exit when v_season.ends_at > now();
+
+    select count(*) into v_players from public.league_players;
+
+    -- Nur wer mehr als das Startkapital hat, kommt in die Halle
+    insert into public.league_hall_of_fame (season_id, rank, user_id, username, wealth, players)
+    select v_season.id, t.rn, t.user_id, t.username, t.wealth, v_players
+      from (
+        select p.user_id, pr.username, p.wealth,
+               row_number() over (order by p.wealth desc, p.updated_at) as rn
+          from public.league_players p
+          left join public.profiles pr on pr.id = p.user_id
+         where p.wealth > 300
+      ) t
+     where t.rn <= 3;
+
+    delete from public.league_trades where true;
+    delete from public.league_players where true;
+    update public.league_market set stock = rest_stock, updated_at = now() where stock <> rest_stock;
+
+    insert into public.league_seasons (id, starts_at, ends_at)
+    values (v_season.id + 1, v_season.ends_at, v_season.ends_at + interval '14 days');
+  end loop;
+end;
+$$;
+
+-- Stündlich: nach mindestens 2 ruhigen Stunden startet mit 50 % Chance ein Ereignis
+-- für 60 bis 120 Minuten. Im Mittel also etwa alle 4 bis 5 Stunden eines.
+create or replace function public.league_event_tick()
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_kind text;
+  v_town text;
+  v_minutes integer;
+begin
+  if exists (select 1 from public.league_events where ends_at > now() - interval '2 hours') then
+    return;
+  end if;
+  if random() >= 0.5 then
+    return;
+  end if;
+
+  v_kind := (array['hochwasser', 'zollstreit', 'markttag'])[1 + floor(random() * 3)::integer];
+  if v_kind <> 'hochwasser' then
+    select t.town_id into v_town
+      from (select distinct town_id from public.league_market) t
+     order by random()
+     limit 1;
+  end if;
+  v_minutes := 60 + floor(random() * 61)::integer;
+
+  insert into public.league_events (kind, town_id, starts_at, ends_at)
+  values (v_kind, v_town, now(), now() + make_interval(mins => v_minutes));
+end;
+$$;
+
+------------------------------------------------------------------------------
+-- 8. Rechte und Cron
+------------------------------------------------------------------------------
+
+revoke execute on function public.league_rate_check() from public, anon, authenticated;
+revoke execute on function public.league_event_percent(text, boolean) from public, anon, authenticated;
+revoke execute on function public.league_player_wealth(integer, jsonb, text) from public, anon, authenticated;
+revoke execute on function public.league_season_tick() from public, anon, authenticated;
+revoke execute on function public.league_event_tick() from public, anon, authenticated;
+
+revoke execute on function public.league_travel(text) from public, anon;
+revoke execute on function public.league_trade(text, text, integer) from public, anon;
+revoke execute on function public.league_buy_ship(text) from public, anon;
+grant execute on function public.league_travel(text) to authenticated;
+grant execute on function public.league_trade(text, text, integer) to authenticated;
+grant execute on function public.league_buy_ship(text) to authenticated;
+
+select cron.schedule('liga-saison', '2 * * * *', 'select public.league_season_tick()');
+select cron.schedule('liga-ereignis', '7 * * * *', 'select public.league_event_tick()');

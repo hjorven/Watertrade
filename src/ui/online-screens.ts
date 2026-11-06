@@ -7,8 +7,26 @@ import { ACHIEVEMENTS } from '../sim/achievements.ts';
 import { price, SELL_FACTOR } from '../sim/economy.ts';
 import { dateText } from '../sim/calendar.ts';
 import type { SaveGame } from '../sim/save.ts';
-import { dailySeed, LEAGUE_TRAVEL_SECONDS, secondsUntilArrival, SLOT_COUNT, todayUtc } from '../online/rules.ts';
-import type { DailyEntry, LeagueMarketRow, LeaguePlayer, LeagueRankEntry, SlotInfo as CloudSlot } from '../online/index.ts';
+import {
+  dailySeed,
+  isEventActive,
+  isFlooding,
+  LEAGUE_SHIPS,
+  LEAGUE_START_GOLD,
+  leagueBuyTotal,
+  leagueEventPercent,
+  leagueEventText,
+  leagueSellTotal,
+  leagueShip,
+  leagueShipCost,
+  leagueTravelSeconds,
+  remainingText,
+  secondsUntilArrival,
+  SLOT_COUNT,
+  todayUtc,
+  travelProgress,
+} from '../online/rules.ts';
+import type { DailyEntry, LeagueInfo, LeagueMarketRow, LeaguePlayer, LeagueRankEntry, SlotInfo as CloudSlot } from '../online/index.ts';
 
 type OnlineApi = typeof import('../online/index.ts');
 let api: Promise<OnlineApi> | null = null;
@@ -21,7 +39,6 @@ import type { Menu } from './menu.ts';
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const fmt = (n: number) => Math.floor(n).toLocaleString('de-DE');
-const LEAGUE_CARGO = 40;
 
 export interface OnlineHooks {
   /** scored: gewerteter Versuch des Tages, sonst Übungsrunde */
@@ -47,7 +64,7 @@ function niceError(e: string): string {
   const map: Record<string, string> = {
     'nicht genug taler': 'Nicht genug Taler.',
     'nicht genug bestand': 'So viel hat der Markt nicht.',
-    'laderaum voll': `Der Laderaum fasst nur ${LEAGUE_CARGO} t.`,
+    'laderaum voll': 'Der Laderaum ist voll.',
     'nicht genug ladung': 'So viel hast du nicht an Bord.',
     'nicht in dieser stadt': 'Dein Kahn ist noch unterwegs.',
     'nicht in der liga': 'Du bist noch nicht in der Liga.',
@@ -83,6 +100,10 @@ export class OnlineScreens {
   private unsubscribe: (() => void) | null = null;
   private ticker = 0;
   private lastWait = 0;
+  private leagueInfo: LeagueInfo = { season: null, events: [], hall: [] };
+  private infoTicks = 0;
+  /** Welche Ereignisse beim letzten Zeichnen liefen, um Beginn und Ende zu bemerken */
+  private eventKey = '';
 
   // Tagesmarkt
   private daily: { entries: DailyEntry[] | null; status: string } = { entries: null, status: '' };
@@ -140,6 +161,15 @@ export class OnlineScreens {
           this.leagueMsg = amount < 0 ? `${-amount} t ${good} für ${fmt(r.taler)} Taler gekauft.` : `${amount} t ${good} für ${fmt(r.taler)} Taler verkauft.`;
           this.hooks.sfx(amount < 0 ? 'kauf' : 'muenzen');
           this.hooks.unlock('liga');
+        });
+        break;
+      }
+      case 'leagueShip': {
+        const ship = leagueShip(d.id);
+        void this.leagueAction(async () => (await online()).leagueBuyShip(ship.id), (p) => {
+          this.player = p;
+          this.leagueMsg = `Neues Schiff: ${ship.name} mit ${ship.capacity} t Laderaum.`;
+          this.hooks.sfx('muenzen');
         });
         break;
       }
@@ -342,7 +372,9 @@ export class OnlineScreens {
     this.leagueBusy = true;
     this.leagueMsg = 'Verbinde mit der Liga ...';
     this.renderLeague();
-    const [p, m, r] = await Promise.all([(await online()).joinLeague(), (await online()).getLeagueMarket(), (await online()).leagueRanking(10)]);
+    const api = await online();
+    const [p, m, r, info] = await Promise.all([api.joinLeague(), api.getLeagueMarket(), api.leagueRanking(10), api.getLeagueInfo()]);
+    if (info.ok) this.leagueInfo = info.data;
     this.leagueBusy = false;
     if (!p.ok) {
       this.leagueMsg = niceError(p.error);
@@ -376,14 +408,36 @@ export class OnlineScreens {
           this.stopLeague();
           return;
         }
-        // nur während der Fahrt neu zeichnen, sonst würden Klicks ins Leere gehen
+        // Saison und Ereignisse jede Minute nachladen
+        if (++this.infoTicks >= 60) {
+          this.infoTicks = 0;
+          void this.refreshInfo();
+        }
+        // nur während der Fahrt oder wenn ein Ereignis beginnt oder endet neu zeichnen,
+        // sonst würden Klicks ins Leere gehen
         const wait = this.player ? secondsUntilArrival(this.player) : 0;
         if (wait > 0) this.updateTravel(wait);
-        else if (this.lastWait > 0) this.renderLeague();
+        else if (this.lastWait > 0 || this.activeEventKey() !== this.eventKey) this.renderLeague();
         this.lastWait = wait;
       }, 1000);
     }
     this.renderLeague();
+  }
+
+  private async refreshInfo(): Promise<void> {
+    const info = await (await online()).getLeagueInfo();
+    if (!info.ok) return;
+    const changed = JSON.stringify(info.data) !== JSON.stringify(this.leagueInfo);
+    this.leagueInfo = info.data;
+    const wait = this.player ? secondsUntilArrival(this.player) : 0;
+    if (changed && !wait && this.menu.screen === 'league' && !this.leagueBusy) this.renderLeague();
+  }
+
+  private activeEventKey(): string {
+    return this.leagueInfo.events
+      .filter((e) => isEventActive(e))
+      .map((e) => e.id)
+      .join(',');
   }
 
   /** Nur Balken und Sekunden der laufenden Fahrt erneuern */
@@ -391,7 +445,7 @@ export class OnlineScreens {
     const box = document.querySelector('.league-travel');
     if (!box) return;
     const bar = box.querySelector<HTMLElement>('.bar i');
-    if (bar) bar.style.width = `${Math.round((1 - wait / LEAGUE_TRAVEL_SECONDS) * 100)}%`;
+    if (bar && this.player) bar.style.width = `${Math.round(travelProgress(this.player) * 100)}%`;
     const sec = box.querySelector('.sec');
     if (sec) sec.textContent = String(wait);
   }
@@ -413,7 +467,13 @@ export class OnlineScreens {
     const r = await run();
     this.leagueBusy = false;
     if (r.ok) done(r.data);
-    else {
+    else if (/beigetreten|nicht in der liga/i.test(r.error)) {
+      // Saisonwechsel: der Server hat alle Spieler zurückgesetzt, also neu beitreten
+      await this.openLeague();
+      this.leagueMsg = `Eine neue Saison hat begonnen. Alle starten wieder mit ${LEAGUE_START_GOLD} Talern und dem Treidelkahn.`;
+      if (this.menu.screen === 'league') this.renderLeague();
+      return;
+    } else {
       this.leagueMsg = niceError(r.error);
       this.hooks.sfx('fehler');
     }
@@ -424,12 +484,20 @@ export class OnlineScreens {
 
   private renderLeague(): void {
     const p = this.player;
+    const info = this.leagueInfo;
+    const now = new Date();
+    this.eventKey = this.activeEventKey();
     let body = '';
     if (p) {
       const wait = secondsUntilArrival(p);
+      const ship = leagueShip(p.ship);
+      const cap = ship.capacity;
       const load = Object.values(p.cargo).reduce((s, n) => s + n, 0);
       const towns = [...new Set(this.market.map((m) => m.townId))];
       const here = this.market.filter((m) => m.townId === p.townId);
+      const buyPct = leagueEventPercent(info.events, p.townId, true, now);
+      const sellPct = leagueEventPercent(info.events, p.townId, false, now);
+      const flood = isFlooding(info.events, now);
       const cargoText = Object.entries(p.cargo)
         .filter(([, n]) => n > 0)
         .map(([g, n]) => `${n} t ${esc(GOOD_BY_ID.get(g)?.name ?? g)}`)
@@ -438,11 +506,11 @@ export class OnlineScreens {
       const rows = here
         .map((m) => {
           const g = GOOD_BY_ID.get(m.goodId);
-          const buyP = price(m.basePrice, m.stock - 1, m.targetStock);
-          const sellP = Math.floor(price(m.basePrice, m.stock + 1, m.targetStock) * SELL_FACTOR);
+          const buyP = leagueBuyTotal(price(m.basePrice, m.stock - 1, m.targetStock), buyPct);
+          const sellP = leagueSellTotal(Math.floor(price(m.basePrice, m.stock + 1, m.targetStock) * SELL_FACTOR), sellPct);
           const have = p.cargo[m.goodId] ?? 0;
-          const canBuy = !wait && m.stock > 0 && load < LEAGUE_CARGO && p.gold >= buyP;
-          const fill = Math.min(LEAGUE_CARGO - load, m.stock, Math.floor(p.gold / Math.max(1, buyP)));
+          const canBuy = !wait && m.stock > 0 && load < cap && p.gold >= buyP;
+          const fill = Math.min(cap - load, m.stock, Math.floor(p.gold / Math.max(1, buyP)));
           return `<tr>
             <td><span class="swatch" style="background:#${(g?.color ?? 0x888888).toString(16).padStart(6, '0')}"></span>${esc(g?.name ?? m.goodId)}</td>
             <td class="num">${fmt(m.stock)} t</td><td class="num">${buyP}</td><td class="num">${sellP}</td><td class="num">${have || ''}</td>
@@ -454,37 +522,100 @@ export class OnlineScreens {
             </td></tr>`;
         })
         .join('');
+      const townMark = (t: string): string => {
+        const e = info.events.find((x) => x.townId === t && isEventActive(x, now));
+        return e ? `<em>${e.kind === 'zollstreit' ? 'Zollstreit' : 'Markttag'}</em>` : '';
+      };
+      const ships = LEAGUE_SHIPS.filter((s) => s.id !== ship.id)
+        .map((s) => {
+          const cost = leagueShipCost(ship.id, s.id);
+          const ok = !wait && !dis && p.gold >= cost && load <= s.capacity;
+          const why = wait ? 'Erst im Hafen' : load > s.capacity ? 'Zu viel Ladung' : p.gold < cost ? 'Zu wenig Taler' : '';
+          return `<div class="league-ship">
+            <b>${esc(s.name)}</b>
+            <span>${s.capacity} t · ${s.travelSeconds} s je Fahrt · Hochwasser ${s.floodSeconds} s</span>
+            <small>${esc(s.text)}</small>
+            <button class="btn small" data-menu="leagueShip" data-id="${s.id}" ${ok ? '' : 'disabled'}>${cost > 0 ? `Wechseln für ${fmt(cost)} Taler` : `Wechseln, ${fmt(-cost)} Taler zurück`}</button>
+            ${why ? `<small class="why">${why}</small>` : ''}
+          </div>`;
+        })
+        .join('');
       body = `
         <div class="league-head">
           <span><small>Ort</small><b>${wait ? `unterwegs nach ${esc(this.townName(p.townId))}` : esc(this.townName(p.townId))}</b></span>
           <span><small>Kasse</small><b>${fmt(p.gold)} Taler</b></span>
-          <span><small>Laderaum</small><b>${load} / ${LEAGUE_CARGO} t</b></span>
+          <span><small>${esc(ship.name)}</small><b>${load} / ${cap} t</b></span>
           <span><small>Vermögen</small><b>${fmt(p.wealth)}</b></span>
         </div>
         ${cargoText ? `<p class="fine">An Bord: ${cargoText}</p>` : ''}
         ${
           wait
-            ? `<div class="league-travel"><div class="bar"><i style="width:${Math.round((1 - wait / LEAGUE_TRAVEL_SECONDS) * 100)}%"></i></div><p>Ankunft in <b class="sec">${wait}</b> Sekunden. Die Preise ändern sich derweil mit jedem Handel der anderen.</p></div>`
+            ? `<div class="league-travel"><div class="bar"><i style="width:${Math.round(travelProgress(p, now) * 100)}%"></i></div><p>Ankunft in <b class="sec">${wait}</b> Sekunden. Die Preise ändern sich derweil mit jedem Handel der anderen.</p></div>`
             : `<table class="league-market"><thead><tr><th>Ware</th><th class="num">Bestand</th><th class="num">Kauf</th><th class="num">Verkauf</th><th class="num">Bord</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
         }
         <h3>Fahren nach</h3>
         <div class="slot-grid league-towns">${towns
           .filter((t) => t !== p.townId)
-          .map((t) => `<button class="btn" data-menu="leagueTravel" data-id="${t}" ${wait || dis ? 'disabled' : ''}>${esc(this.townName(t))}<small>${LEAGUE_TRAVEL_SECONDS} s</small></button>`)
+          .map(
+            (t) =>
+              `<button class="btn" data-menu="leagueTravel" data-id="${t}" ${wait || dis ? 'disabled' : ''}>${esc(this.townName(t))}${townMark(t)}<small>${leagueTravelSeconds(ship.id, flood)} s</small></button>`,
+          )
           .join('')}</div>
+        <h3>Werft</h3>
+        <p class="fine">Beim Wechsel nimmt die Werft dein altes Schiff für den halben Preis zurück. Der halbe Preis zählt auch zum Vermögen.</p>
+        <div class="league-ships">${ships}</div>
         <h3>Rangliste</h3>
         ${this.ranking.length ? rankTable(this.ranking) : '<p class="fine">Noch keine Einträge.</p>'}`;
     }
+    const season = info.season;
+    const seasonLine = season
+      ? `<p class="league-season">Saison ${season.id} · endet in ${remainingText(Date.parse(season.endsAt) - now.getTime())} (${new Date(season.endsAt).toLocaleString('de-DE', { weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}). Dann kommen die drei Reichsten in die Ruhmeshalle und alle beginnen neu.</p>`
+      : '';
+    const events = info.events
+      .filter((e) => isEventActive(e, now))
+      .map((e) => {
+        const t = leagueEventText(e, (id) => this.townName(id));
+        return `<div class="league-event"><b>${esc(t.title)}</b> <span>noch ${remainingText(Date.parse(e.endsAt) - now.getTime())}</span><br><small>${esc(t.text)}</small></div>`;
+      })
+      .join('');
+    const hall = this.hallHtml();
     this.menu.show(
       `<div class="card-head">Handelsliga · live</div>
       <h2>Ein Markt für alle</h2>
-      <p class="fine">Alle Spieler handeln auf demselben Markt. Jeder Kauf macht die Ware teurer, jeder Verkauf billiger, für alle. Ein Kahn mit ${LEAGUE_CARGO} t, Start mit 300 Talern. Die Märkte erholen sich langsam von selbst.</p>
+      <p class="fine">Alle Spieler handeln auf demselben Markt. Jeder Kauf macht die Ware teurer, jeder Verkauf billiger, für alle. Start mit ${LEAGUE_START_GOLD} Talern und einem Treidelkahn. Die Märkte erholen sich langsam von selbst.</p>
+      ${seasonLine}
+      ${events}
       ${this.leagueMsg ? `<p class="league-msg">${esc(this.leagueMsg)}</p>` : ''}
       ${body}
+      ${hall}
       <p class="fine"><button class="link" data-menu="leagueRefresh">Neu laden</button> · <button class="link" data-menu="account">Konto und Name</button> · <button class="link" data-menu="${this.menuBack()}">Zurück</button></p>`,
       true,
     );
     this.menu.screen = 'league';
+  }
+
+  /** Ruhmeshalle: die besten drei der letzten Saisons */
+  private hallHtml(): string {
+    const bySeason = new Map<number, LeagueInfo['hall']>();
+    for (const e of this.leagueInfo.hall) {
+      const list = bySeason.get(e.seasonId) ?? [];
+      list.push(e);
+      bySeason.set(e.seasonId, list);
+    }
+    if (!bySeason.size) {
+      return this.leagueInfo.season ? '<h3>Ruhmeshalle</h3><p class="fine">Noch leer. Die erste Saison läuft noch.</p>' : '';
+    }
+    const medal = ['Gold', 'Silber', 'Bronze'];
+    return `<h3>Ruhmeshalle</h3>${[...bySeason.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(
+        ([id, list]) =>
+          `<div class="league-hall"><b>Saison ${id}</b> <small>${list[0]!.players} Teilnehmer</small><table class="rank-table"><tbody>${list
+            .sort((a, b) => a.rank - b.rank)
+            .map((e) => `<tr class="${e.mine ? 'mine' : ''}"><td>${medal[e.rank - 1] ?? e.rank}</td><td>${esc(e.username)}${e.mine ? ' (du)' : ''}</td><td class="num">${fmt(e.wealth)} Taler</td></tr>`)
+            .join('')}</tbody></table></div>`,
+      )
+      .join('')}`;
   }
 
   private menuBack(): string {
