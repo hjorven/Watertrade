@@ -15,7 +15,10 @@ import {
   startCanalStage,
   tickCanal,
 } from './canal.ts';
-import { advance, addShip, day, effectiveSegments, newGame, planRoute, type GameState } from './game.ts';
+import { advance, addShip, day, effectiveSegments, newGame, planRoute, upgradeState, type GameState } from './game.ts';
+import { tickContracts } from './contracts.ts';
+import { tickRivals } from './rivals.ts';
+import { canalDone } from './canal.ts';
 import { goalDone } from './goals.ts';
 
 const MAP = ZWEI_TAELER;
@@ -250,5 +253,107 @@ describe('Kanalbau', () => {
     const p = canalProgress(s, MAP)!;
     expect(p.stageShare).toBeCloseTo(0.5);
     expect(p.total).toBeCloseTo(12.5 / 235);
+  });
+});
+
+describe('Kanal und der Rest des Spiels', () => {
+  it('Aufträge kommen nur aus Städten, die der Spieler erreicht', () => {
+    const s = newGame(MAP, { startTown: 'altenfurt', rivals: false, seed: 7 });
+    for (let i = 0; i < 120; i++) {
+      s.hour += 24;
+      tickContracts(s, MAP);
+    }
+    expect(s.contracts.length).toBeGreaterThan(0);
+    expect(s.contracts.some((c) => NORTH_TOWN_IDS.includes(c.town))).toBe(false);
+    // mit einem Kontor in Nordhafen kommen auch Aufträge aus dem Norden
+    s.kontore.nordhafen = { level: 1, stock: {} };
+    for (let i = 0; i < 200; i++) {
+      s.hour += 24;
+      tickContracts(s, MAP);
+    }
+    expect(s.contracts.some((c) => NORTH_TOWN_IDS.includes(c.town))).toBe(true);
+  });
+
+  it('Konkurrenz baut Kontore nur, wo ihre Schiffe hinkommen', () => {
+    const s = newGame(MAP, { startTown: 'altenfurt', rivals: true, seed: 3 });
+    for (const r of s.rivals) r.money = 1e6;
+    for (let i = 0; i < 10; i++) tickRivals(s, MAP);
+    const kontore = s.rivals.flatMap((r) => r.kontore);
+    expect(kontore.length).toBeGreaterThan(0);
+    for (const r of s.rivals) {
+      const north = r.ships.some((x) => NORTH_TOWN_IDS.includes(x.port ?? x.voyage?.to ?? ''));
+      const south = r.ships.some((x) => !NORTH_TOWN_IDS.includes(x.port ?? x.voyage?.to ?? ''));
+      for (const k of r.kontore) {
+        if (NORTH_TOWN_IDS.includes(k)) expect(north, `${r.id} in ${k}`).toBe(true);
+        else expect(south, `${r.id} in ${k}`).toBe(true);
+      }
+    }
+  });
+
+  it('ein Kapitel mit fertigem Kanal zählt ihn als gebaut', () => {
+    const s = newGame(MAP, { startTown: 'altenfurt', money: 50000, rivals: false, works: [CANAL_ID] });
+    expect(canalDone(s)).toBe(true);
+    expect(canalStagesDone(s)).toBe(4);
+    expect(canalProgress(s, MAP)!.done).toBe(true);
+    expect(startCanalStage(s, MAP).ok).toBe(false);
+    expect(s.money).toBe(50000);
+    expect(canalAccepts(s, SCHEITELKANAL, 'brot')).toBe(0);
+    expect(goalDone(s, { type: 'canalStage', stage: 4, text: '' })).toBe(true);
+  });
+
+  it('Spielstand mit halbem Kanal übersteht Speichern und Laden', () => {
+    const s = fresh();
+    startCanalStage(s, MAP);
+    s.canal!.worked = 10;
+    s.canal!.stock.holz = 40;
+    const back = upgradeState(JSON.parse(JSON.stringify(s)), MAP);
+    expect(back.canal).toEqual(s.canal);
+    expect(canalProgress(back, MAP)).toEqual(canalProgress(s, MAP));
+  });
+
+  it('fertiger Kanal gehört dem Spieler, auch nach dem Laden', () => {
+    const s = fresh(200000);
+    startCanalStage(s, MAP);
+    s.canal!.stage = 3;
+    s.canal!.worked = 19.5;
+    supply(s);
+    setDayOfYear(s, 10);
+    tickCanal(s, MAP);
+    const w = s.works.find((x) => x.id === CANAL_ID)!;
+    expect(w.owner).toBe('spieler');
+    const back = upgradeState(JSON.parse(JSON.stringify(s)), MAP);
+    expect(back.works.find((x) => x.id === CANAL_ID)).toEqual(w);
+  });
+
+  it('altes Brot nimmt die Baustelle nicht an', () => {
+    const s = fresh();
+    const ship = addShip(s, 'treidelkahn', 'altenfurt');
+    ship.cargo.brot = { amount: 30, cost: 600, fresh: 0.45 };
+    expect(deliverToCanal(s, MAP, { ship: ship.id }, 'brot', 30).ok).toBe(false);
+    ship.cargo.brot.fresh = 0.9;
+    expect(deliverToCanal(s, MAP, { ship: ship.id }, 'brot', 30).ok).toBe(true);
+  });
+
+  it('im Winter Frostpause statt Mangelmeldung, im Frühjahr meldet die Baustelle den Mangel neu', () => {
+    const s = fresh();
+    setDayOfYear(s, 80);
+    startCanalStage(s, MAP);
+    s.canal!.stage = 1;
+    expect(tickCanal(s, MAP).length).toBe(1);
+    setDayOfYear(s, 95);
+    expect(tickCanal(s, MAP).length).toBe(0);
+    expect(s.canal!.frost).toBe(true);
+    expect(s.canal!.waiting).toEqual([]);
+    setDayOfYear(s, 121);
+    expect(tickCanal(s, MAP).length).toBe(1);
+    expect(s.canal!.frost).toBe(false);
+  });
+
+  it('Schiff auf der Fahrt kann nicht abliefern', () => {
+    const s = fresh();
+    const ship = addShip(s, 'treidelkahn', 'altenfurt');
+    ship.cargo.holz = { amount: 30, cost: 300 };
+    ship.port = null;
+    expect(deliverToCanal(s, MAP, { ship: ship.id }, 'holz', 30).ok).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 import type { MapDef } from '../data/maps/valley.ts';
 import { season } from './calendar.ts';
 import { addNews, day, pick, rand, randInt, type GameState, type NewsItem, type WorldEvent, type WorldEventKind } from './state.ts';
-import { gaugeCount } from './works.ts';
+import { effectiveSegments, gaugeCount } from './works.ts';
 
 /** Wahrscheinlichkeit für ein neues Ereignis pro Tag */
 const EVENT_CHANCE = 0.08;
@@ -120,7 +120,7 @@ function startEvent(state: GameState, map: MapDef, kind: WorldEventKind): WorldE
       e.until = d + randInt(state, 8, 14);
       break;
     case 'zoll': {
-      const segs = map.segments.filter((s) => !s.requires && !state.events.some((x) => x.seg === s.id));
+      const segs = effectiveSegments(state, map).filter((s) => !state.events.some((x) => x.seg === s.id));
       if (!segs.length) return null;
       e.seg = pick(state, segs).id;
       e.value = randInt(state, 3, 8) * 10;

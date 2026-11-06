@@ -113,7 +113,7 @@ const NORTH_TOWNS: TownDef[] = [
   {
     id: 'moorwalde',
     name: 'Moorwalde',
-    description: 'Dorf am Moorbach zwischen Wald und Moor. Holz, Schafe und ein wenig Hafer.',
+    description: 'Dorf am Moorbach zwischen Wald und Moor. Holz, Schafe, Hafer und die einzige Mühle im Norden.',
     river: 'moorbach',
     riverT: 0.15,
     side: 1,
@@ -121,9 +121,12 @@ const NORTH_TOWNS: TownDef[] = [
     population: 300,
     fields: true,
     target: 50,
-    produces: { holz: 8, wolle: 3, getreide: 3 },
+    produces: { holz: 8, wolle: 3, getreide: 7 },
     consumes: { salz: 1.5, werkzeug: 0.5, brot: 1, stoff: 0.5 },
-    industries: [{ name: 'Sägemühle', inputs: { holz: 3 }, outputs: { bretter: 2 } }],
+    industries: [
+      { name: 'Sägemühle', inputs: { holz: 3 }, outputs: { bretter: 2 } },
+      { name: 'Mühle', inputs: { getreide: 3 }, outputs: { mehl: 2 } },
+    ],
     shipyard: ['floss'],
   },
   {

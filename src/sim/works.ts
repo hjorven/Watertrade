@@ -86,3 +86,36 @@ export function gaugeCount(state: GameState): number {
 export function litSegments(state: GameState): string[] {
   return (state.works ?? []).filter((w) => w.done && PROJECT_BY_ID.get(w.id)?.effect.light).map((w) => PROJECT_BY_ID.get(w.id)!.seg);
 }
+
+/**
+ * Städte, die von den Ausgangsstädten über vorhandene Abschnitte erreichbar sind (ohne Rücksicht
+ * auf Wasserstand oder Schiffstyp). Auf Karten ohne gesperrte Abschnitte (z. B. ein Kanal, der erst
+ * gebaut wird) hängt alles zusammen, dann kommen alle Städte zurück.
+ */
+export function connectedTowns(state: GameState, map: MapDef, from: Iterable<string>): Set<string> {
+  if (!map.segments.some((s) => s.requires)) return new Set(map.towns.map((t) => t.id));
+  const segs = effectiveSegments(state, map);
+  const seen = new Set<string>(from);
+  const queue = [...seen];
+  while (queue.length) {
+    const node = queue.pop()!;
+    for (const s of segs) {
+      const next = s.from === node ? s.to : s.to === node ? s.from : null;
+      if (next && !seen.has(next)) {
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return seen;
+}
+
+/** Häfen, an denen der Spieler etwas hat: Schiffe (auch Fahrtziele) und Kontore */
+export function playerTowns(state: GameState): string[] {
+  const out = new Set<string>(Object.keys(state.kontore));
+  for (const s of state.ships) {
+    if (s.port) out.add(s.port);
+    if (s.voyage) out.add(s.voyage.to);
+  }
+  return [...out];
+}

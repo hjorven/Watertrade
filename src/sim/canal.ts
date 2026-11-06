@@ -28,10 +28,15 @@ export interface CanalState {
   startedDay: number;
   /** Waren, auf die die Baustelle gerade wartet (für Anzeige und einmalige Meldung) */
   waiting: string[];
+  /** Frostpause: im Winter ruht der laufende Abschnitt */
+  frost?: boolean;
   done: boolean;
 }
 
 const EPS = 1e-6;
+
+/** Verderbliche Ware (Brot) nimmt die Baustelle nur halbwegs frisch an */
+export const CANAL_MIN_FRESH = 0.6;
 
 /** Kanal, der auf dieser Karte gebaut werden kann, oder null */
 export function canalOf(map: MapDef): CanalDef | null {
@@ -43,15 +48,27 @@ function ensure(state: GameState, def: CanalDef): CanalState {
   if (!state.canal || state.canal.id !== def.id) {
     state.canal = { id: def.id, stage: 0, active: false, worked: 0, stock: {}, delivered: {}, startedDay: 0, waiting: [], done: false };
   }
+  // schon fertig gebaut (z. B. Kapitelstart mit works: ['scheitelkanal'])
+  if (!state.canal.done && state.works.some((w) => w.id === def.id && w.done)) {
+    Object.assign(state.canal, { stage: def.stages.length, active: false, worked: 0, stock: {}, waiting: [], done: true });
+  }
   return state.canal;
 }
 
+/** Spielstand des Kanals für die Anzeige, ohne etwas anzulegen; berücksichtigt vorgebaute Kanäle */
+function view(state: GameState, def: CanalDef): CanalState | undefined {
+  if (state.works.some((w) => w.id === def.id && w.done)) return ensure(state, def);
+  return state.canal?.id === def.id ? state.canal : undefined;
+}
+
 export function canalDone(state: GameState): boolean {
-  return !!state.canal?.done;
+  return !!state.canal?.done || CANALS.some((c) => state.works.some((w) => w.id === c.id && w.done));
 }
 
 /** Anzahl fertiger Bauabschnitte */
 export function canalStagesDone(state: GameState): number {
+  const built = CANALS.find((c) => state.works.some((w) => w.id === c.id && w.done));
+  if (built) return built.stages.length;
   return state.canal?.stage ?? 0;
 }
 
@@ -64,7 +81,7 @@ export function currentStage(state: GameState, def: CanalDef): CanalStageDef | n
 export function canalProgress(state: GameState, map: MapDef): { stage: number; stages: number; stageShare: number; total: number; done: boolean } | null {
   const def = canalOf(map);
   if (!def) return null;
-  const c = state.canal?.id === def.id ? state.canal : undefined;
+  const c = view(state, def);
   const stages = def.stages.length;
   if (!c) return { stage: 0, stages, stageShare: 0, total: 0, done: false };
   if (c.done) return { stage: stages, stages, stageShare: 1, total: 1, done: true };
@@ -77,7 +94,7 @@ export function canalProgress(state: GameState, map: MapDef): { stage: number; s
 
 /** Restbedarf an Baustoffen im laufenden Abschnitt (abzüglich Baulager), in t */
 export function stageNeeds(state: GameState, def: CanalDef): Record<string, number> {
-  const c = state.canal?.id === def.id ? state.canal : undefined;
+  const c = view(state, def);
   const st = def.stages[c?.stage ?? 0];
   if (!st || c?.done) return {};
   const left = c?.active ? Math.max(0, 1 - c.worked / st.days) : 1;
@@ -91,7 +108,7 @@ export function stageNeeds(state: GameState, def: CanalDef): Record<string, numb
 
 /** Wie viel von einer Ware die Baustelle noch annimmt: Rest dieses und aller folgenden Abschnitte */
 export function canalAccepts(state: GameState, def: CanalDef, good: string): number {
-  const c = state.canal?.id === def.id ? state.canal : undefined;
+  const c = view(state, def);
   if (c?.done) return 0;
   const from = c?.stage ?? 0;
   let total = 0;
@@ -117,6 +134,7 @@ export function startCanalStage(state: GameState, map: MapDef): TradeResult {
   c.active = true;
   c.worked = 0;
   c.waiting = [];
+  c.frost = false;
   if (c.stage === 0) c.startedDay = day(state);
   addNews(state, 'haus', `${def.name}, Abschnitt ${c.stage + 1} von ${def.stages.length}: ${st.name} beginnt.`);
   return { ok: true, message: `${st.name}: Die Arbeiten beginnen.`, amount: 0, taler: st.cost };
@@ -162,6 +180,7 @@ export function deliverToCanal(
   if (accepts <= 0) return fail(`Die Baustelle braucht kein ${name} mehr.`);
   const have = Math.floor(cargo[good]?.amount ?? 0);
   if (have <= 0) return fail(`Kein ${name} vorhanden.`);
+  if ((cargo[good].fresh ?? 1) < CANAL_MIN_FRESH) return fail(`Das ${name} ist zu alt, die Baustelle nimmt es nicht.`);
   const amount = Math.min(wanted, have, accepts);
   if (amount <= 0) return fail('Nichts geliefert.');
   takeFrom(cargo, good, amount);
@@ -179,7 +198,11 @@ export function tickCanal(state: GameState, map: MapDef): NewsItem[] {
   const st = def.stages[c.stage];
   const out: NewsItem[] = [];
   const pace = season(day(state)) === 'winter' ? st.winterWork : 1;
-  if (pace <= 0) return out;
+  c.frost = pace <= 0;
+  if (pace <= 0) {
+    c.waiting = [];
+    return out;
+  }
   const planned = Math.min(pace, st.days - c.worked);
   let work = planned;
   // Baustoffe begrenzen die Arbeit: je Arbeitstag ein gleicher Anteil jeder Ware
@@ -210,7 +233,8 @@ export function tickCanal(state: GameState, map: MapDef): NewsItem[] {
     if (c.stage >= def.stages.length) {
       c.done = true;
       c.stock = {};
-      if (!state.works.some((w) => w.id === def.id)) state.works.push({ id: def.id, started: c.startedDay, done: true });
+      // gehört dem Spieler; Durchfahrtsgebühren gibt es (noch) nicht, die Konkurrenz fährt frei
+      if (!state.works.some((w) => w.id === def.id)) state.works.push({ id: def.id, started: Math.max(1, c.startedDay), done: true, owner: 'spieler', fee: 'frei' });
       out.push(addNews(state, 'ereignis', `Eingeweiht: ${def.name}. ${def.text}`));
     } else {
       out.push(addNews(state, 'haus', `${def.name}: ${st.name} ist fertig. Der nächste Abschnitt wartet auf Geld.`));
