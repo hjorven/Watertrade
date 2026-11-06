@@ -5,11 +5,11 @@ export interface ShipClass extends ShipType {
   description: string;
   /** ab welcher Epoche die Werften diesen Typ bauen */
   epoch: number;
-  /** Dieselkosten in Taler je Fahrstunde (Motorschiffe) */
-  fuel?: number;
+  /** Dieselverbrauch in Tonnen je Fahrstunde (Motorschiffe). Der Diesel kommt aus dem Tank (`bunker`). */
+  diesel?: number;
   /** Kohleverbrauch in Tonnen je Fahrstunde (Dampfer). Die Kohle kommt aus dem Bunker. */
   coal?: number;
-  /** Fassungsvermögen des Kohlebunkers in Tonnen, getrennt vom Laderaum */
+  /** Fassungsvermögen des Kohlebunkers oder Dieseltanks in Tonnen, getrennt vom Laderaum */
   bunker?: number;
   /** Kühlraum: verderbliche Ware bleibt frisch und bringt diesen Aufpreis */
   fresh?: number;
@@ -17,8 +17,15 @@ export interface ShipClass extends ShipType {
   timber?: number;
 }
 
-/** Verderbliche Ware: Wertverlust je Fahrtag ohne Kühlung */
-export const PERISH: Record<string, number> = { fisch: 0.06, brot: 0.04, bier: 0.01 };
+/** Verderbliche Ware: Wertverlust je Fahrtag ohne Kühlung. Milch hält kaum, Käse ist die haltbare Form. */
+export const PERISH: Record<string, number> = { fisch: 0.06, brot: 0.04, bier: 0.01, milch: 0.12, kaese: 0.015 };
+
+/** Brennstoff eines Schiffs: Kohle für Dampfer, Diesel für Motorschiffe, sonst keiner */
+export function fuelOf(cls: ShipClass): { good: 'kohle' | 'diesel'; rate: number; name: string } | null {
+  if (cls.coal) return { good: 'kohle', rate: cls.coal, name: 'Kohle' };
+  if (cls.diesel) return { good: 'diesel', rate: cls.diesel, name: 'Diesel' };
+  return null;
+}
 
 /** Waren, die im Kühlraum frisch bleiben */
 export const FRESH_GOODS = Object.keys(PERISH);
@@ -138,8 +145,9 @@ export const SHIPS: Record<string, ShipClass> = {
     capacity: 110,
     canGoUpstream: true,
     price: 6500,
-    fuel: 10,
-    description: 'Dieselmotor, Steuerhaus achtern, flacher Aufbau: schnell, groß und passt unter die meisten Brücken.',
+    diesel: 0.25,
+    bunker: 12,
+    description: 'Dieselmotor, Steuerhaus achtern, flacher Aufbau: schnell, groß und passt unter die meisten Brücken. Verbraucht 0,25 t Diesel je Stunde aus dem Tank.',
   },
   kuehlschiff: {
     id: 'kuehlschiff',
@@ -152,9 +160,10 @@ export const SHIPS: Record<string, ShipClass> = {
     capacity: 80,
     canGoUpstream: true,
     price: 7200,
-    fuel: 11,
+    diesel: 0.28,
+    bunker: 12,
     fresh: 0.1,
-    description: 'Kühlraum für Fisch, Brot und Bier: nichts verdirbt unterwegs, und ganz frische Ware bringt 10 % mehr.',
+    description: 'Kühlraum für Fisch, Milch, Käse, Brot und Bier: nichts verdirbt unterwegs, und ganz frische Ware bringt 10 % mehr. Verbraucht 0,28 t Diesel je Stunde.',
   },
 };
 

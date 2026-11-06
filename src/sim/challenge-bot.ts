@@ -13,6 +13,7 @@ import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { PROJECT_BY_ID } from '../data/projects.ts';
 import { SHIPS } from '../data/ships.ts';
+import { fairWage, LOYALTY_WARN, setCaptainWage } from './captains.ts';
 import { challengeGame } from './challenge.ts';
 import { acceptContract, deliverContract, MAX_ACCEPTED } from './contracts.ts';
 import { buyCost, price, sellRevenue } from './economy.ts';
@@ -91,8 +92,8 @@ function goalBonus(state: GameState, map: MapDef, goals: Goal[], open: boolean[]
 /** Kosten einer Fahrt ohne Zoll: Diesel, Kohle und die spätere Reparatur des Verschleißes */
 function runningCost(ship: Ship, hours: number): number {
   const cls = SHIPS[ship.type];
-  // Kohle ist abseits der Gruben meist knapp: lieber mit dem anderthalbfachen Grundpreis rechnen
-  const fuel = (cls.fuel ?? 0) * hours + (cls.coal ?? 0) * hours * base('kohle') * 1.6;
+  // Kohle ist abseits der Gruben meist knapp: lieber mit dem anderthalbfachen Grundpreis rechnen; Diesel etwas über Grundpreis
+  const fuel = (cls.diesel ?? 0) * hours * base('diesel') * 1.3 + (cls.coal ?? 0) * hours * base('kohle') * 1.6;
   return fuel + hours * wearRate(ship) * cls.price * 0.5;
 }
 
@@ -297,6 +298,19 @@ function assignRoute(state: GameState, map: MapDef, goals: Goal[], open: boolean
 }
 
 /**
+ * Lohn nachziehen wie ein aufmerksamer Spieler: Wer murrt oder ein fremdes Angebot hat,
+ * bekommt, was er wert ist, oder so viel wie das Angebot.
+ */
+function payCaptains(state: GameState): void {
+  for (const ship of state.ships) {
+    const c = ship.captain;
+    if (!c || ((c.loyalty ?? 100) >= LOYALTY_WARN && !c.offer)) continue;
+    const want = Math.max(fairWage(c), c.offer?.wage ?? 0);
+    if (want > c.wage) setCaptainWage(state, ship.id, want);
+  }
+}
+
+/**
  * Spielt eine Herausforderung bis zum Sieg oder bis die Frist abläuft.
  * Ziele rasten ein wie im Spiel: Einmal erfüllt bleibt erfüllt.
  */
@@ -328,6 +342,7 @@ export function playChallenge(map: MapDef, c: Challenge, seed: number, opts: Bot
     const d = day(state);
     if (d === lastDay) continue;
     lastDay = d;
+    payCaptains(state);
     const od = open();
     manageHouse(state, map, goals, od, opts);
     const daysLeft = limit - (d - startDay);

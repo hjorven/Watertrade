@@ -20,13 +20,17 @@ import {
 } from './game.ts';
 import { marketTarget, STOCK_CAP, tickTown, tradedGoods } from './towns.ts';
 
+import { EPOCH_GOODS } from './supply.ts';
+
 const start = () => newGame(VALLEY, 'oberau');
 
 describe('Karte', () => {
   it('jede Ware wird irgendwo erzeugt und irgendwo gebraucht', () => {
     for (const g of GOODS) {
-      const made = VALLEY.towns.some((t) => g.id in t.produces || t.industries.some((i) => g.id in i.outputs));
-      const used = VALLEY.towns.some((t) => g.id in t.consumes || t.industries.some((i) => g.id in i.inputs));
+      // Waren einer späteren Epoche (Diesel) stehen nicht in den Stadtdaten, sondern in supply.ts
+      const epoch = EPOCH_GOODS.find((e) => e.good === g.id);
+      const made = VALLEY.towns.some((t) => g.id in t.produces || t.industries.some((i) => g.id in i.outputs)) || !!epoch && Object.keys(epoch.produces).length > 0;
+      const used = VALLEY.towns.some((t) => g.id in t.consumes || t.industries.some((i) => g.id in i.inputs)) || !!epoch && Object.keys(epoch.consumes).length > 0;
       expect(made, `${g.name} wird nirgends erzeugt`).toBe(true);
       expect(used, `${g.name} wird nirgends gebraucht`).toBe(true);
     }

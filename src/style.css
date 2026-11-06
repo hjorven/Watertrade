@@ -1235,8 +1235,18 @@ ul.plain small {
   text-align: left;
 }
 
-.contract-row .swatch {
+.contract-row .swatch,
+.contract-row .good-icon {
   flex: none;
+}
+
+/* Bildzeichen der Waren (ui/goodicons.ts), ersetzt das Farbkästchen */
+.good-icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 5px;
+  vertical-align: -3px;
 }
 
 .btn.on:hover:not(:disabled) {

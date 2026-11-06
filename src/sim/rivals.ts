@@ -2,7 +2,7 @@ import { KONTOR_PRICE } from '../data/buildings.ts';
 import { GOODS } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { RIVAL_BY_ID, RIVALS } from '../data/rivals.ts';
-import { SHIPS } from '../data/ships.ts';
+import { fuelOf, MIN_FRESH, PERISH, SHIPS } from '../data/ships.ts';
 import { available, buyCost, sellRevenue } from './economy.ts';
 import { withWind, type ShipType } from './river.ts';
 import { addNews, rand, wind, type GameState, type NewsItem, type RivalShip, type RivalState } from './state.ts';
@@ -70,6 +70,13 @@ export function rivalWorth(r: RivalState): number {
   return Math.round(r.money + ships + r.kontore.length * KONTOR_PRICE);
 }
 
+/** Frische verderblicher Ware nach `hours` Fahrt, wie beim Spieler; im Kühlschiff verdirbt nichts */
+function freshAfter(good: string, hours: number, type: string): number {
+  const rate = PERISH[good];
+  if (!rate || SHIPS[type]?.fresh) return 1;
+  return Math.max(MIN_FRESH, 1 - (rate * hours) / 24);
+}
+
 function sellCargo(state: GameState, r: RivalState, ship: RivalShip, town: string): void {
   const c = ship.cargo;
   if (!c) return;
@@ -77,7 +84,7 @@ function sellCargo(state: GameState, r: RivalState, ship: RivalShip, town: strin
   const m = state.markets[town][c.good];
   if (m) {
     const factor = r.kontore.includes(town) ? 0.95 : 0.9;
-    const revenue = sellRevenue(good.base, m, c.amount, factor);
+    const revenue = Math.round(sellRevenue(good.base, m, c.amount, factor) * (c.fresh ?? 1));
     m.stock += c.amount;
     r.money += revenue;
     const sold = (state.stats.rivalSold ??= {});
@@ -119,7 +126,7 @@ function bestDeal(state: GameState, map: MapDef, r: RivalState, ship: RivalShip)
     for (const [dest, { hours, fee }] of routes) {
       const m2 = state.markets[dest][goodId];
       if (!m2) continue;
-      const revenue = sellRevenue(good.base, m2, amount, r.kontore.includes(dest) ? 0.95 : 0.9);
+      const revenue = sellRevenue(good.base, m2, amount, r.kontore.includes(dest) ? 0.95 : 0.9) * freshAfter(goodId, hours, ship.type);
       // Gebühren für fremde Bauwerke schmälern den Gewinn
       const profit = revenue - cost - fee;
       if (profit < amount * 2) continue;
@@ -131,17 +138,15 @@ function bestDeal(state: GameState, map: MapDef, r: RivalState, ship: RivalShip)
 }
 
 /**
- * Dampfer der Konkurrenz bunkern Kohle am Hafenmarkt, genau wie der Spieler.
- * Gibt es dort keine, zahlen sie den anderthalbfachen Grundpreis beim Kohlenhändler.
+ * Dampfer und Motorschiffe der Konkurrenz bunkern Kohle oder Diesel am Hafenmarkt, genau wie der Spieler.
+ * Gibt es dort keinen, zahlen sie den anderthalbfachen Grundpreis beim Händler.
  */
 function rivalBunker(state: GameState, r: RivalState, ship: RivalShip, hours: number): void {
-  const cls = SHIPS[ship.type];
-  if (cls.fuel) r.money -= Math.round(cls.fuel * hours); // Diesel
-  const rate = cls.coal;
-  if (!rate) return;
-  const need = Math.ceil(rate * hours);
-  const base = GOODS.find((g) => g.id === 'kohle')!.base;
-  const m = state.markets[ship.port!]?.kohle;
+  const fuel = fuelOf(SHIPS[ship.type]);
+  if (!fuel) return;
+  const need = Math.ceil(fuel.rate * hours);
+  const base = GOODS.find((g) => g.id === fuel.good)!.base;
+  const m = state.markets[ship.port!]?.[fuel.good];
   const fromMarket = m ? Math.max(0, Math.min(need, available(m) - 5)) : 0;
   if (fromMarket > 0) {
     r.money -= buyCost(base, m!, fromMarket);
@@ -176,7 +181,9 @@ function decide(state: GameState, map: MapDef, r: RivalState, ship: RivalShip): 
     const cost = buyCost(GOODS.find((g) => g.id === deal.good)!.base, m, deal.amount);
     m.stock -= deal.amount;
     r.money -= cost;
-    ship.cargo = { good: deal.good, amount: deal.amount, cost, dest: deal.dest };
+    const hours = ship.port ? planRoute(state, map, here, deal.dest, rivalType(state, ship)) : null;
+    const fresh = hours?.ok ? freshAfter(deal.good, hours.voyage.hours, ship.type) : 1;
+    ship.cargo = { good: deal.good, amount: deal.amount, cost, dest: deal.dest, ...(fresh < 1 ? { fresh } : {}) };
     if (sailTo(state, map, ship, deal.dest, r)) return;
     // doch nicht losgekommen: Ware zurück
     m.stock += deal.amount;

@@ -181,7 +181,8 @@ export interface RivalShip {
   name: string;
   port: string | null;
   voyage: Voyage | null;
-  cargo: { good: string; amount: number; cost: number; dest: string } | null;
+  /** fresh: erwartete Frische verderblicher Ware bei Ankunft (fehlt bei haltbarer Ware) */
+  cargo: { good: string; amount: number; cost: number; dest: string; fresh?: number } | null;
   /** Spielstunde, ab der das Schiff wieder handelt */
   idleUntil: number;
 }
@@ -318,6 +319,10 @@ export interface Work {
   earned?: number;
   /** Gebührenanteil, der an den Partner ging */
   partnerEarned?: number;
+  /** Tage, um die sich der Bau mangels Ziegeln schon verzögert hat (in `started` eingerechnet) */
+  brickDelay?: number;
+  /** angesammelter Ziegelmangel in Bautagen, ab 1 ruht der Bau einen Tag */
+  brickShort?: number;
 }
 
 /** Ausbau eines Hafens durch den Spieler */
@@ -435,6 +440,8 @@ export interface GameState {
   finance?: Finance;
   /** Höchstzahl eigener Schiffe (Herausforderung "Ein Schiff"), fehlt = unbegrenzt */
   shipLimit?: number;
+  /** gesetzt, sobald Motorschiffe Diesel im Tank führen (ältere Spielstände bekommen einmal einen vollen Tank) */
+  dieselTanks?: boolean;
 }
 
 export function shipClass(ship: { type: string }): ShipClass {
