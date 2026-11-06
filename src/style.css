@@ -1792,6 +1792,25 @@ body.no-game .toasts {
   }
 }
 
+/* Ansehen und Rathaus */
+.standing-line {
+  display: block;
+  opacity: 0.85;
+}
+ul.ranks li {
+  opacity: 0.6;
+}
+ul.ranks li.done {
+  opacity: 1;
+}
+ul.ranks li.done b::after {
+  content: ' \2713';
+}
+/* viele Reiter: auf schmalen Bildschirmen umbrechen statt abschneiden */
+.tabs {
+  flex-wrap: wrap;
+}
+
 /* ---------- Preisbuch, Preisverlauf, Schiffsbuch ---------- */
 
 .news .news-geruecht {

@@ -62,6 +62,7 @@ import type { RoutePlan } from './sim/state.ts';
 import { deliverToCanal, startCanalStage } from './sim/canal.ts';
 import { EPOCHS } from './data/ships.ts';
 import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
+import { buildTownhouse, found, joinCouncil, leaveCouncil } from './sim/standing.ts';
 import { goalDone, goalProgress, restoreCompleted } from './sim/goals.ts';
 import { payOverdueNow, repayLoan, setInsured, takeLoan } from './sim/finance.ts';
 import { deserialize, SAVE_VERSION, serialize, type GameMode, type SaveGame } from './sim/save.ts';
@@ -105,7 +106,11 @@ const towns = MAP.towns.map((def) => placeTown(land, def));
 land.build([
   ...towns.map((t) => ({ pos: t.center, radius: t.radius * 1.4, fields: !!t.def.fields })),
   // Bauplätze am Ufer frei von Bäumen halten
-  ...towns.flatMap((t) => t.lots.map((l) => ({ pos: l.pos, radius: 0.5, fields: false }))),
+  ...towns.flatMap((t) => [
+    ...t.lots.map((l) => ({ pos: l.pos, radius: 0.5, fields: false })),
+    // Plätze für Stadthaus und Stiftungen sind breiter
+    ...t.civic.map((l) => ({ pos: l.pos, radius: 2.5, fields: false })),
+  ]),
 ]);
 land.buildIce(MAP.segments.filter((s) => s.freezes).map((s) => ({ river: s.river, from: s.fromT, to: s.toT })));
 stage.scene.add(land.group);
@@ -403,6 +408,21 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
     case 'harbor':
       r = buildHarbor(state, MAP, String(d.town), d.partner === 'stadt');
       ok = 'glocke';
+      break;
+    case 'found':
+      r = found(state, town, String(d.id));
+      ok = 'glocke';
+      break;
+    case 'townhouse':
+      r = buildTownhouse(state, town);
+      ok = 'erfolg';
+      break;
+    case 'council':
+      r = joinCouncil(state, town);
+      ok = 'stempel';
+      break;
+    case 'leaveCouncil':
+      r = leaveCouncil(state, town);
       break;
     case 'canalStart':
       r = startCanalStage(state, MAP);
@@ -757,7 +777,7 @@ function reloadWithMap(s: GameState, sess: Session): void {
 function featuresFor(sess: Session): HudFeatures {
   const n = sess.mode === 'kampagne' ? (sess.chapter?.number ?? 99) : 99;
   if (n <= 1) return { tabs: ['markt', 'werft', 'bank'], views: ['ship', 'news', 'map'] };
-  if (n === 2) return { tabs: ['markt', 'kontor', 'werft', 'kneipe', 'route', 'bank'], views: ['ship', 'news', 'map', 'contracts', 'register'] };
+  if (n === 2) return { tabs: ['markt', 'kontor', 'werft', 'kneipe', 'route', 'bank', 'rathaus'], views: ['ship', 'news', 'map', 'contracts', 'register'] };
   return ALL_FEATURES;
 }
 
@@ -1079,6 +1099,10 @@ function syncEstates(): void {
   for (const [town, k] of Object.entries(state.kontore)) get(town).kontore.push({ color: PLAYER_COLOR, level: k.level });
   for (const r of state.rivals) for (const town of r.kontore) get(town).kontore.push({ color: RIVAL_BY_ID.get(r.id)!.color, level: 1 });
   for (const b of state.betriebe) get(b.town).betriebe.push({ type: b.type, active: b.active });
+  for (const [town, st] of Object.entries(state.standing ?? {})) {
+    const civic = [...st.foundations, ...(st.townhouse ? ['stadthaus'] : [])];
+    if (civic.length) get(town).civic = civic;
+  }
   estates.sync(info);
 }
 

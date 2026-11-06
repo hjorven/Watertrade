@@ -331,6 +331,24 @@ export interface Harbor {
   partnerEarned?: number;
 }
 
+/** Ansehen des Spielers in einer Stadt (sim/standing.ts) */
+export interface TownStanding {
+  /** durch Handel und Aufträge verdientes Ansehen, verblasst langsam */
+  earned: number;
+  /** heute schon aus Verkäufen verdient (Tagesgrenze) */
+  today: number;
+  /** gestiftete Bauten */
+  foundations: string[];
+  townhouse: boolean;
+  council: boolean;
+  /** aktueller Rang */
+  rank: number;
+  /** höchster je gemeldeter Rang, damit ein Auf und Ab an der Grenze nicht immer neue Meldungen bringt */
+  best?: number;
+  /** vom Spieler hier zuletzt gekaufte Tonnen je Ware (verblasst täglich); gegen Kauf-und-Rückverkauf */
+  bought?: Record<string, number>;
+}
+
 export interface GameState {
   money: number;
   hour: number; // Spielstunden seit Start
@@ -389,6 +407,8 @@ export interface GameState {
   canal?: CanalState;
   /** Brennstoffkosten seit Mitternacht */
   fuelToday: number;
+  /** Ansehen je Stadt; fehlt in älteren Spielständen */
+  standing?: Record<string, TownStanding>;
   /** Preisbuch: Stand des letzten Besuchs je Stadt */
   priceBook?: Record<string, PriceBookPage>;
   /** Beobachteter Preisverlauf: Stadt -> Ware -> Punkte */

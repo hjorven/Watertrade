@@ -13,6 +13,7 @@ import { dueEpoch, TOW_FEE_EPOCH } from './epochs.ts';
 import { YEAR_DAYS, year } from './calendar.ts';
 import { addNews, day, shipClass, withStream, type GameEvent, type GameState, type NewsItem } from './state.ts';
 import { tickWorks } from './works.ts';
+import { tickStanding, townNews, townOptions } from './standing.ts';
 import { observe, tickMarketInfo, tripArrive, tripSail } from './market-info.ts';
 import { closeSteamDay, logSteam } from './steam.ts';
 import { tickCanal } from './canal.ts';
@@ -228,7 +229,8 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
   const after = day(state);
   for (let d = before + 1; d <= after; d++) {
     for (const def of map.towns) {
-      const r = tickTown(def, state.markets[def.id], state.towns[def.id]);
+      const r = tickTown(def, state.markets[def.id], state.towns[def.id], townOptions(state, def.id, d));
+      pushNews(events, townNews(state, def, r), false);
       if (r.levelUp !== undefined || r.levelDown !== undefined) {
         const up = r.levelUp !== undefined;
         events.push({ type: 'townLevel', town: def.id, level: (r.levelUp ?? r.levelDown)!, up, newGoods: r.newGoods });
@@ -238,6 +240,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     tickHouse(state);
     // gleich nach der Lohnzahlung buchen, bevor Kapitäne gehen oder abgeworben werden
     bookRouteWages(state);
+    pushNews(events, tickStanding(state, map), false);
     pushNews(events, tickCaptains(state, map), true);
     closeFinanceDay(state);
     pushNews(events, tickFinance(state, map), true);

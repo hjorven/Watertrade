@@ -4,6 +4,7 @@ import { GOOD_BY_ID } from '../data/goods.ts';
 import { available, buyCost } from './economy.ts';
 import { explainBlock, findRoute, segmentDepth, travelTime, type BlockReason, type ShipType } from './river.ts';
 import { effectiveSegments } from './works.ts';
+import { playerToll } from './standing.ts';
 import { towFee } from './epochs.ts';
 import { tripDepart } from './market-info.ts';
 import { capacityOf, cargoLoad, conditions, effectiveDraft, effectiveType, getShip, hasUpgrade, shipClass, type FeeItem, type GameState, type Leg, type Ship, type Voyage } from './state.ts';
@@ -61,6 +62,8 @@ export function planVoyage(state: GameState, map: MapDef, shipId: number, to: st
   const plan = planRoute(state, map, ship.port, to, effectiveType(state, ship), boost);
   if (!plan.ok) return plan;
   const v = plan.voyage;
+  // Ratssitz: halber Zoll auf den Abschnitten an der eigenen Ratsstadt
+  if (v.toll) v.toll = playerToll(state, map, v.legs, (seg) => tollOn(state, seg));
   // Der Schmuggler fährt am Zoll vorbei; was er spart, merkt sich die Fahrt für eine mögliche Kontrolle
   if (hasTrait(ship.captain, 'schmuggler') && (v.toll ?? 0) > 0) {
     v.evaded = v.toll;

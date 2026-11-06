@@ -5,6 +5,7 @@ import { available, price, SELL_FACTOR, type MarketEntry } from './economy.ts';
 import { FRESH_GOODS } from '../data/ships.ts';
 import { tripSale, tripStore } from './market-info.ts';
 import { addToSlot, capacityOf, cargoLoad, fail, getShip, shipClass, type CargoSlot, type GameState, type Ship, type TradeResult } from './state.ts';
+import { buyDiscount, consumeBought, noteBuy, noteSale, recentlyBought, roundtripCap } from './standing.ts';
 
 /** Händlerblut am Ruder: etwas bessere Preise */
 const HAENDLER = 0.04;
@@ -39,7 +40,8 @@ function buyInto(
   const good = GOOD_BY_ID.get(goodId);
   const m = state.markets[town][goodId];
   if (!good || !m) return fail('Diese Ware wird hier nicht gehandelt.');
-  const rebate = opts.haendler ? 1 - HAENDLER : 1;
+  // Händlerblut und Ansehen in der Stadt machen den Einkauf billiger
+  const rebate = (opts.haendler ? 1 - HAENDLER : 1) * (1 - buyDiscount(state, town));
   const max = Math.min(wanted, space, available(m));
   let amount = 0;
   let cost = 0;
@@ -59,6 +61,7 @@ function buyInto(
   }
   state.money -= cost;
   m.stock -= amount;
+  noteBuy(state, town, goodId, amount);
   addToSlot(cargo, goodId, amount, cost);
   return { ok: true, message: `${amount} t ${good.name} für ${cost} Taler gekauft.`, amount, taler: cost };
 }
@@ -81,10 +84,13 @@ function sellFrom(
   if (!m) return fail(`${good.name} wird hier nicht gehandelt.`);
   // verdorbene Ware bringt weniger
   const f = sellFactorAt(state, town) * (opts.haendler ? 1 + HAENDLER : 1) * (1 + (opts.bonus ?? 0)) * (slot.fresh ?? 1);
+  // gerade hier gekaufte Ware bringt beim Zurückverkaufen nie mehr, als sie gekostet hat
+  const own = recentlyBought(state, town, goodId);
+  const fOwn = Math.min(f, roundtripCap(state, town, HAENDLER));
   let amount = 0;
   let revenue = 0;
   for (let i = 1; i <= max; i++) {
-    const p = unitSell(good.base, m, i, f);
+    const p = unitSell(good.base, m, i, i <= own ? fOwn : f);
     if (opts.limit && p < opts.limit) break;
     revenue += p;
     amount = i;
@@ -95,6 +101,9 @@ function sellFrom(
   slot.cost -= costShare;
   slot.amount -= amount;
   if (slot.amount < 0.001) delete cargo[goodId];
+  // Lieferung in die Knappheit bringt Ansehen
+  noteSale(state, town, goodId, amount, m.stock, m.target);
+  consumeBought(state, town, goodId, amount);
   m.stock += amount;
   state.money += revenue;
 
