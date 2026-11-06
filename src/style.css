@@ -1,0 +1,443 @@
+:root {
+  --paper: #f3e8cf;
+  --paper-dark: #e4d3ad;
+  --ink: #2b2118;
+  --ink-soft: #5b4a38;
+  --line: #b89c6c;
+  --stamp: #a8322a;
+  --gain: #2f6b2f;
+  --loss: #a8322a;
+  --water: #3f7f9a;
+  font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+  color: var(--ink);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #e9dcc0;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+.viewport {
+  position: absolute;
+  inset: 0;
+  z-index: 0; /* eigene Ebene, damit Ortsschilder nicht über dem Kontorbuch liegen */
+}
+
+.viewport canvas {
+  display: block;
+}
+
+.labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.town-label {
+  font-variant: small-caps;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-size: 15px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  border: 1px solid var(--line);
+  padding: 2px 10px;
+  border-radius: 2px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.2);
+}
+
+/* --- Kopfzeile --- */
+.topbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 14px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.18);
+  border-radius: 3px;
+}
+
+.brand {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant: small-caps;
+  letter-spacing: 0.05em;
+  padding-right: 14px;
+  border-right: 1px solid var(--line);
+}
+
+.stats {
+  display: flex;
+  gap: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.stats small {
+  font-size: 11px;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.stats b {
+  font-size: 18px;
+}
+
+/* --- Kontorbuch --- */
+.ledger {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 440px;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  padding: 16px 18px;
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 27px, rgb(184 156 108 / 0.25) 27px 28px),
+    var(--paper);
+  border: 1px solid var(--line);
+  border-left: 6px double var(--line);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.22);
+  border-radius: 3px;
+}
+
+.ledger-head h2 {
+  margin: 4px 0 2px;
+  font-size: 26px;
+  font-variant: small-caps;
+}
+
+.ledger-head p {
+  margin: 0 0 10px;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+
+.stamp-small {
+  display: inline-block;
+  color: var(--stamp);
+  border: 2px solid var(--stamp);
+  padding: 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  transform: rotate(-3deg);
+}
+
+.market {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.market thead th {
+  text-align: right;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  border-bottom: 2px solid var(--ink);
+  padding: 4px;
+}
+
+.market thead th:first-child {
+  text-align: left;
+}
+
+.market tbody th,
+.market td {
+  padding: 6px 4px;
+  border-bottom: 1px dashed var(--line);
+  vertical-align: middle;
+}
+
+.market tbody th {
+  text-align: left;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.market small {
+  display: block;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.market .num {
+  text-align: right;
+  font-size: 16px;
+}
+
+.market .gain {
+  color: var(--gain);
+  font-weight: 700;
+}
+
+.market .loss {
+  color: var(--loss);
+}
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border: 1px solid var(--ink-soft);
+  vertical-align: baseline;
+}
+
+.acts {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 3px;
+  justify-content: end;
+}
+
+.btn {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--paper-dark);
+  border: 1px solid var(--ink-soft);
+  border-radius: 2px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  background: #d8c290;
+}
+
+.btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.btn.primary {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: #47382a;
+}
+
+.btn.wide {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 15px;
+}
+
+.btn.wide small {
+  display: block;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.note {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin: 8px 0;
+}
+
+.departures {
+  margin-top: 6px;
+}
+
+.progress {
+  height: 12px;
+  border: 1px solid var(--ink-soft);
+  background: var(--paper-dark);
+}
+
+.progress div {
+  height: 100%;
+  background: repeating-linear-gradient(45deg, var(--water) 0 6px, #5795ad 6px 12px);
+}
+
+/* --- Meldungen --- */
+.toasts {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(420px, calc(100% - 24px));
+  pointer-events: none;
+}
+
+.toast {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--ink-soft);
+  padding: 6px 10px;
+  font-size: 14px;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.18);
+  transition: opacity 0.5s;
+}
+
+.toast.gain {
+  border-left-color: var(--gain);
+}
+
+.toast.loss,
+.toast.warn {
+  border-left-color: var(--loss);
+}
+
+.toast.out {
+  opacity: 0;
+}
+
+.stamp {
+  position: fixed;
+  left: 50%;
+  top: 40%;
+  translate: -50% -50%;
+  color: var(--stamp);
+  border: 5px double var(--stamp);
+  padding: 10px 26px;
+  font-size: 44px;
+  font-weight: 700;
+  font-variant: small-caps;
+  text-align: center;
+  background: color-mix(in srgb, var(--paper) 70%, transparent);
+  pointer-events: none;
+  animation: stamp-in 0.35s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+  transition: opacity 0.8s;
+}
+
+.stamp small {
+  display: block;
+  font-size: 20px;
+}
+
+.stamp.out {
+  opacity: 0;
+}
+
+@keyframes stamp-in {
+  from {
+    transform: scale(2.4) rotate(-14deg);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) rotate(-7deg);
+    opacity: 1;
+  }
+}
+
+/* --- Einstieg --- */
+.intro {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(43 33 24 / 0.35);
+  padding: 16px;
+}
+
+.intro-card {
+  max-width: 460px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  padding: 22px 26px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+}
+
+.intro-head {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-soft);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 6px;
+}
+
+.intro-card h1 {
+  font-size: 40px;
+  font-variant: small-caps;
+  margin: 10px 0 6px;
+}
+
+.intro-card p {
+  line-height: 1.45;
+}
+
+.intro-card .btn {
+  font-size: 17px;
+  padding: 8px 20px;
+  margin-top: 6px;
+}
+
+/* --- Handy --- */
+@media (max-width: 720px) {
+  .topbar {
+    left: 8px;
+    right: 8px;
+    top: 8px;
+    gap: 10px;
+    padding: 6px 10px;
+  }
+
+  .brand {
+    display: none;
+  }
+
+  .stats {
+    gap: 14px;
+  }
+
+  .ledger {
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: auto;
+    max-height: 48%;
+    padding: 12px;
+  }
+
+  .ledger-head h2 {
+    font-size: 21px;
+  }
+
+  .toasts {
+    top: 66px;
+    bottom: auto;
+    left: 8px;
+  }
+
+  .stamp {
+    font-size: 30px;
+  }
+}
