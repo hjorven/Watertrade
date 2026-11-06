@@ -80,7 +80,7 @@ export const CHAPTERS: Chapter[] = [
       { type: 'betriebe', count: 2, text: 'Lass zwei eigene Betriebe arbeiten' },
       { type: 'routes', count: 1, text: 'Lass ein Schiff mit Kapitän eine Handelsroute fahren' },
       { type: 'contracts', count: 3, text: 'Erfülle drei Aufträge' },
-      { type: 'worth', amount: 20000, text: 'Bring dein Haus auf 20.000 Taler Vermögen' },
+      { type: 'worth', amount: 40000, text: 'Bring dein Haus auf 40.000 Taler Vermögen' },
     ],
   },
   {

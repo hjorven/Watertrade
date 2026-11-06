@@ -1,13 +1,30 @@
-import { BUILDING_BY_ID, KONTOR_CAPACITY, KONTOR_PRICE, KONTOR_SLOTS, KONTOR_UPGRADE } from '../data/buildings.ts';
+import { BUILDING_BY_ID, betriebUpkeep, KONTOR_CAPACITY, KONTOR_PRICE, KONTOR_SLOTS, KONTOR_UPGRADE, kontorUpkeep } from '../data/buildings.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { SHIPS } from '../data/ships.ts';
 import { price } from './economy.ts';
 import { captainWages } from './fleet.ts';
-import { cargoLoad, day, fail, type GameState, type TradeResult } from './state.ts';
+import { addToSlot, cargoLoad, day, fail, type GameState, type TradeResult } from './state.ts';
 
-/** Tägliche Unterhaltskosten eines Kontors je Stufe */
-export const KONTOR_UPKEEP = [0, 3, 6, 12];
+export { KONTOR_UPKEEP, kontorUpkeep } from '../data/buildings.ts';
+
+/** Unterhalt, den das Kontor in `town` gerade kostet, oder den ein neues Kontor kosten würde */
+export function kontorUpkeepIn(state: GameState, town: string, level?: number): number {
+  const count = Object.keys(state.kontore).length + (state.kontore[town] ? 0 : 1);
+  return kontorUpkeep(level ?? state.kontore[town]?.level ?? 1, count);
+}
+
+/** Gesamter Tagesunterhalt aller Kontore und Betriebe */
+export function dailyUpkeep(state: GameState): number {
+  const count = Object.keys(state.kontore).length;
+  let sum = 0;
+  for (const k of Object.values(state.kontore)) sum += kontorUpkeep(k.level, count);
+  for (const b of state.betriebe) {
+    const t = BUILDING_BY_ID.get(b.type);
+    if (t) sum += betriebUpkeep(t);
+  }
+  return sum;
+}
 
 export function buildKontor(state: GameState, town: string): TradeResult {
   if (state.kontore[town]) return fail('Hier steht schon ein Kontor.');
@@ -76,9 +93,9 @@ export function sellBetrieb(state: GameState, id: number): TradeResult {
  */
 export function tickHouse(state: GameState): void {
   let wages = captainWages(state);
-  let upkeep = 0;
+  // Kontore und Betriebe kosten Unterhalt, auch wenn ein Betrieb ruht
+  const upkeep = dailyUpkeep(state);
   let production = 0;
-  for (const [, k] of Object.entries(state.kontore)) upkeep += KONTOR_UPKEEP[k.level];
 
   for (const b of state.betriebe) {
     const t = BUILDING_BY_ID.get(b.type)!;
@@ -112,9 +129,7 @@ export function tickHouse(state: GameState): void {
     const outs = Object.entries(t.outputs);
     for (const [g, n] of outs) {
       const made = n * share;
-      const slot = (k.stock[g] ??= { amount: 0, cost: 0 });
-      slot.amount += made;
-      slot.cost += (inputCost + wage) * (n / outTotal);
+      addToSlot(k.stock, g, made, (inputCost + wage) * (n / outTotal));
       const good = GOOD_BY_ID.get(g)!;
       const m = state.markets[b.town][g];
       production += made * (m ? price(good.base, m.stock, m.target) : good.base);
@@ -135,16 +150,27 @@ export function kontorAmount(state: GameState, town: string, good: string): numb
   return Math.floor(state.kontore[town]?.stock[good]?.amount ?? 0);
 }
 
+/** Lagerware zählt zum Marktwert der Stadt abzüglich 10 %, damit teures Einlagern das Vermögen nicht aufbläht */
+export const STOCK_VALUE_FACTOR = 0.9;
+
+function stockValue(state: GameState, town: string | null, good: string, slot: { amount: number; cost: number; fresh?: number }): number {
+  const m = town ? state.markets[town]?.[good] : undefined;
+  const g = GOOD_BY_ID.get(good);
+  if (!m || !g) return Math.min(slot.cost, (g?.base ?? 0) * slot.amount);
+  return price(g.base, m.stock, m.target) * slot.amount * STOCK_VALUE_FACTOR * (slot.fresh ?? 1);
+}
+
 /** Vermögen des Handelshauses für das Handelsregister: Geld, Schiffe zum Zeitwert, Kontore, Betriebe, Lager */
 export function playerWorth(state: GameState): number {
   let w = state.money;
   for (const s of state.ships) w += SHIPS[s.type].price * 0.7 * (0.5 + 0.5 * s.condition);
-  for (const k of Object.values(state.kontore)) {
+  for (const [town, k] of Object.entries(state.kontore)) {
     w += KONTOR_PRICE;
     for (let l = 2; l <= k.level; l++) w += KONTOR_UPGRADE[l];
-    for (const slot of Object.values(k.stock)) w += slot.cost;
+    for (const [g, slot] of Object.entries(k.stock)) w += stockValue(state, town, g, slot);
   }
   for (const b of state.betriebe) w += (BUILDING_BY_ID.get(b.type)?.price ?? 0) * 0.5;
-  for (const s of state.ships) for (const slot of Object.values(s.cargo)) w += slot.cost;
+  // unterwegs zählt die Ladung zum Markt am Ziel
+  for (const s of state.ships) for (const [g, slot] of Object.entries(s.cargo)) w += stockValue(state, s.port ?? s.voyage?.to ?? null, g, slot);
   return Math.round(w);
 }

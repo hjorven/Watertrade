@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MAST_HOURS, needsMastDown, travelTime } from './river.ts';
 import { GOODS } from '../data/goods.ts';
 import { VALLEY } from '../data/maps/valley.ts';
 import { runBalance } from './balance.ts';
@@ -10,6 +11,7 @@ import {
   day,
   depart,
   dismantleRaft,
+  effectiveType,
   newGame,
   planVoyage,
   sell,
@@ -69,16 +71,20 @@ describe('Karte', () => {
 });
 
 describe('Routen', () => {
-  it('Segelkahn passt nicht unter die Brücke bei Kesselbrück', () => {
+  it('Segelkahn legt vor der Brücke bei Kesselbrück den Mast und verliert 2 Stunden', () => {
     const s = start();
     const r = buyShip(s, VALLEY, 'niedermuend', 'segelkahn');
     expect(r.ok).toBe(false); // zu wenig Geld
     s.money = 5000;
     const ship = buyShip(s, VALLEY, 'niedermuend', 'segelkahn').ship!;
     const plan = planVoyage(s, VALLEY, ship.id, 'oberau')!;
-    expect(plan.ok).toBe(false);
-    if (!plan.ok) expect(plan.reasons.map((x) => x.reason)).toContain('bruecke');
-    expect(planVoyage(s, VALLEY, ship.id, 'muehlheim')!.ok).toBe(true);
+    expect(plan.ok).toBe(true);
+    const seg = VALLEY.segments.find((x) => x.id === 'kessel-muehl')!;
+    const type = effectiveType(s, ship);
+    expect(needsMastDown(seg, type, s.waterLevel)).toBe(true);
+    const withMast = travelTime(seg, type, false, s.waterLevel)!;
+    const noMast = travelTime(seg, { ...type, height: 3, mastHeight: undefined }, false, s.waterLevel)!;
+    expect(withMast - noMast).toBeCloseTo(MAST_HOURS, 5);
   });
 
   it('nur flache Boote kommen zur Erzgrube', () => {
