@@ -64,7 +64,7 @@ function renderLoans(state: GameState, map: MapDef, town: string, name: (id: str
         .join('');
       return `<div class="yard-row"><div><b>${t.name}</b> <small>${t.days} Tage, ${pct(t.rate)} Zins für die ganze Laufzeit, ${q.count} Raten</small></div><div class="row-btns">${btns}</div></div>`;
     }).join('');
-    offer = `<h3>Geld leihen</h3><p><small>Kreditrahmen ${fmt(creditLine(state))} Taler (die Hälfte deines Vermögens nach Schulden), davon frei ${fmt(creditLeft(state))}.</small></p><div class="yard">${rows}</div>`;
+    offer = `<h3>Geld leihen</h3><p><small>Kreditrahmen ${fmt(creditLine(state))} Taler (die Hälfte deines Vermögens nach Schulden), nach Abzug offener Kredite frei ${fmt(creditLeft(state))}.</small></p><div class="yard">${rows}</div>`;
   }
   const rules = `<p><small>Reicht die Kasse am Zahltag nicht, mahnt die Bank und schlägt ${pct(LATE_FEE)} Gebühr auf. Nach ${MAX_MISSED} verpassten Raten kündigt sie und pfändet Kasse, Betriebe und Schiffe. Wer im Hochwasser festsitzt und nichts verkaufen kann, sollte vorsorgen.</small></p>`;
   const debt = totalDebt(state);

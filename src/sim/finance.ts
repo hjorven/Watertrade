@@ -38,7 +38,7 @@ export interface Loan {
   overdue: number;
   /** Tag der nächsten Rate */
   due: number;
-  /** verpasste Raten (Mahnstufe) */
+  /** verpasste Raten in Folge (Mahnstufe), zurück auf 0, sobald der Rückstand bezahlt ist */
   missed: number;
 }
 
@@ -268,7 +268,11 @@ export function payOverdueNow(state: GameState, id: number): TradeResult {
   const owed = loan.overdue;
   if (state.money < owed) return fail(`Die offene Rate beträgt ${owed} Taler.`);
   payOverdue(state, f, loan, false);
-  if (loan.remaining <= 0.5) f.loans = f.loans.filter((l) => l !== loan);
+  loan.missed = 0;
+  if (loan.remaining <= 0.5) {
+    f.loans = f.loans.filter((l) => l !== loan);
+    return { ok: true, message: `Rückstand von ${owed} Taler beglichen, der Kredit ist abbezahlt.`, amount: 0, taler: owed };
+  }
   return { ok: true, message: `Rückstand von ${owed} Taler beglichen.`, amount: 0, taler: owed };
 }
 
@@ -331,14 +335,20 @@ export function tickFinance(state: GameState, map: MapDef): NewsItem[] {
     // alte Rückstände zuerst, sobald wieder Geld da ist
     if (loan.overdue > 0 && loan.due > d) {
       const owed = loan.overdue;
-      if (payOverdue(state, f, loan, false) > 0) news.push(addNews(state, 'haus', `Die Stadtbank hat den Rückstand von ${owed} Taler eingezogen.`));
+      if (payOverdue(state, f, loan, false) > 0) {
+        loan.missed = 0;
+        news.push(addNews(state, 'haus', `Die Stadtbank hat den Rückstand von ${owed} Taler eingezogen.`));
+      }
     }
     if (d >= loan.due) {
-      loan.overdue += Math.min(loan.installment, Math.max(0, loan.remaining - loan.overdue));
+      const rate = Math.min(loan.installment, Math.max(0, loan.remaining - loan.overdue));
+      loan.overdue += rate;
       loan.due += RATE_DAYS;
       payOverdue(state, f, loan, true);
-      if (loan.overdue > 0.5) {
-        const fee = Math.ceil(loan.overdue * LATE_FEE);
+      if (loan.overdue <= 0.5) loan.missed = 0;
+      else {
+        // Gebühr nur auf den unbezahlten Teil der neuen Rate, nicht auf ältere Rückstände und Gebühren
+        const fee = Math.ceil(Math.min(loan.overdue, rate) * LATE_FEE);
         loan.overdue += fee;
         loan.remaining += fee;
         loan.missed++;

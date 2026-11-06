@@ -681,7 +681,7 @@ function startGame(s: GameState, sess: Session): void {
 /** Die Kampagne führt Reiter und Bücher nach und nach ein, alle anderen Modi zeigen alles */
 function featuresFor(sess: Session): HudFeatures {
   const n = sess.mode === 'kampagne' ? (sess.chapter?.number ?? 99) : 99;
-  if (n <= 1) return { tabs: ['markt', 'werft'], views: ['ship', 'news', 'map'] };
+  if (n <= 1) return { tabs: ['markt', 'werft', 'bank'], views: ['ship', 'news', 'map'] };
   if (n === 2) return { tabs: ['markt', 'kontor', 'werft', 'kneipe', 'route', 'bank'], views: ['ship', 'news', 'map', 'contracts', 'register'] };
   return ALL_FEATURES;
 }

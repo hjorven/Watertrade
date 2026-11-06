@@ -14,6 +14,7 @@ import {
   loanQuote,
   LOAN_TERMS,
   MAX_MISSED,
+  payOverdueNow,
   payoffAmount,
   premiumPerHour,
   RATE_DAYS,
@@ -26,6 +27,7 @@ import {
 } from './finance.ts';
 import { advance, addShip, newGame, upgradeState, type GameState } from './game.ts';
 import { playerWorth } from './house.ts';
+import { goalProgress } from './goals.ts';
 import { deserialize, SAVE_VERSION, serialize } from './save.ts';
 
 const BANK = 'altenfurt';
@@ -113,7 +115,37 @@ describe('Stadtbank', () => {
     s.money = 5000;
     days(s, 1);
     expect(loan.overdue).toBe(0);
-    expect(loan.missed).toBe(1);
+    expect(loan.missed).toBe(0);
+  });
+
+  it('setzt die Mahnstufe zurück, wenn der Rückstand bezahlt ist', () => {
+    const s = game(1000);
+    addShip(s, 'treidelkahn', BANK);
+    takeLoan(s, BANK, 1000, 120);
+    for (let i = 0; i < MAX_MISSED + 1; i++) {
+      s.money = 0;
+      days(s, RATE_DAYS);
+      expect(s.finance!.loans[0].missed).toBe(1);
+      s.money = 5000;
+      days(s, 1);
+      expect(s.finance!.loans[0].missed).toBe(0);
+      days(s, RATE_DAYS - 1);
+    }
+    expect(s.ships.length).toBe(2);
+  });
+
+  it('nimmt einen Rückstand von Hand an und zählt Schulden gegen das Geldziel', () => {
+    const s = game(2000);
+    takeLoan(s, BANK, 1000, 30);
+    expect(goalProgress(s, { type: 'money', amount: 3000, text: '' }).value).toBeLessThan(3000);
+    s.money = 0;
+    days(s, RATE_DAYS);
+    const loan = s.finance!.loans[0];
+    expect(payOverdueNow(s, loan.id).ok).toBe(false);
+    s.money = 1000;
+    expect(payOverdueNow(s, loan.id).ok).toBe(true);
+    expect(loan.overdue).toBe(0);
+    expect(loan.missed).toBe(0);
   });
 
   it('übersteht Speichern und Laden', () => {
