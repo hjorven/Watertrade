@@ -144,6 +144,38 @@ function setHtml(el: HTMLElement, html: string): void {
   el.innerHTML = html;
 }
 
+/**
+ * Beim Neuzeichnen offene Klappfelder und angefangene Eingaben in Blöcken mit data-keep erhalten
+ * (Routen-Editor), sonst klappt das Bedingungen-Feld während der Fahrt ständig zu.
+ */
+function keepForms(root: HTMLElement, redraw: () => void): void {
+  const kept = new Map<string, { open: boolean; values: Map<string, string> }>();
+  root.querySelectorAll<HTMLElement>('[data-keep]').forEach((el) => {
+    const values = new Map<string, string>();
+    el.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[name][data-dirty]').forEach((f) => values.set(f.name, f.value));
+    kept.set(el.dataset.keep!, { open: !!el.querySelector('details[open]'), values });
+  });
+  const focused = document.activeElement instanceof HTMLElement && root.contains(document.activeElement) ? document.activeElement : null;
+  const focusKey = focused?.closest<HTMLElement>('[data-keep]')?.dataset.keep;
+  const focusName = focused?.getAttribute('name');
+  const before = root.firstElementChild;
+  redraw();
+  if (!kept.size || root.firstElementChild === before) return;
+  root.querySelectorAll<HTMLElement>('[data-keep]').forEach((el) => {
+    const k = kept.get(el.dataset.keep!);
+    if (!k) return;
+    if (k.open) el.querySelector('details')?.setAttribute('open', '');
+    for (const [name, value] of k.values) {
+      const f = el.querySelector<HTMLInputElement | HTMLSelectElement>(`[name="${name}"]`);
+      if (f) {
+        f.value = value;
+        f.dataset.dirty = '1';
+      }
+    }
+    if (el.dataset.keep === focusKey && focusName) el.querySelector<HTMLElement>(`[name="${focusName}"]`)?.focus();
+  });
+}
+
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 const goodName = (id: string) => GOOD_BY_ID.get(id)?.name ?? id;
 const swatch = (id: string) => `<span class="swatch" style="background:${hex(GOOD_BY_ID.get(id)?.color ?? 0x999999)}"></span>`;
@@ -221,6 +253,14 @@ export class Hud {
       contracts: root.querySelector('[data-badge="contracts"]')!,
       news: root.querySelector('[data-badge="news"]')!,
     };
+
+    // angefangene Eingaben im Routen-Editor merken, damit sie das Neuzeichnen überstehen
+    const markDirty = (ev: Event) => {
+      const f = ev.target as HTMLElement;
+      if (f.getAttribute('name') && f.closest('[data-keep]')) f.dataset.dirty = '1';
+    };
+    root.addEventListener('input', markDirty);
+    root.addEventListener('change', markDirty);
 
     root.addEventListener('click', (ev) => {
       const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-act]');
@@ -302,6 +342,9 @@ export class Hud {
           this.actions.command('refresh', {});
           break;
         case 'cmd': {
+          // nach dem Löschen verschieben sich die Halte: gemerkte Eingaben verwerfen
+          if (d.cmd === 'routeDelStop' || d.cmd === 'routeClear' || d.cmd === 'routeCopyPlan')
+            root.querySelectorAll<HTMLElement>('[data-dirty]').forEach((f) => delete f.dataset.dirty);
           const data: Record<string, string | number> = {};
           for (const [k, v] of Object.entries(d)) if (k !== 'act' && k !== 'cmd' && v !== undefined) data[k] = v;
           // Formularfelder im selben Block mitschicken (Routen-Editor)
@@ -401,7 +444,7 @@ export class Hud {
       return;
     }
     // Nur neu aufbauen, was sich geändert hat, sonst gehen Klicks während einer Fahrt verloren
-    setHtml(this.body, this.renderShip(state, ship));
+    keepForms(this.body, () => setHtml(this.body, this.renderShip(state, ship)));
   }
 
   private townName(id: string): string {
@@ -751,11 +794,12 @@ export class Hud {
       <p>${cap ? `${cap.name} fährt die Route allein ab: an jedem Halt werden die Befehle ausgeführt, erst Verkauf und Einlagern, dann Kauf.` : 'Für eine Handelsroute braucht das Schiff einen Kapitän. Heuere in einer Hafenkneipe einen an.'}</p></div>`;
     if (ship.type === 'floss') return head.replace(/<p>.*<\/p>/s, '<p>Ein Floß fährt keine Routen.</p>');
     const plan = this.routePlan;
-    const running = r ? activePlan(state, r) : 'sommer';
+    // gefahren wird nach r.plan; umgeschaltet wird erst beim nächsten Anlegen
+    const running: RoutePlan = r ? (r.active ? (r.plan ?? 'sommer') : activePlan(state, r)) : 'sommer';
     const planStops = r ? stopsOf(r, plan) : [];
     const goodsOptions = GOODS.map((g) => `<option value="${g.id}">${g.name}</option>`).join('');
     const kindOptions = (Object.keys(ORDER_TEXT) as OrderKind[]).map((k) => `<option value="${k}">${ORDER_TEXT[k]}</option>`).join('');
-    const num = (v: number | undefined, f = 1) => (v === undefined ? '' : String(Math.round(v * f * 10) / 10));
+    const num = (v: number | undefined, f = 1) => (v === undefined ? '' : String(Math.round(v * f * 10) / 10).replace('.', ','));
     const stops = planStops
       .map((s, i) => {
         const orders = s.orders
@@ -768,7 +812,7 @@ export class Hud {
         const isNext = r?.active && plan === running && i === r.next;
         const cond = conditionText(s);
         const skipNow = stopSkipped(state, s);
-        return `<div class="stop ${isNext ? 'next' : ''}" data-form>
+        return `<div class="stop ${isNext ? 'next' : ''}" data-form data-keep="${plan}-${i}">
           <div class="stop-head"><b>${i + 1}. ${this.townName(s.town)}</b>${isNext ? '<small>nächster Halt</small>' : ''}${skipNow ? '<small>wird beim jetzigen Pegel übersprungen</small>' : ''}
             <button class="link" data-act="cmd" data-cmd="routeDelStop" data-plan="${plan}" data-stop="${i}">Halt entfernen</button></div>
           <ul class="orders">${orders || '<li class="muted">keine Befehle, nur durchfahren</li>'}</ul>
@@ -782,9 +826,9 @@ export class Hud {
           </div>
           <details class="route-cond-form"><summary>Bedingungen</summary>
             <div class="order-form">
-              <label>Ablegen ab <input name="minLoad" type="number" min="0" max="100" step="10" value="${num(s.minLoad, 100)}" placeholder="–"> % Ladung</label>
-              <label>Überspringen bei Pegel unter <input name="levelMin" type="number" step="0.1" value="${num(s.levelMin)}" placeholder="–"> m</label>
-              <label>oder über <input name="levelMax" type="number" step="0.1" value="${num(s.levelMax)}" placeholder="–"> m</label>
+              <label>Ablegen ab <input name="minLoad" type="text" inputmode="numeric" value="${num(s.minLoad, 100)}" placeholder="–"> % Ladung</label>
+              <label>Überspringen bei Pegel unter <input name="levelMin" type="text" value="${num(s.levelMin)}" placeholder="–"> m</label>
+              <label>oder über <input name="levelMax" type="text" value="${num(s.levelMax)}" placeholder="–"> m</label>
               <button class="btn" data-act="cmd" data-cmd="routeStopCond" data-plan="${plan}" data-stop="${i}">Speichern</button>
             </div>
           </details></div>`;
@@ -814,11 +858,11 @@ export class Hud {
             const on = r ? winterSeasonsOf(r).includes(x) : DEFAULT_WINTER_SEASONS.includes(x);
             return `<button class="btn ${on ? 'on' : ''}" data-act="cmd" data-cmd="routeWinterSeason" data-season="${x}" aria-pressed="${on}">${SEASON_NAME[x]}</button>`;
           }).join('')}
-          ${r?.stops.length ? '<button class="btn" data-act="cmd" data-cmd="routeCopyPlan">Sommerplan übernehmen</button>' : ''}</div>`
+          ${r?.stops.length ? '<button class="btn" data-act="cmd" data-cmd="routeCopyPlan" data-plan="winter">Sommerplan übernehmen</button>' : ''}</div>`
         : '';
     return `${head}${status}${planNav}${winterInfo}
       <div class="stops">${stops || `<p class="note">${plan === 'winter' ? 'Noch kein Winterplan. Ohne ihn gilt das ganze Jahr der Sommerplan.' : 'Noch keine Halte. Eine Route braucht mindestens zwei.'}</p>`}</div>
-      <div class="order-form add-stop" data-form>
+      <div class="order-form add-stop" data-form data-keep="add-${plan}">
         <select name="town" aria-label="Stadt">${townOptions}</select>
         <button class="btn" data-act="cmd" data-cmd="routeAddStop" data-plan="${plan}">Halt hinzufügen</button>
       </div>
@@ -837,13 +881,13 @@ export class Hud {
       .map((v, i) => {
         const bh = Math.max(v === 0 ? 0 : 1, (Math.abs(v) / max) * (h / 2 - 1));
         const y = v >= 0 ? h / 2 - bh : h / 2;
-        return `<rect x="${i * w}" y="${y.toFixed(1)}" width="${w - 1}" height="${bh.toFixed(1)}" fill="var(${v >= 0 ? '--gain' : '--loss'})"><title>Tag ${day(state) - p.days + 1 + i}: ${fmt(v)} Taler</title></rect>`;
+        return `<rect x="${(ROUTE_BOOK_DAYS - p.days + i) * w}" y="${y.toFixed(1)}" width="${w - 1}" height="${bh.toFixed(1)}" fill="var(${v >= 0 ? '--gain' : '--loss'})"><title>Tag ${day(state) - p.days + 1 + i}: ${fmt(v)} Taler</title></rect>`;
       })
       .join('');
     const cls = p.perDay >= 0 ? 'gain' : 'loss';
     return `<div class="route-book">
         <p>Gewinn pro Tag: <b class="${cls}">${fmt(p.perDay)} Taler</b> <small>(${p.days === 1 ? 'heute' : `letzte ${p.days} Tage`}, zusammen ${fmt(p.total)} Taler, nach Löhnen, Zoll und Brennstoff)</small></p>
-        <svg viewBox="0 0 ${p.days * w} ${h}" width="${Math.min(240, p.days * w * 2)}" height="${h}" role="img" aria-label="Gewinn je Tag"><line x1="0" x2="${p.days * w}" y1="${h / 2}" y2="${h / 2}" stroke="var(--line)" stroke-width="0.5"/>${bars}</svg>
+        <svg viewBox="0 0 ${ROUTE_BOOK_DAYS * w} ${h}" width="100%" height="${h}" preserveAspectRatio="none" role="img" aria-label="Gewinn je Tag"><line x1="0" x2="${ROUTE_BOOK_DAYS * w}" y1="${h / 2}" y2="${h / 2}" stroke="var(--line)" stroke-width="0.5"/>${bars}</svg>
         <button class="link" data-act="cmd" data-cmd="routeResetBook">Auswertung neu beginnen</button>
       </div>`;
   }

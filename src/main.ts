@@ -452,7 +452,7 @@ function editRoute(ship: Ship, cmd: string, d: Record<string, string | number>):
     case 'routeCopyPlan': {
       // Sommerplan als Vorlage für den Winterplan übernehmen
       r.winterStops = structuredClone(r.stops);
-      if (touchesActive()) restart();
+      if (r.active && (r.plan ?? 'sommer') === 'winter') restart();
       return okMsg('Sommerplan in den Winterplan übernommen.');
     }
     case 'routeResetBook':

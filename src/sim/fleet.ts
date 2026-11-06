@@ -298,7 +298,6 @@ function runStop(state: GameState, map: MapDef, ship: Ship, r: TradeRoute): stri
       return log;
     }
   }
-  r.loadingSince = undefined;
   // nächstes Ziel: der folgende Halt, oder der aktuelle, falls das Schiff woanders liegt;
   // Halte, deren Pegelbedingung nicht passt, werden übersprungen
   let nextIndex = here ? (r.next + 1) % stops.length : r.next;
@@ -315,8 +314,15 @@ function runStop(state: GameState, map: MapDef, ship: Ship, r: TradeRoute): stri
   const skipText = skipped.length ? `, ${skipped.join(' und ')} übersprungen (Pegel ${fmtLevel(state.waterLevel)})` : '';
   const target = stops[nextIndex].town;
   if (target === port) {
-    // der nächste gültige Halt ist dieser Hafen: dort beim nächsten Durchlauf handeln
+    if (here && nextIndex === r.next) {
+      // alle anderen Halte werden übersprungen: hier warten, ohne erneut zu handeln
+      r.note = `wartet in ${townName(port)}${skipText}`;
+      r.retryAt = state.hour + 12;
+      return log;
+    }
+    // der nächste gültige Halt ist ein anderer Halt in diesem Hafen: dort beim nächsten Durchlauf handeln
     r.next = nextIndex;
+    r.loadingSince = undefined;
     r.retryAt = undefined;
     if (skipText) r.note = `bleibt in ${townName(port)}${skipText}`;
     return log;
@@ -328,6 +334,7 @@ function runStop(state: GameState, map: MapDef, ship: Ship, r: TradeRoute): stri
     r.note = `wartet in ${townName(port)}: ${why}`;
     // Halt gilt als erledigt, damit beim nächsten Versuch nicht noch einmal gehandelt wird
     r.next = nextIndex;
+    r.loadingSince = undefined;
     r.retryAt = state.hour + 12;
     return log;
   }
@@ -335,11 +342,13 @@ function runStop(state: GameState, map: MapDef, ship: Ship, r: TradeRoute): stri
     const why = departProblem(state, map, ship.id, target) ?? 'kein Geld für den Zoll';
     r.note = `wartet: ${why.replace(/\.$/, '')}`;
     r.next = nextIndex;
+    r.loadingSince = undefined;
     r.retryAt = state.hour + 12;
     return log;
   }
   r.next = nextIndex;
   r.retryAt = undefined;
+  r.loadingSince = undefined;
   r.note = `unterwegs nach ${townName(target)}${skipText}`;
   return log;
 }

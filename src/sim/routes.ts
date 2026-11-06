@@ -1,3 +1,4 @@
+import { GOOD_BY_ID } from '../data/goods.ts';
 import { season, type Season } from './calendar.ts';
 import { day, type GameState, type RoutePlan, type RouteStop, type Ship, type TradeRoute } from './state.ts';
 
@@ -73,14 +74,25 @@ export function conditionText(s: RouteStop): string {
 
 /**
  * Wert, an dem der Gewinn einer Route gemessen wird: Bargeld plus Einstandswert der Ware an Bord
- * und in allen Kontoren. Kaufen und Umladen ins Kontor ändern ihn nicht, erst der Verkauf über oder
- * unter Einstand, Zoll und Kohle. So zählt nur, was die Route wirklich verdient.
+ * und in allen Kontoren, dazu die Kohle im Bunker zum Grundpreis. Kaufen, Bunkern und Umladen ins
+ * Kontor ändern ihn kaum, erst der Verkauf über oder unter Einstand und der Zoll. Verbrannte Kohle
+ * bucht `step` mit bookCoal, so zählt nur, was die Route wirklich verdient.
  */
 export function bookValue(state: GameState, ship: Ship): number {
-  let v = state.money;
+  let v = state.money + (ship.bunker ?? 0) * coalPrice();
   for (const slot of Object.values(ship.cargo)) v += slot.cost;
   for (const k of Object.values(state.kontore)) for (const slot of Object.values(k.stock)) v += slot.cost;
   return v;
+}
+
+/** Grundpreis der Kohle je t, mit dem Bunkerkohle bewertet wird */
+export function coalPrice(): number {
+  return GOOD_BY_ID.get('kohle')?.base ?? 0;
+}
+
+/** Unterwegs verbrannte Bunkerkohle der Route anlasten */
+export function bookCoal(state: GameState, r: TradeRoute, tons: number): void {
+  bookRoute(state, r, -tons * coalPrice());
 }
 
 /** Betrag auf den heutigen Tag der Route buchen und Einträge älter als 30 Tage entfernen */

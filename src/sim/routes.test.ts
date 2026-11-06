@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { VALLEY } from '../data/maps/valley.ts';
-import { hireCaptain, setRoute } from './fleet.ts';
+import { addShip, hireCaptain, setRoute } from './fleet.ts';
 import { advance, newGame, type GameState, type RouteStop, type Ship, type TradeRoute } from './game.ts';
-import { activePlan, bookRoute, bookValue, MAX_LOAD_WAIT_HOURS, routeProfit, ROUTE_BOOK_DAYS, stopSkipped } from './routes.ts';
+import { activePlan, bookRoute, bookValue, coalPrice, MAX_LOAD_WAIT_HOURS, routeProfit, ROUTE_BOOK_DAYS, stopSkipped } from './routes.ts';
 
 const fresh = (money = 5000): GameState => newGame(VALLEY, { startTown: 'oberau', money, rivals: false });
 
@@ -34,6 +34,22 @@ describe('Routenauswertung', () => {
     // Bargeld plus Einstand an Bord: das ist der ganze Gewinn der Route, Löhne eingeschlossen
     expect(p.total).toBeCloseTo(s.money + cargoCost(ship) - before, 3);
     expect(p.perDay).toBeCloseTo(p.total / p.days, 6);
+  });
+
+  it('Ein Dampfer: verbrannte Kohle und Bunkerkäufe gehen genau in die Auswertung ein', () => {
+    const { s } = withCaptain(35);
+    s.epoch = 3;
+    s.money = 50000;
+    const steamer = addShip(s, 'raddampfer', 'oberau');
+    steamer.captain = s.ships[0].captain;
+    s.ships[0].captain = null;
+    // der Raddampfer passt nicht unter die alte Brücke, darum nur bis Kesselbrück
+    setRoute(s, steamer.id, { active: true, next: 0, stops: [buyWood(), sellWood('kesselbrueck')] });
+    const value = () => s.money + cargoCost(steamer) + (steamer.bunker ?? 0) * coalPrice();
+    const before = value();
+    advance(s, VALLEY, 24 * 15);
+    expect(s.stats.trips).toBeGreaterThanOrEqual(2);
+    expect(routeProfit(s, steamer.route!).total).toBeCloseTo(value() - before, 3);
   });
 
   it('Es zählen nur die letzten 30 Tage', () => {
@@ -93,6 +109,27 @@ describe('Bedingungen je Halt', () => {
     advance(s, VALLEY, 24 * 20);
     expect(s.stats.delivered.muehlheim?.holz ?? 0).toBe(0);
     expect(s.stats.delivered.niedermuend?.holz ?? 0).toBeGreaterThan(0);
+  });
+
+  it('Wird nur der andere Halt übersprungen, handelt das Schiff nicht jede Stunde neu', () => {
+    const { s, ship } = withCaptain(35);
+    s.kontore.oberau = { level: 1, stock: {} };
+    setRoute(s, 1, {
+      active: true,
+      next: 0,
+      stops: [
+        { town: 'oberau', orders: [{ kind: 'einlagern', good: 'holz', amount: 0, limit: 0 }, { kind: 'kaufen', good: 'holz', amount: 0, limit: 0 }] },
+        { ...sellWood('muehlheim'), levelMin: 5 },
+      ],
+    });
+    advance(s, VALLEY, 2);
+    const stored = s.kontore.oberau.stock.holz?.amount ?? 0;
+    advance(s, VALLEY, 24 * 3);
+    expect(ship.port).toBe('oberau');
+    expect(s.stats.trips).toBe(0);
+    // höchstens alle 12 Stunden ein neuer Versuch, und der handelt nicht erneut
+    expect(s.kontore.oberau.stock.holz?.amount ?? 0).toBe(stored);
+    expect(ship.route!.note).toMatch(/wartet in Oberau, Mühlheim übersprungen/);
   });
 
   it('Werden alle Halte übersprungen, wartet das Schiff', () => {
