@@ -132,6 +132,8 @@ export interface WorldEvent {
   town?: string;
   seg?: string;
   value?: number; // Pegel, Zollhöhe
+  /** Tag der Ankündigung (nur Hochwasser und Dürre) */
+  announced?: number;
 }
 
 export interface NewsItem {
@@ -193,6 +195,8 @@ export interface GameState {
   /** Konkurrenz aktiv (im ersten Kapitel noch nicht) */
   rivalsActive: boolean;
   events: WorldEvent[];
+  /** Angekündigte Hochwasser und Dürren; sie beginnen am Tag `from` und kommen dann nach `events` */
+  forecast?: WorldEvent[];
   news: NewsItem[];
   contracts: Contract[];
   nextId: number;
