@@ -56,15 +56,20 @@ describe('Tagesmarkt deterministisch', () => {
     }
   });
 
-  it('Ereignisse hängen nicht von der Bildrate ab', () => {
+  it('Ereignisse, Aufträge und Konkurrenz hängen nicht von der Bildrate ab', () => {
     for (const day of ['2026-11-06', '2026-11-08']) {
       const a = run(day, busyPlayer, [24]);
       const b = run(day, busyPlayer, [0.3, 5.2, 7, 11.5]);
-      // Konkurrenz und Aufträge reagieren auf Marktstände, die von der Schrittweite leicht abhängen;
-      // Ereignisse, Wetter und Kneipen nicht.
       expect(b.events).toEqual(a.events);
       expect(b.tavern).toEqual(a.tavern);
       expect(b.news).toEqual(a.news);
+      // Konkurrenz rückt in ganzen Stunden vor, damit sind auch KI und Aufträge gleich
+      expect(b.contracts).toEqual(a.contracts);
+      expect(b.rivals).toBe(a.rivals);
+      // viele kleine Schritte wie bei hoher Bildrate (Summe exakt 24, damit der Vergleichszeitpunkt gleich ist)
+      const c = run(day, busyPlayer, [...Array(8).fill(0.125), ...Array(16).fill(0.0625), 0.75, 0.75, 20.5]);
+      expect(c.rivals).toBe(a.rivals);
+      expect(c.contracts).toEqual(a.contracts);
     }
   });
 

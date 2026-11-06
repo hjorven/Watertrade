@@ -35,6 +35,9 @@ export interface OnlineHooks {
   challenges(): Record<string, number>;
   /** lokaler Stand des Tages: gewerteter Versuch begonnen, gewertetes Ergebnis */
   dailyLocal(day: string): { tried: boolean; worth: number | null };
+  /** gewertetes Ergebnis, das noch nicht beim Server angekommen ist */
+  dailyPending(): { day: string; worth: number } | null;
+  dailyPendingDone(day: string): void;
   toast(text: string, kind?: 'info' | 'warn' | 'gain'): void;
   sfx(name: 'klick' | 'kauf' | 'verkauf' | 'muenzen' | 'fehler' | 'ablegen' | 'erfolg' | 'papier'): void;
 }
@@ -211,6 +214,22 @@ export class OnlineScreens {
     this.daily = r.ok ? { entries: r.data, status: r.data.length ? '' : 'Heute hat noch niemand gespielt. Sei der Erste.' } : { entries: null, status: niceError(r.error) };
     this.dailyServer = mine.ok ? { day, ...mine.data } : null;
     if (this.menu.screen === 'daily') this.renderDaily();
+    await this.retryDailySubmit();
+  }
+
+  /** Gewertetes Ergebnis, das am Ende nicht beim Server ankam, erneut senden (Server nimmt es bis zu 2 Tage an) */
+  private async retryDailySubmit(): Promise<void> {
+    const pending = this.hooks.dailyPending();
+    if (!pending) return;
+    const api = await online();
+    const sent = await api.submitDaily(pending.worth, pending.day);
+    // Erfolgreich oder endgültig abgelehnt: nicht weiter versuchen. Netzfehler: beim nächsten Öffnen erneut.
+    if (sent.ok || !/fetch|network|verbindung|load failed|timeout/i.test(sent.error)) this.hooks.dailyPendingDone(pending.day);
+    if (!sent.ok || pending.day !== todayUtc()) return;
+    this.dailyServer = { day: pending.day, started: true, wealth: sent.data.wealth };
+    const top = await api.topDaily(pending.day, 10);
+    if (top.ok) this.daily = { entries: top.data, status: '' };
+    if (this.menu.screen === 'daily') this.renderDaily();
   }
 
   /** Gewerteter Versuch schon verbraucht? Server hat Vorrang vor dem lokalen Stand. */
@@ -230,13 +249,15 @@ export class OnlineScreens {
       let scored = !this.dailyUsed(day).tried;
       if (api.isConfigured()) {
         const r = await api.beginDaily(day);
-        if (r.ok) {
-          scored = r.data.scored;
-          this.dailyServer = { day, started: true, wealth: r.data.wealth };
-        } else {
-          scored = false;
-          this.hooks.toast(`Der Versuch ließ sich nicht beim Server anmelden (${dailyError(r.error)}). Diese Runde ist eine Übungsrunde.`, 'warn');
+        if (!r.ok) {
+          // Ohne Anmeldung beim Server kein Start, auch keine Übung: sonst ließe sich der Tag
+          // vor dem gewerteten Versuch beliebig oft üben (Netz trennen, spielen, wieder verbinden).
+          this.hooks.toast(`Der Tagesmarkt braucht den Server: ${dailyError(r.error)}`, 'warn');
+          this.hooks.sfx('fehler');
+          return;
         }
+        scored = r.data.scored;
+        this.dailyServer = { day, started: true, wealth: r.data.wealth };
       }
       this.menu.close();
       this.stopLeague();
@@ -300,6 +321,7 @@ export class OnlineScreens {
     this.renderDaily({ worth, scored, accepted: null });
     if (!configured) return;
     const sent = scored ? await api.submitDaily(worth, day) : null;
+    if (sent && (sent.ok || !/fetch|network|verbindung|load failed|timeout/i.test(sent.error))) this.hooks.dailyPendingDone(day);
     const top = await api.topDaily(day, 10);
     this.daily = top.ok ? { entries: top.data, status: '' } : { entries: null, status: niceError(top.error) };
     if (sent && !sent.ok) this.daily.status = dailyError(sent.error);

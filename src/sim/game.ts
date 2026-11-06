@@ -188,8 +188,28 @@ function pushNews(events: GameEvent[], items: NewsItem[], important: boolean): v
   for (const item of items) events.push({ type: 'news', item, important });
 }
 
+/**
+ * Tagesmarkt: fn zu einer festen Spielstunde ausführen, damit Zeitpunkte wie idleUntil
+ * und der Pegel bei der Routenplanung nicht von der Bildrate abhängen. Ohne fairSeed läuft fn zur aktuellen Stunde.
+ */
+function atHour<T>(state: GameState, hour: number, fn: () => T): T {
+  if (state.fairSeed === undefined) return fn();
+  const real = state.hour;
+  const level = state.waterLevel;
+  state.hour = hour;
+  // Pegel zur festen Stunde, die Routenplanung der Konkurrenz hängt davon ab
+  state.waterLevel = waterLevel(hour / 24 + 1) + eventWaterOffset(state);
+  try {
+    return fn();
+  } finally {
+    state.hour = real;
+    state.waterLevel = level;
+  }
+}
+
 function step(state: GameState, map: MapDef, hours: number, events: GameEvent[]): void {
   const before = day(state);
+  const hourBefore = state.hour;
   state.hour += hours;
   const after = day(state);
   for (let d = before + 1; d <= after; d++) {
@@ -215,7 +235,9 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     }
     pushNews(events, withStream(state, 'ereignisse', d, () => tickEvents(state, map)), true);
     pushNews(events, withStream(state, 'auftraege', d, () => tickContracts(state, map)), false);
-    if (state.rivalsActive) pushNews(events, withStream(state, 'konkurrenz', d, () => tickRivals(state, map)), false);
+    if (state.rivalsActive) {
+      pushNews(events, atHour(state, (d - 1) * 24, () => withStream(state, 'konkurrenz', d, () => tickRivals(state, map))), false);
+    }
     if (d % TAVERN_DAYS === 0) withStream(state, 'kneipe', d, () => refreshTavern(state, map));
     pushNews(events, tickMarketInfo(state, map), false);
     state.ice = isIce(d);
@@ -255,7 +277,17 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     }
     if (ship.route?.active && ship.port && !ship.voyage) runRoute(state, map, ship);
   }
-  if (state.rivalsActive) withStream(state, 'konkurrenz-fahrt', Math.floor(state.hour), () => moveRivals(state, map, hours));
+  if (state.rivalsActive) {
+    if (state.fairSeed === undefined) moveRivals(state, map, hours);
+    else {
+      // Tagesmarkt: Konkurrenz rückt in ganzen Stunden vor, damit Bildrate und Zeitraffer
+      // ihre Entscheidungen nicht verschieben. Die Anzeige rechnet den Stundenbruchteil dazu.
+      // gleiche Rundung wie day(), damit Tageswechsel und volle Stunde im selben Schritt liegen
+      const from = Math.floor(hourBefore) + 1;
+      const to = Math.floor(state.hour);
+      for (let h = from; h <= to; h++) atHour(state, h, () => withStream(state, 'konkurrenz-fahrt', h, () => moveRivals(state, map, 1)));
+    }
+  }
 }
 
 export function anySailing(state: GameState): boolean {

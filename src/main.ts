@@ -151,6 +151,8 @@ interface Progress {
   daily?: Record<string, number>;
   /** Kalendertage, an denen der gewertete Versuch schon begonnen wurde */
   dailyTried?: string[];
+  /** gewertetes Ergebnis, das noch zum Server muss */
+  dailyPending?: { day: string; worth: number } | null;
 }
 const settings = loadJson<Settings>('settings', { tiltShift: true });
 const progress = loadJson<Progress>('progress', { unlocked: ['k1'] });
@@ -552,6 +554,12 @@ const screens = new OnlineScreens(menu, VALLEY, {
   achievements: () => achieved,
   challenges: () => progress.challenges!,
   dailyLocal: (day) => ({ tried: progress.dailyTried!.includes(day), worth: progress.daily![day] ?? null }),
+  dailyPending: () => progress.dailyPending ?? null,
+  dailyPendingDone(day) {
+    if (progress.dailyPending?.day !== day) return;
+    progress.dailyPending = null;
+    saveJson('progress', progress);
+  },
   toast: (text, kind) => hud.toast(text, kind),
   sfx: (name) => sfx(name),
 });
@@ -567,6 +575,10 @@ function unlock(id: string): void {
   sfx('stempel');
 }
 let inGame = false;
+// Tagesmarkt: beim Verlassen der Seite den aktuellen Stand sichern, damit Neuladen keinen Spieltag zurückdreht
+addEventListener('pagehide', () => {
+  if (inGame && session.mode === 'tagesmarkt' && !session.finished) saveSlot('auto');
+});
 document.body.classList.add('no-game');
 const canSave = () => session.mode !== 'tagesmarkt' && session.mode !== 'herausforderung';
 
@@ -809,7 +821,10 @@ function checkDaily(): void {
   hud.renderGoals(null, []);
   const day = session.dailyDay ?? '';
   // Gewertet ist nur der erste Versuch des Tages, Übungsrunden ändern das Ergebnis nicht
-  if (session.dailyScored && progress.daily![day] === undefined) progress.daily![day] = worth;
+  if (session.dailyScored && progress.daily![day] === undefined) {
+    progress.daily![day] = worth;
+    progress.dailyPending = { day, worth };
+  }
   saveJson('progress', progress);
   saveSlot('auto');
   sfx('stempel');
@@ -1004,6 +1019,13 @@ function updateSeasonVisuals(): void {
 
 const smooth = (x: number) => x * x * (3 - 2 * x);
 
+/** Tagesmarkt: Konkurrenz rückt in ganzen Stunden vor; für die Anzeige den Bruchteil der Stunde dazurechnen */
+function rivalShown(v: Voyage): { voyage: Voyage } {
+  if (state.fairSeed === undefined) return { voyage: v };
+  const frac = state.hour - Math.floor(state.hour);
+  return { voyage: { ...v, elapsed: Math.min(v.hours, v.elapsed + frac) } };
+}
+
 function placeOnVoyage(ship: { voyage: Voyage | null }, view: ShipView): void {
   const v = ship.voyage!;
   const { leg, progress: p, index } = voyagePosition(v);
@@ -1091,7 +1113,7 @@ function frame(): void {
     for (const ship of r.ships) {
       const view = rivalViews.get(ship.id);
       if (!view) continue;
-      if (ship.voyage) placeOnVoyage(ship, view);
+      if (ship.voyage) placeOnVoyage(rivalShown(ship.voyage), view);
       else if (!view.docked) rivalDocked = true;
       view.update(dt);
     }

@@ -23,7 +23,7 @@ create policy "eigene daily versuche lesbar" on public.daily_attempts for select
 drop policy if exists "eigenes daily eintragen" on public.daily_results;
 drop policy if exists "eigenes daily verbessern" on public.daily_results;
 
--- Versuch beginnen. Erlaubt ist nur der heutige Tag (UTC), mit einem Tag Spielraum rund um Mitternacht.
+-- Versuch beginnen. Erlaubt ist der heutige Tag (UTC) und, kurz nach Mitternacht, der gestrige. Künftige Tage nie.
 create or replace function public.daily_begin(p_day date)
 returns jsonb
 language plpgsql
@@ -39,7 +39,7 @@ begin
   if auth.uid() is null then
     raise exception 'nicht angemeldet';
   end if;
-  if p_day is null or p_day < v_today - 1 or p_day > v_today + 1 then
+  if p_day is null or p_day < v_today - 1 or p_day > v_today then
     raise exception 'tagesmarkt nicht von heute';
   end if;
 
