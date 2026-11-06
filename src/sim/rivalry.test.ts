@@ -79,12 +79,19 @@ describe('KI-Häuser reagieren auf den Spieler', () => {
   it('Vergeltung kostet nie mehr als ein kleiner Teil der Rücklagen', () => {
     const s = game();
     const r = findRival(s, 'nordstrom')!;
-    r.money = 4000;
+    r.money = 6000;
     nextDay(s);
     r.anger = 95;
     sold(s, 'niedermuend', 'werkzeug', 100);
-    for (let i = 0; i < 30; i++) nextDay(s);
-    expect(r.money).toBeGreaterThan(1400); // Reserve 1500, Tagesbudget 3 % darüber
+    let before = r.money;
+    for (let i = 0; i < 30; i++) {
+      nextDay(s);
+      if (i === 0) expect(r.retaliation?.kind).toBe('leerkaufen'); // sie läuft wirklich
+      // Tagesbudget: 3 % über der Reserve (Schiffsunterhalt läuft hier nicht mit)
+      expect(before - r.money).toBeLessThanOrEqual(Math.max(0, (before - 1500) * 0.03) + 1);
+      before = r.money;
+    }
+    expect(r.money).toBeGreaterThan(1400);
   });
 
   it('Ärger verfliegt, wenn man das Revier in Ruhe lässt', () => {
@@ -99,7 +106,7 @@ describe('KI-Häuser reagieren auf den Spieler', () => {
 describe('Gebietsabkommen', () => {
   it('prüft Revier, Kerngeschäft und Laune', () => {
     const s = game();
-    expect(canOfferPact(s, 'steinbrueck', 'salz', 'fisch')).toContain('nicht das Revier');
+    expect(canOfferPact(s, 'steinbrueck', 'salz', 'fisch')).toContain('nicht zum Revier');
     expect(canOfferPact(s, 'steinbrueck', 'holz', 'bretter')).toContain('Kerngeschäft');
     findRival(s, 'steinbrueck')!.anger = ANGER_REFUSE;
     expect(canOfferPact(s, 'steinbrueck', 'holz', 'salz')).toContain('verärgert');
@@ -152,12 +159,30 @@ describe('Gebietsabkommen', () => {
     expect(s.money).toBe(money + pactPenalty(s));
   });
 
-  it('kündigen ist kein Bruch', () => {
+  it('kündigen ist kein Bruch, aber man kann nicht sofort neu verhandeln', () => {
     const s = game();
     offerPact(s, VALLEY, 'ahlers', 'fisch', 'holz');
     expect(endPact(s, 'ahlers').ok).toBe(true);
     expect(s.pacts).toHaveLength(0);
     expect(s.pactBanUntil).toBeUndefined();
+    expect(offerPact(s, VALLEY, 'ahlers', 'fisch', 'holz').ok).toBe(false);
+    for (let i = 0; i < 31; i++) nextDay(s);
+    expect(offerPact(s, VALLEY, 'ahlers', 'fisch', 'holz').ok).toBe(true);
+  });
+
+  it('ein Abkommen über eine Ware schützt nicht das übrige Revier', () => {
+    const s = game();
+    const r = findRival(s, 'steinbrueck')!;
+    r.money = 20_000;
+    offerPact(s, VALLEY, 'steinbrueck', 'holz', 'arznei');
+    nextDay(s);
+    let started = false;
+    for (let i = 0; i < 10 && !started; i++) {
+      sold(s, 'niedermuend', 'moebel', 20);
+      started = nextDay(s).some((n) => n.text.includes('Möbel'));
+    }
+    expect(started).toBe(true);
+    expect(r.retaliation?.good).toBe('moebel');
   });
 });
 
@@ -207,9 +232,10 @@ describe('Konkurs und Versteigerung', () => {
     // zurückbieten und bis zum Ende halten
     for (const x of s.rivals) x.money = 0;
     expect(placeBid(s, 'weidenhof').ok).toBe(true);
+    const paid = lot.bid;
     while (s.auction) nextDay(s);
     expect(s.kontore.weidenhof).toBeDefined();
-    expect(s.money).toBeLessThan(money);
+    expect(s.money).toBe(money - paid);
   });
 
   it('ein alter Spielstand legt keine Häuser neu an, wenn alle verschwunden sind', () => {
@@ -256,9 +282,19 @@ describe('Anteile und Übernahme', () => {
     s.kontore.oberau = { level: 2, stock: {} };
     const ships = s.ships.length;
     const rivalShips = r.ships.length;
+    r.money = 5000;
+    const worthBefore = rivalWorth(r);
+    let paid = 0;
     const k6 = { type: 'takeover' as const, count: 1, text: '' };
     expect(goalProgress(s, k6).value).toBe(0);
-    for (let i = 0; i < 6; i++) expect(buyShares(s, VALLEY, 'ahlers').ok).toBe(true);
+    for (let i = 0; i < 6; i++) {
+      const before = s.money;
+      expect(buyShares(s, VALLEY, 'ahlers').ok).toBe(true);
+      paid += before - s.money;
+    }
+    // paid ist schon abzüglich der übernommenen Kasse; die übrigen 40 % wurden ausgezahlt,
+    // also kostet das Haus netto mehr als Schiffe und Kontore wert sind
+    expect(paid).toBeGreaterThan(worthBefore - 5000);
     expect(findRival(s, 'ahlers')).toBeUndefined();
     expect(s.ships.length).toBe(ships + rivalShips);
     expect(s.kontore.weidenhof).toBeDefined();

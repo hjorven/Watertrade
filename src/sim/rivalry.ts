@@ -45,6 +45,8 @@ export const PACT_DAYS = 120;
 /** Tonnen, die man trotz Abkommen noch verkaufen darf (Restposten) */
 export const PACT_TOLERANCE = 10;
 const PACT_BAN_DAYS = 60;
+/** Nach einer Kündigung verhandelt das Haus so lange nicht neu */
+export const PACT_COOLDOWN_DAYS = 30;
 
 /** Ein Haus geht pleite nach so vielen Tagen in Folge mit Schulden */
 export const BANKRUPT_DAYS = 30;
@@ -137,12 +139,12 @@ function startRetaliation(state: GameState, map: MapDef, r: RivalState, good: st
     const town = supplyTown(state, map, good);
     if (!town) return null;
     r.retaliation = { kind: 'leerkaufen', good, town, until: d + days - 1 };
-    return addNews(state, 'konkurrenz', `${name} schlägt zurück: Ihre Leute kaufen in ${townName(map, town)} alles ${goodName(good)} auf, das sie kriegen können.`);
+    return addNews(state, 'konkurrenz', `${name} schlägt zurück: In ${townName(map, town)} wird ${goodName(good)} aufgekauft, so viel zu kriegen ist.`);
   }
   const town = playerOutlet(state, good) ?? supplyTown(state, map, good);
   if (!town) return null;
   r.retaliation = { kind: 'unterbieten', good, town, until: d + days - 1 };
-  return addNews(state, 'konkurrenz', `${name} sieht ${goodName(good)} als ihr Revier an und drückt in ${townName(map, town)} mit billiger Ware die Preise.`);
+  return addNews(state, 'konkurrenz', `${name} betrachtet ${goodName(good)} als eigenes Revier und drückt in ${townName(map, town)} mit billiger Ware die Preise.`);
 }
 
 /** Was ein Haus täglich für Vergeltung ausgibt: ein kleiner Teil der Rücklagen über der Reserve */
@@ -215,7 +217,7 @@ function tickReaction(state: GameState, map: MapDef, r: RivalState, news: NewsIt
     r.retaliation = null;
     r.anger = Math.min(r.anger, 20); // erst einmal Ruhe
   }
-  if (!r.retaliation && r.anger >= ANGER_RETALIATE && worst && !pact && retaliationBudget(r) >= 100) {
+  if (!r.retaliation && r.anger >= ANGER_RETALIATE && worst && retaliationBudget(r) >= 100) {
     const item = startRetaliation(state, map, r, worst, r.anger >= ANGER_BUYOUT);
     if (item) {
       news.push(item);
@@ -236,11 +238,12 @@ export function canOfferPact(state: GameState, house: string, playerGood: string
   const def = RIVAL_BY_ID.get(house);
   if (!r || !def) return 'Dieses Haus gibt es nicht mehr.';
   if (pactWith(state, house)) return `Mit ${def.name} gibt es schon ein Abkommen.`;
+  if ((r.noPactUntil ?? 0) >= day(state)) return `${def.name} verhandelt nach deiner Kündigung erst ab Tag ${r.noPactUntil! + 1} wieder.`;
   if ((state.pactBanUntil ?? 0) >= day(state)) return 'Nach deinem Vertragsbruch traut dir am Fluss niemand. Warte bis Tag ' + (state.pactBanUntil! + 1) + '.';
   if ((r.anger ?? 0) >= ANGER_REFUSE) return `${def.name} ist zu verärgert, um mit dir zu verhandeln.`;
-  if (!def.turf.includes(playerGood)) return `${goodName(playerGood)} ist nicht das Revier von ${def.name}.`;
+  if (!def.turf.includes(playerGood)) return `${goodName(playerGood)} gehört nicht zum Revier von ${def.name}.`;
   if (!GOOD_BY_ID.has(houseGood)) return 'Unbekannte Ware.';
-  if (def.turf.includes(houseGood)) return `${goodName(houseGood)} ist ihr Kerngeschäft, das geben sie nicht her.`;
+  if (def.turf.includes(houseGood)) return `${goodName(houseGood)} gehört zum Kerngeschäft von ${def.name}, das geben sie nicht her.`;
   return null;
 }
 
@@ -257,7 +260,7 @@ export function offerPact(state: GameState, map: MapDef, house: string, playerGo
   void map;
   return {
     ok: true,
-    message: `Handschlag. ${PACT_DAYS} Tage lang verkaufst du kein ${goodName(playerGood)}, ${houseName(house)} kauft kein ${goodName(houseGood)}.`,
+    message: `Handschlag. ${PACT_DAYS} Tage lang lässt du ${goodName(playerGood)} in Ruhe, ${houseName(house)} lässt ${goodName(houseGood)} in Ruhe.`,
     amount: 0,
     taler: 0,
   };
@@ -269,7 +272,10 @@ export function endPact(state: GameState, house: string): TradeResult {
   if (!p) return fail('Kein Abkommen mit diesem Haus.');
   state.pacts = state.pacts!.filter((x) => x !== p);
   const r = findRival(state, house);
-  if (r) r.anger = Math.min(100, (r.anger ?? 0) + 15);
+  if (r) {
+    r.anger = Math.min(100, (r.anger ?? 0) + 15);
+    r.noPactUntil = day(state) + PACT_COOLDOWN_DAYS;
+  }
   addNews(state, 'haus', `Du kündigst das Abkommen mit ${houseName(house)}.`);
   return { ok: true, message: `Abkommen mit ${houseName(house)} gekündigt. Sie sind verstimmt.`, amount: 0, taler: 0 };
 }
@@ -302,9 +308,11 @@ function tickPacts(state: GameState, map: MapDef, news: NewsItem[]): void {
       r.money += fine;
       r.anger = 100;
       state.pactBanUntil = d + PACT_BAN_DAYS;
-      news.push(addNews(state, 'konkurrenz', `Vertragsbruch! Du hast ${goodName(p.playerGood)} verkauft, obwohl du es ${name} zugesagt hattest. Das Gericht verlangt ${fine} Taler, und am ganzen Fluss traut dir ${PACT_BAN_DAYS} Tage lang niemand.`));
-      const item = startRetaliation(state, map, r, p.playerGood, true, 30);
-      if (item) news.push(item);
+      news.push(addNews(state, 'konkurrenz', `Vertragsbruch! Du hast ${goodName(p.playerGood)} verkauft, obwohl du ${name} zugesagt hattest, es in Ruhe zu lassen. Das Gericht verlangt ${fine} Taler, und am ganzen Fluss traut dir ${PACT_BAN_DAYS} Tage lang niemand.`));
+      if (retaliationBudget(r) >= 100) {
+        const item = startRetaliation(state, map, r, p.playerGood, true, 30);
+        if (item) news.push(item);
+      }
       continue;
     }
     // Das Haus bricht das Abkommen, wenn es knapp bei Kasse ist
@@ -341,6 +349,11 @@ function fall(state: GameState, r: RivalState, how: 'konkurs' | 'uebernahme'): v
 
 function bankrupt(state: GameState, map: MapDef, r: RivalState, news: NewsItem[]): void {
   const name = houseName(r.id);
+  // Bauwerke eines Hauses im Konkurs fallen an die Allgemeinheit (ohne owner = öffentlich, Aufbau des Wasserbau-Threads)
+  for (const w of state.works as Array<{ owner?: string; partner?: { kind: string; id: string } }>) {
+    if (w.owner === r.id) delete w.owner;
+    if (w.partner?.kind === 'haus' && w.partner.id === r.id) w.partner = undefined;
+  }
   const lost = r.shares ?? 0;
   fall(state, r, 'konkurs');
   const towns = r.kontore;
@@ -457,11 +470,28 @@ export function sharesWorth(state: GameState): number {
   return Math.round(w);
 }
 
+/**
+ * Bei der Übernahme werden die übrigen Teilhaber zum Zeitwert ausgezahlt.
+ * So kostet ein Haus insgesamt mehr, als es wert ist, und die Kasse lässt sich nicht billig plündern.
+ */
+export function buyoutCost(r: RivalState): number {
+  return Math.round((Math.max(0, rivalWorth(r)) * (100 - (r.shares ?? 0) - SHARE_BLOCK)) / 100);
+}
+
+/** Kosten des nächsten Kaufs: ein Block, beim letzten Block samt Auszahlung der übrigen Teilhaber */
+export function nextShareCost(r: RivalState): number {
+  const last = (r.shares ?? 0) + SHARE_BLOCK > TAKEOVER_SHARE;
+  return sharePrice(r) + (last ? buyoutCost(r) : 0);
+}
+
 export function canBuyShares(state: GameState, house: string): string | null {
   const r = findRival(state, house);
   if (!r) return 'Dieses Haus gibt es nicht mehr.';
   if ((r.anger ?? 0) >= ANGER_REFUSE && r.money >= 0) return `${houseName(house)} verkauft dir keine Anteile, solange sie so verärgert sind.`;
-  if (state.money < sharePrice(r)) return `Ein Block von ${SHARE_BLOCK} % kostet ${sharePrice(r)} Taler.`;
+  const cost = nextShareCost(r);
+  if (state.money < cost) return `Das kostet ${cost} Taler.`;
+  // übernommene Schulden müssen aus der Kasse bezahlbar sein
+  if (cost !== sharePrice(r) && state.money - cost + r.money < 0) return `Du müsstest ${Math.round(-r.money)} Taler Schulden übernehmen, dafür reicht die Kasse nicht.`;
   return null;
 }
 
@@ -469,7 +499,7 @@ export function buyShares(state: GameState, map: MapDef, house: string): TradeRe
   const why = canBuyShares(state, house);
   if (why) return fail(why);
   const r = findRival(state, house)!;
-  const cost = sharePrice(r);
+  const cost = nextShareCost(r);
   state.money -= cost;
   r.shares = (r.shares ?? 0) + SHARE_BLOCK;
   if (r.shares > TAKEOVER_SHARE) {
@@ -521,7 +551,7 @@ export function takeOver(state: GameState, map: MapDef, r: RivalState): void {
     if (w.partner?.kind === 'haus' && w.partner.id === r.id) w.partner = undefined;
   }
   fall(state, r, 'uebernahme');
-  const parts = [`${r.ships.length} Schiffe`];
+  const parts = [r.ships.length === 1 ? 'ein Schiff' : `${r.ships.length} Schiffe`];
   if (kontore.length) parts.push(`Kontore in ${kontore.map((t) => townName(map, t)).join(', ')}`);
   parts.push(r.money >= 0 ? `${Math.round(r.money)} Taler aus der Kasse` : `${Math.round(-r.money)} Taler Schulden`);
   addNews(state, 'haus', `Übernahme: ${name} gehört jetzt deinem Haus. Du übernimmst ${parts.join(', ')}.`);

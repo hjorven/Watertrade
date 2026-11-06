@@ -137,6 +137,8 @@ export interface RivalState {
   debtDays?: number;
   /** Anzahl Schiffe, für die schon ein Kaufplan im Flussboten stand */
   planned?: number;
+  /** bis zu diesem Tag kein neues Abkommen (nach Kündigung) */
+  noPactUntil?: number;
 }
 
 export interface Retaliation {

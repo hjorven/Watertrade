@@ -3,10 +3,12 @@ import type { MapDef } from '../data/maps/valley.ts';
 import { RIVAL_BY_ID } from '../data/rivals.ts';
 import {
   canBid,
+  buyoutCost,
   canBuyShares,
   canOfferPact,
   moodOf,
   nextBid,
+  nextShareCost,
   pactUsed,
   PACT_DAYS,
   PACT_TOLERANCE,
@@ -14,7 +16,6 @@ import {
   pactWith,
   SHARE_BLOCK,
   shareSaleValue,
-  sharePrice,
   TAKEOVER_SHARE,
 } from '../sim/rivalry.ts';
 import { day, type GameState, type RivalState } from '../sim/state.ts';
@@ -46,7 +47,7 @@ function houseCard(state: GameState, map: MapDef, r: RivalState): string {
         : `Kauft in ${townName(v.town)} ${goodName(v.good)} leer, bis Tag ${v.until}.`,
     );
   }
-  if ((r.debtDays ?? 0) > 0) lines.push(`Seit ${r.debtDays} Tagen in Schulden.`);
+  lines.push(r.money >= 0 ? `Kasse: ${fmt(r.money)} Taler` : `Schulden: ${fmt(-r.money)} Taler, seit ${r.debtDays === 1 ? 'einem Tag' : `${r.debtDays ?? 0} Tagen`}`);
 
   // Abkommen
   const p = pactWith(state, r.id);
@@ -60,7 +61,7 @@ function houseCard(state: GameState, map: MapDef, r: RivalState): string {
       .map((g) => `<option value="${g.id}">${g.name}</option>`)
       .join('');
     const why = canOfferPact(state, r.id, def.turf[0], GOODS.find((g) => !def.turf.includes(g.id))!.id);
-    const blocked = why && !why.includes('Revier') && !why.includes('Kerngeschäft') ? why : null;
+    const blocked = why && !why.includes('Revier von') && !why.includes('Kerngeschäft') ? why : null;
     pact = `<div class="order-form" data-form>
         <span>Ich lasse</span><select name="mine" aria-label="Ware, die du in Ruhe lässt">${mine}</select>
         <span>in Ruhe, ihr</span><select name="theirs" aria-label="Ware, die das Haus in Ruhe lässt">${theirs}</select>
@@ -70,14 +71,15 @@ function houseCard(state: GameState, map: MapDef, r: RivalState): string {
 
   // Anteile
   const shares = r.shares ?? 0;
-  const price = sharePrice(r);
+  const price = nextShareCost(r);
+  const last = shares + SHARE_BLOCK > TAKEOVER_SHARE;
   const why = canBuyShares(state, r.id);
   const buyLabel = shares + SHARE_BLOCK > TAKEOVER_SHARE ? 'Übernehmen' : `${SHARE_BLOCK} % kaufen`;
-  const sharesHtml = `<p class="note">Deine Anteile: <b>${shares} %</b>${shares ? `, Wert ${fmt(shareSaleValue(r) * (shares / SHARE_BLOCK))} Taler` : ''}. Ab mehr als ${TAKEOVER_SHARE} % gehört dir das Haus mit Schiffen, Kontoren und Kasse.</p>
+  const sharesHtml = `<p class="note">Deine Anteile: <b>${shares} %</b>${shares ? `, Wert ${fmt(shareSaleValue(r) * (shares / SHARE_BLOCK))} Taler` : ''}. Ab mehr als ${TAKEOVER_SHARE} % gehört dir das Haus mit Schiffen, Kontoren und Kasse (oder Schulden), die übrigen Teilhaber werden dann ausgezahlt.${last ? ` Im Preis stecken ${fmt(buyoutCost(r))} Taler Auszahlung.` : ''}</p>
     <div class="row-btns">
       <button class="btn ${shares + SHARE_BLOCK > TAKEOVER_SHARE ? 'primary' : ''}" data-act="cmd" data-cmd="buyShares" data-house="${r.id}" ${why ? `disabled title="${esc(why)}"` : ''}>${buyLabel}<small>${fmt(price)} Taler</small></button>
       ${shares ? `<button class="btn" data-act="cmd" data-cmd="sellShares" data-house="${r.id}">${SHARE_BLOCK} % verkaufen<small>${fmt(shareSaleValue(r))} Taler</small></button>` : ''}
-    </div>${why && !why.startsWith('Ein Block') ? `<p class="fine">${why}</p>` : ''}`;
+    </div>${why && !why.startsWith('Das kostet') ? `<p class="fine">${why}</p>` : ''}`;
 
   return `<div class="contract-box house-box">
       <h3><span class="flag" style="background:${hex(def.color)}"></span>${def.name}</h3>
@@ -91,6 +93,7 @@ function auctionBox(state: GameState, map: MapDef): string {
   const a = state.auction;
   if (!a) return '';
   const townName = (id: string) => map.towns.find((t) => t.id === id)?.name ?? id;
+  const left = Math.max(0, a.until - day(state) + 1);
   const rows = a.lots
     .map((lot) => {
       const who = lot.bidder === 'player' ? 'du' : lot.bidder ? (RIVAL_BY_ID.get(lot.bidder)?.name ?? lot.bidder) : 'niemand';
@@ -101,13 +104,13 @@ function auctionBox(state: GameState, map: MapDef): string {
     })
     .join('');
   return `<div class="contract-box"><h3>Versteigerung: Kontore von ${a.house}</h3>
-      <p class="note">Zuschlag am Ende von Tag ${a.until}, noch ${Math.max(0, a.until - day(state) + 1)} Tage. Dein Gebot wird hinterlegt und bei Überbietung zurückgezahlt.</p>${rows}</div>`;
+      <p class="note">Zuschlag am Ende von Tag ${a.until}, ${left === 1 ? 'nur noch heute' : `noch ${left} Tage`}. Dein Gebot wird hinterlegt und bei Überbietung zurückgezahlt.</p>${rows}</div>`;
 }
 
 export function renderRivalry(state: GameState, map: MapDef): string {
   if (!state.rivalsActive) return '';
   const gone = (state.housesGone ?? [])
-    .map((h) => `<li>${RIVAL_BY_ID.get(h.id)?.name ?? h.id}: ${h.how === 'konkurs' ? 'pleite' : 'von dir übernommen'} an Tag ${h.day}</li>`)
+    .map((h) => `<li>${RIVAL_BY_ID.get(h.id)?.name ?? h.id}: ${h.how === 'konkurs' ? 'pleite' : 'von dir übernommen'} am Tag ${h.day}</li>`)
     .join('');
   const ban = (state.pactBanUntil ?? 0) >= day(state) ? `<p class="note">Nach deinem Vertragsbruch schließt bis Tag ${state.pactBanUntil} niemand ein Abkommen mit dir.</p>` : '';
   return `<h3>Die anderen Häuser</h3>
