@@ -123,7 +123,7 @@ describe('Zufallsflüsse: Spielen', () => {
       const map = randomMap(seed);
       const s = newGame(map, { startTown: startOf(map), seed: 99 });
       expect(s.map).toEqual({ id: map.id, seed, def: map });
-      advance(s, map, 24 * 120);
+      advance(s, map, 24 * 360);
       expect(Number.isFinite(s.money)).toBe(true);
       // die Häuser der Konkurrenz liegen in Häfen dieser Karte
       const ids = new Set(map.towns.map((t) => t.id));
@@ -134,6 +134,8 @@ describe('Zufallsflüsse: Spielen', () => {
       for (const t of map.towns) expect(s.towns[t.id].population).toBeGreaterThan(0);
       // Häuser ohne Heimathafen auf dieser Karte behalten ihren Ersatzhafen
       for (const r of s.rivals) if (r.home) expect(ids.has(r.home)).toBe(true);
+      // Wasserbauten der Konkurrenz stammen nur aus der Liste dieser Karte
+      for (const w of s.works) expect(map.projects!.some((p) => p.id === w.id), w.id).toBe(true);
     }
   });
 
