@@ -101,7 +101,7 @@ function today(state: GameState): { income: number; cost: number } {
 }
 
 /** Einnahme an Bauherrn und Partner verteilen */
-function credit(state: GameState, owner: string | undefined, partner: WorkPartner | undefined, amount: number, rec?: { earned?: number }): void {
+function credit(state: GameState, owner: string | undefined, partner: WorkPartner | undefined, amount: number, rec?: { earned?: number; partnerEarned?: number }): void {
   const share = partner ? partner.share : 0;
   const ownPart = amount * (1 - share);
   const partPart = amount * share;
@@ -115,7 +115,8 @@ function credit(state: GameState, owner: string | undefined, partner: WorkPartne
     if (rec) rec.earned = (rec.earned ?? 0) + ownPart;
   } else if (owner) toRival(owner, ownPart);
   if (partner?.kind === 'haus') toRival(partner.id, partPart);
-  // Anteil einer Stadt geht in die Stadtkasse
+  // Anteil einer Stadt geht in die Stadtkasse; festgehalten, damit die Anzeige ihn nennen kann
+  if (partner && rec) rec.partnerEarned = (rec.partnerEarned ?? 0) + partPart;
 }
 
 /** Gebühren, die beim Ablegen gezahlt wurden, an die Bauherren auszahlen */
@@ -149,9 +150,15 @@ export function chargeRival(state: GameState, r: RivalState, v: Voyage, capacity
   );
   const sum = feeSum(items);
   if (sum <= 0) return 0;
-  r.money -= sum;
-  distributeFees(state, items);
-  return sum;
+  // Ein Haus zahlt höchstens, was in der Kasse liegt; der Rest geht den Bauherren verloren
+  const pay = Math.min(sum, Math.max(0, r.money));
+  if (pay <= 0) return 0;
+  r.money -= pay;
+  distributeFees(
+    state,
+    items.map((f) => ({ ...f, amount: (f.amount * pay) / sum })),
+  );
+  return pay;
 }
 
 /** Gebühr, die ein KI-Haus für diese Abschnitte erwarten muss (für die Planung) */
@@ -246,22 +253,24 @@ export function upkeepCost(w: Work): number {
 export function dredgeCost(w: Work): number {
   const p = PROJECT_BY_ID.get(w.id);
   if (!p || !SILT_KINDS.has(p.kind) || !(w.silt ?? 0)) return 0;
-  return Math.max(50, Math.round(p.cost * DREDGE_RATE * (w.silt ?? 0) * (1 - (w.partner?.share ?? 0))));
+  return Math.max(10, Math.round(p.cost * DREDGE_RATE * (w.silt ?? 0) * (1 - (w.partner?.share ?? 0))));
 }
 
 export function dredge(state: GameState, id: string): TradeResult {
   const w = state.works.find((x) => x.id === id);
   const p = PROJECT_BY_ID.get(id);
   if (!w || !p || !w.done || !isPlayer(w.owner)) return fail('Das ist nicht deine Fahrrinne.');
-  const cost = dredgeCost(w);
+  let cost = dredgeCost(w);
   if (!cost) return fail('Die Rinne ist frei.');
+  // Ein Partnerhaus trägt seinen Anteil nur, soweit seine Kasse reicht; den Rest übernimmt der Spieler
+  const r = w.partner?.kind === 'haus' ? state.rivals.find((x) => x.id === w.partner!.id) : undefined;
+  const rivalShare = r ? Math.round(p.cost * DREDGE_RATE * (w.silt ?? 0) * w.partner!.share) : 0;
+  const rivalPays = r ? Math.min(rivalShare, Math.max(0, r.money)) : 0;
+  cost += rivalShare - rivalPays;
   if (state.money < cost) return fail(`Das Nachbaggern kostet ${cost} Taler.`);
   state.money -= cost;
   today(state).cost += cost;
-  if (w.partner?.kind === 'haus') {
-    const r = state.rivals.find((x) => x.id === w.partner!.id);
-    if (r) r.money -= Math.round(p.cost * DREDGE_RATE * (w.silt ?? 0) * w.partner.share);
-  }
+  if (r) r.money -= rivalPays;
   w.silt = 0;
   return { ok: true, message: `${p.name}: Die Baggerschiffe haben die Rinne wieder frei geräumt.`, amount: 0, taler: cost };
 }
@@ -273,7 +282,8 @@ export function setUpkeep(state: GameState, id: string, on: boolean): TradeResul
   w.upkeep = on;
   return {
     ok: true,
-    message: on ? `${p.name}: Baggerschiffe halten die Rinne frei, ${upkeepCost(w)} Taler am Tag.` : `${p.name}: Keine Pflege mehr, die Rinne verlandet langsam.`,
+    message: on
+      ? `${p.name}: Baggerschiffe halten die Rinne auf ihrem Stand, ${upkeepCost(w)} Taler am Tag.${(w.silt ?? 0) > 0 ? ' Angeschwemmter Sand muss erst nachgebaggert werden.' : ''}` : `${p.name}: Keine Pflege mehr, die Rinne verlandet langsam.`,
     amount: 0,
     taler: 0,
   };
@@ -343,7 +353,7 @@ export function dockFee(state: GameState, town: string): number {
 
 /** Ein KI-Schiff legt an: Liegegeld zahlen und Liegezeit nach Hafenstufe */
 export function rivalDocks(state: GameState, r: RivalState, town: string): number {
-  const fee = dockFee(state, town);
+  const fee = Math.min(dockFee(state, town), Math.max(0, r.money));
   if (fee > 0) {
     r.money -= fee;
     distributeFees(state, [{ work: `hafen:${town}`, amount: fee }]);
@@ -384,7 +394,8 @@ export function buildHarbor(state: GameState, map: MapDef, town: string, withTow
   const harbors = (state.harbors ??= {});
   harbors[town] = { ...h, building: { level: next.level, started: day(state) } };
   // Eine Beteiligung der Stadt gilt für den ganzen Hafen, eine frühere bleibt bestehen
-  if (offer) harbors[town].partner = offer.partner;
+  // Wer allein ausbaut, löst eine frühere Beteiligung der Stadt ab
+  harbors[town].partner = offer ? offer.partner : undefined;
   addNews(state, 'haus', `Hafenausbau in ${def.name}: ${next.name}. Fertig in ${next.days} Tagen.`);
   return { ok: true, message: `${def.name}: ${next.name} wird gebaut.`, amount: 0, taler: cost };
 }
@@ -434,7 +445,7 @@ export function tickWaterworks(state: GameState, map: MapDef): NewsItem[] {
         const r = state.rivals.find((x) => x.id === w.partner!.id);
         if (r) r.money -= Math.round(p.cost * UPKEEP_RATE * w.partner.share);
       }
-      w.silt = 0;
+      // Pflege hält die Rinne auf ihrem Stand; schon angeschwemmter Sand muss nachgebaggert werden
       continue;
     }
     const before = w.silt ?? 0;

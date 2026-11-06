@@ -274,6 +274,8 @@ export interface Work {
   upkeep?: boolean;
   /** Gebühren, die der Spieler mit diesem Bauwerk eingenommen hat */
   earned?: number;
+  /** Gebührenanteil, der an den Partner ging */
+  partnerEarned?: number;
 }
 
 /** Ausbau eines Hafens durch den Spieler */
@@ -284,6 +286,7 @@ export interface Harbor {
   partner?: WorkPartner;
   fee?: FeeLevel;
   earned?: number;
+  partnerEarned?: number;
 }
 
 export interface GameState {

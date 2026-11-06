@@ -125,7 +125,10 @@ export function upgradeState(state: GameState, map: MapDef): GameState {
     if (w.owner || w.started <= 0) continue;
     w.owner = 'spieler';
     w.fee ??= 'normal';
-    if (PROJECT_BY_ID.get(w.id)?.kind === 'vertiefung') w.upkeep ??= true;
+    if (PROJECT_BY_ID.get(w.id)?.kind === 'vertiefung' && w.upkeep === undefined) {
+      w.upkeep = true;
+      addNews(s, 'haus', `Neu beim Wasserbauamt: ${PROJECT_BY_ID.get(w.id)!.name} wird jetzt gepflegt und kostet täglich Unterhalt. Abschalten im Reiter Wasserbau.`);
+    }
   }
   s.fuelToday ??= 0;
   s.priceBook ??= {};

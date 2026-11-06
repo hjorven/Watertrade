@@ -202,6 +202,18 @@ describe('Wasserbau: Verlandung und Unterhalt', () => {
     expect(s.ledger.works?.cost).toBe(daily);
   });
 
+  it('Pflege hält nur den Stand, verlandeter Sand muss nachgebaggert werden', () => {
+    const s = game({ rivals: false });
+    startProjectWith(s, VALLEY, 'vertiefung-glas');
+    const w = finish(s, 'vertiefung-glas');
+    w.upkeep = false;
+    w.silt = 1;
+    setUpkeep(s, 'vertiefung-glas', true);
+    s.hour += 24;
+    tickWaterworks(s, VALLEY);
+    expect(w.silt).toBe(1);
+  });
+
   it('Hochwasser schwemmt schneller zu', () => {
     const s = game({ rivals: false });
     startProjectWith(s, VALLEY, 'vertiefung-glas');
@@ -251,6 +263,22 @@ describe('Hafenausbau', () => {
     expect(buildHarbor(s, VALLEY, 'niedermuend', true).ok).toBe(true);
     expect(money - s.money).toBe(HARBOR_LEVELS[1].cost / 2);
     expect(buildHarbor(s, VALLEY, 'erzgrube', true).ok).toBe(false);
+  });
+
+  it('wer allein ausbaut, löst die Beteiligung der Stadt ab', () => {
+    const s = game({ rivals: false });
+    s.harbors = { niedermuend: { level: 1, partner: { kind: 'stadt', id: 'niedermuend', share: 0.5 } } };
+    expect(buildHarbor(s, VALLEY, 'niedermuend').ok).toBe(true);
+    expect(s.harbors.niedermuend.partner).toBeUndefined();
+  });
+
+  it('ein armes Haus zahlt höchstens, was es hat', () => {
+    const s = game();
+    startProjectWith(s, VALLEY, 'bruecke-kessel');
+    finish(s, 'bruecke-kessel');
+    s.rivals[0].money = 3;
+    rivalPasses(s, 'kesselbrueck', 'muehlheim');
+    expect(s.rivals[0].money).toBe(0);
   });
 
   it('zu tiefe Schiffe werden geleichtert: langsamer und mit Leichtergeld', () => {

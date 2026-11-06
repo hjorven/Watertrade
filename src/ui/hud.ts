@@ -959,7 +959,8 @@ export class Hud {
           extra.push(`Bauherr: ${ownerName(w)}${partner}`);
           const fee = passageFee({ ...w, done: true }, 60);
           if (w.owner === 'spieler') {
-            if (fee || w.fee === 'frei') extra.push(`Gebühr je fremder Durchfahrt: ${fee} Taler (mittleres Schiff), eingenommen: ${fmt(Math.round(w.earned ?? 0))} Taler`);
+            const part = w.partner ? `, Anteil des Partners: ${fmt(Math.round(w.partnerEarned ?? 0))} Taler` : '';
+            if (fee || w.fee === 'frei') extra.push(`Gebühr je fremder Durchfahrt: ${fee} Taler (mittleres Schiff), eingenommen: ${fmt(Math.round(w.earned ?? 0))} Taler${part}`);
           } else if (fee) extra.push(`Gebühr für deine Schiffe: rund ${fee} Taler je Durchfahrt (mittleres Schiff).`);
         }
         if (w?.owner === 'spieler' && st === 'fertig' && p.kind === 'vertiefung') {
@@ -967,12 +968,12 @@ export class Hud {
           const cost = dredgeCost(w);
           extra.push(
             w.upkeep
-              ? `Baggerschiffe halten die Rinne frei: ${upkeepCost(w)} Taler am Tag.`
+              ? `Baggerschiffe halten die Rinne auf ihrem Stand (${silt} % verlandet): ${upkeepCost(w)} Taler am Tag.`
               : `Verlandet zu ${silt} %. Ohne Pflege schwemmt der Fluss die Rinne langsam zu.`,
           );
           extra.push(`<span class="row-btns">
             <button class="btn small" data-act="cmd" data-cmd="workUpkeep" data-id="${p.id}" data-on="${w.upkeep ? 0 : 1}">${w.upkeep ? 'Pflege beenden' : `Pflege für ${upkeepCost(w)} Taler am Tag`}</button>
-            ${cost ? `<button class="btn small" data-act="cmd" data-cmd="dredge" data-id="${p.id}" ${state.money >= cost ? '' : 'disabled'}>Nachbaggern: ${fmt(cost)} Taler</button>` : ''}
+            ${cost && (w.silt ?? 0) >= 0.05 ? `<button class="btn small" data-act="cmd" data-cmd="dredge" data-id="${p.id}" ${state.money >= cost ? '' : 'disabled'}>Nachbaggern: ${fmt(cost)} Taler</button>` : ''}
           </span>`);
         }
         if (w?.owner === 'spieler' && st === 'fertig' && passageFee({ ...w, fee: 'normal' }, 60)) extra.push(feeBtns(p.id, w.fee));
@@ -1003,7 +1004,7 @@ export class Hud {
         }
         const own =
           h.level > 0
-            ? `<small class="desc">Liegegeld von fremden Schiffen, eingenommen: ${fmt(Math.round(h.earned ?? 0))} Taler</small>${feeBtns(`hafen:${t.id}`, h.fee)}`
+            ? `<small class="desc">Liegegeld von fremden Schiffen, eingenommen: ${fmt(Math.round(h.earned ?? 0))} Taler${h.partner ? `, Anteil der Stadt: ${fmt(Math.round(h.partnerEarned ?? 0))} Taler` : ''}</small>${feeBtns(`hafen:${t.id}`, h.fee)}`
             : '';
         return `<div class="yard-row"><div><b>${t.name}</b> <small>${info}</small>${own}</div>${btn}</div>`;
       })
