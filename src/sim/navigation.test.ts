@@ -59,10 +59,12 @@ describe('Nachtfahrt', () => {
 
   it('fertige Leuchtfeuer-Bauten zählen als beleuchtete Abschnitte', () => {
     const s = newGame(VALLEY, { startTown: 'oberau', rivals: false });
-    const lamp = PROJECTS.find((p) => (p.kind as string) === 'leuchtfeuer');
-    if (!lamp) return; // die Leuchtfeuer kommen aus dem Wasserbau
+    const lamp = PROJECTS.find((p) => p.kind === 'leuchtfeuer')!;
+    expect(lamp).toBeDefined();
+    expect(progressFactor(s, 'treidelkahn', lamp.seg, 2)).toBe(NIGHT_SPEED);
     s.works.push({ id: lamp.id, started: 0, done: true });
     expect(litSegments(s)).toContain(lamp.seg);
+    expect(progressFactor(s, 'treidelkahn', lamp.seg, 2)).toBe(1);
   });
 
   it('eine Fahrt über Nacht dauert länger als der Fahrplan, die Schätzung trifft die Ankunft', () => {

@@ -1,6 +1,5 @@
 import type { MapDef } from '../data/maps/valley.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
-import { PROJECT_BY_ID } from '../data/projects.ts';
 import { SHIPS } from '../data/ships.ts';
 import { season, type Season } from './calendar.ts';
 import { segmentDepth } from './river.ts';
@@ -19,7 +18,7 @@ import {
   type Voyage,
 } from './state.ts';
 import { planVoyage, TIGHT_DEPTH, voyagePosition, wearRate, WEAR_PER_HOUR } from './voyage.ts';
-import { effectiveSegments } from './works.ts';
+import { effectiveSegments, litSegments } from './works.ts';
 
 /**
  * Fahren und Risiko (Plan 5.2):
@@ -52,16 +51,8 @@ export function isNight(hour: number): boolean {
   return h >= dusk || h < dawn;
 }
 
-/** Abschnitte mit fertigem Leuchtfeuer (Wasserbau, Projektart 'leuchtfeuer') */
-export function litSegments(state: GameState): string[] {
-  const out: string[] = [];
-  for (const w of state.works ?? []) {
-    if (!w.done) continue;
-    const p = PROJECT_BY_ID.get(w.id);
-    if (p && (p.kind as string) === 'leuchtfeuer') out.push(p.seg);
-  }
-  return out;
-}
+/** Abschnitte mit fertigem Leuchtfeuer kommen aus dem Wasserbau */
+export { litSegments };
 
 /** Fahrt bei Dunkelheit ohne Leuchtfeuer, je nach Antrieb */
 export function nightSpeed(type: string): number {
