@@ -1,4 +1,4 @@
-# Flussreich
+# Watertrade
 
 Handels- und Aufbauspiel im Browser. Du führst ein Handelshaus an einem großen Flusssystem.
 

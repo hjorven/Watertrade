@@ -70,10 +70,13 @@ import { LEVELS, levelOf } from './sim/towns.ts';
 import { chapterOneHint } from './ui/tutorial.ts';
 import { ALL_FEATURES, Hud, type HudFeatures } from './ui/hud.ts';
 import { Menu, type SlotInfo } from './ui/menu.ts';
-import { loadJson, saveJson } from './ui/storage.ts';
+import { loadJson, migrateLegacyStorage, saveJson, storageKey } from './ui/storage.ts';
 
 /** Spielstunden pro echter Sekunde bei Tempo 1 */
 const HOURS_PER_SECOND = 3;
+
+// Spielstände und Einstellungen aus der Zeit vor der Umbenennung (flussreich.*) einmal übernehmen
+migrateLegacyStorage();
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = '<div class="viewport"></div>';
@@ -82,7 +85,7 @@ const viewport = app.querySelector<HTMLDivElement>('.viewport')!;
 // --- Karte ---
 // Die Welt wird einmal beim Laden aufgebaut. Startet ein Spiel auf einer anderen Karte (Zufallsfluss),
 // legt startGame den Spielstand in den sessionStorage und lädt die Seite neu; hier geht es dann weiter.
-const PENDING_KEY = 'flussreich.pending';
+const PENDING_KEY = 'watertrade.pending';
 const pending = takePending();
 /** Die Seite wurde für einen übergebenen Spielstand neu geladen: höchstens ein Versuch, ihn zu starten */
 let bootedWithPending = !!pending;
@@ -824,7 +827,7 @@ function makeSave(): SaveGame {
 function saveSlot(slot: string): void {
   const save = makeSave();
   try {
-    localStorage.setItem(`flussreich.save.${slot}`, serialize(save));
+    localStorage.setItem(storageKey(`save.${slot}`), serialize(save));
   } catch {
     hud.toast('Speichern nicht möglich: Der Browser erlaubt keinen lokalen Speicher.', 'warn');
   }
@@ -832,7 +835,7 @@ function saveSlot(slot: string): void {
 
 function readSlot(slot: string): SaveGame | null {
   try {
-    const text = localStorage.getItem(`flussreich.save.${slot}`);
+    const text = localStorage.getItem(storageKey(`save.${slot}`));
     return text ? deserialize(text) : null;
   } catch {
     return null;
@@ -1308,7 +1311,7 @@ function frame(): void {
 
 // Testhilfe: mit ?debug in der Adresse lassen sich Tage überspringen
 if (new URLSearchParams(location.search).has('debug')) {
-  (window as unknown as Record<string, unknown>).flussreich = {
+  (window as unknown as Record<string, unknown>).watertrade = {
     state: () => state,
     skipDays(n: number) {
       handleEvents(advance(state, MAP, n * 24));

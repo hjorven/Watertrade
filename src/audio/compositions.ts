@@ -1,5 +1,5 @@
 /**
- * Eigene Kompositionen für Flussreich. Melodien in Stufen-Kurzschrift (siehe theory.ts),
+ * Eigene Kompositionen für Watertrade. Melodien in Stufen-Kurzschrift (siehe theory.ts),
  * Begleitung als Muster über leitereigene Akkorde. Jede Stimmung hat eine eigene Besetzung:
  *
  * - epoche1 "Am alten Furt": D-dorisch, 6/8, Bordun, Harfe, Flöte, Rahmentrommel (mittelalterlich)

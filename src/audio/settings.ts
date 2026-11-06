@@ -6,7 +6,9 @@ export interface AudioSettings {
   muted: boolean;
 }
 
-export const STORAGE_KEY = 'flussreich.audio';
+export const STORAGE_KEY = 'watertrade.audio';
+/** Schlüssel aus der Zeit, als das Spiel noch „Flussreich“ hieß (wird beim Start nach STORAGE_KEY übernommen) */
+export const LEGACY_STORAGE_KEY = 'flussreich.audio';
 
 export const DEFAULT_SETTINGS: AudioSettings = {
   volume: { master: 0.9, music: 0.65, sfx: 0.8, ambient: 0.45 },
@@ -36,7 +38,7 @@ export function defaultStore(): Store | null {
 export function loadSettings(store: Store | null = defaultStore()): AudioSettings {
   const s: AudioSettings = { volume: { ...DEFAULT_SETTINGS.volume }, muted: DEFAULT_SETTINGS.muted };
   try {
-    const raw = store?.getItem(STORAGE_KEY);
+    const raw = store?.getItem(STORAGE_KEY) ?? store?.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return s;
     const data = JSON.parse(raw) as Partial<AudioSettings>;
     for (const ch of CHANNELS) {
