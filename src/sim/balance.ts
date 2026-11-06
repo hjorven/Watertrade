@@ -97,8 +97,8 @@ export function paybackTable(): { id: string; name: string; raw: boolean; price:
 }
 
 /** Reichstes Haus der Konkurrenz nach `days` Tagen freiem Spiel, ohne dass der Spieler eingreift */
-export function rivalPeak(map: MapDef, days: number, seed = 20260601): { worth: number; house: string } {
-  const state = newGame(map, { startTown: 'oberau', rivals: true, seed });
+export function rivalPeak(map: MapDef, days: number, seed = 20260601, start = 'oberau'): { worth: number; house: string } {
+  const state = newGame(map, { startTown: start, rivals: true, seed });
   advance(state, map, days * 24);
   let best = { worth: -Infinity, house: '' };
   for (const r of state.rivals) {

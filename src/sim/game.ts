@@ -21,7 +21,7 @@ import { initialMarket, initialTown, tickTown } from './towns.ts';
 import { movingHours, wearFactor, wearRate } from './voyage.ts';
 import { voyageProgress } from './navigation.ts';
 import { tickWaterworks } from './wasserbau.ts';
-import { PROJECT_BY_ID } from '../data/projects.ts';
+import { PROJECT_BY_ID, registerProjects } from '../data/projects.ts';
 
 export * from './state.ts';
 export * from './trade.ts';
@@ -100,6 +100,9 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
     works: (opts.works ?? []).map((id) => ({ id, started: 0, done: true })),
     fuelToday: 0,
   };
+  registerProjects(map);
+  // Zufallskarten (mit Startwert) reisen vollständig im Spielstand mit
+  if (map.id) state.map = map.seed === undefined ? { id: map.id } : { id: map.id, seed: map.seed, def: map };
   const startDays = Math.max(0, (opts.startYear ?? 1) - 1) * YEAR_DAYS + Math.max(0, Math.floor(opts.startDay ?? 0));
   if (startDays > 0) {
     state.hour += startDays * 24;
@@ -122,6 +125,7 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
 
 /** Ältere Spielstände auf den aktuellen Aufbau bringen */
 export function upgradeState(state: GameState, map: MapDef): GameState {
+  registerProjects(map);
   const s = state as Partial<GameState> & GameState;
   s.stats.contracts ??= 0;
   s.kontore ??= {};

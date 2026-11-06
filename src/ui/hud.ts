@@ -47,7 +47,7 @@ import {
   shipsAlongside,
   totalChance,
 } from '../sim/navigation.ts';
-import { PROJECTS } from '../data/projects.ts';
+import { projectsOf } from '../data/projects.ts';
 import { daysLeft, projectState } from '../sim/works.ts';
 import { HARBOR_LEVELS, LIGHTER_FEE } from '../data/harbors.ts';
 import {
@@ -457,9 +457,9 @@ export class Hud {
   render(state: GameState, selected: number): void {
     const w = wind(state);
     // angekündigte Wetterlagen (nur mit Pegelstation sichtbar) stehen mit in der Lage
-    const ahead = visibleForecasts(state);
+    const ahead = visibleForecasts(state, this.map);
     const lage = [...state.events.map((e) => EVENT_TITLE[e.kind]), ...ahead.map((e) => `${EVENT_TITLE[e.kind]} (angekündigt)`)];
-    const lageTitle = [...state.events.map((e) => describeEvent(this.map, e)), ...ahead.map((e) => describeForecast(state, e))].join('\n');
+    const lageTitle = [...state.events.map((e) => describeEvent(this.map, e)), ...ahead.map((e) => describeForecast(state, e, this.map))].join('\n');
     const events = lage.length ? `<span class="hide-narrow event-chip" title="${lageTitle}"><small>Lage</small><b>${lage.join(', ')}</b></span>` : '';
     setHtml(
       this.top,
@@ -1013,7 +1013,7 @@ export class Hud {
     const pct = Math.round((v.elapsed / v.hours) * 100);
     const left = realHours(state, ship.type, v);
     const night = isNight(state.hour);
-    const lit = litSegments(state).includes(leg.seg);
+    const lit = litSegments(state, this.map).includes(leg.seg);
     const status =
       (v.aground ?? 0) > 0
         ? `<p class="note warn">Auf Grund gelaufen. Die Mannschaft stakt und wartet auf Wasser, frei in etwa ${fmtHours(Math.ceil(v.aground!))}.</p>`
@@ -1129,7 +1129,7 @@ export class Hud {
 
   private renderNews(state: GameState): string {
     // Vorhersagen der Pegelstationen stehen mit in der Lage am Fluss
-    const forecasts = visibleForecasts(state).map((e) => `<li><b>Pegelmeldung</b>: ${describeForecast(state, e)}</li>`);
+    const forecasts = visibleForecasts(state, this.map).map((e) => `<li><b>Pegelmeldung</b>: ${describeForecast(state, e, this.map)}</li>`);
     const events = state.events.length || forecasts.length
       ? `<div class="contract-box"><h3>Lage am Fluss</h3><ul class="plain">${state.events
           .map((e) => `<li><b>${EVENT_TITLE[e.kind]}</b>: ${describeEvent(this.map, e)}<small> bis Tag ${e.until}</small></li>`)
@@ -1174,7 +1174,7 @@ export class Hud {
             `<button class="btn small ${(current ?? 'normal') === lv ? 'on' : ''}" data-act="cmd" data-cmd="workFee" data-id="${id}" data-level="${lv}" aria-pressed="${(current ?? 'normal') === lv}" title="${FEE_LABEL[lv]}">${lv === 'frei' ? 'frei' : lv === 'normal' ? 'üblich' : 'hoch'}</button>`,
         )
         .join('')}</div>`;
-    const list = PROJECTS.map((p) => {
+    const list = projectsOf(this.map).map((p) => {
       const st = projectState(state, p.id);
       const w = state.works.find((x) => x.id === p.id);
       const seg = this.map.segments.find((s) => s.id === p.seg)!;
@@ -1195,7 +1195,7 @@ export class Hud {
           </div>`;
         }
       } else {
-        btn = st === 'fertig' ? '<span class="done-mark">fertig</span>' : `<span class="note">noch ${daysLeft(state, p.id)} Tage</span>`;
+        btn = st === 'fertig' ? '<span class="done-mark">fertig</span>' : `<span class="note">noch ${daysLeft(state, p.id, this.map)} Tage</span>`;
         if (w?.owner) {
           const partner = w.partner ? `, gemeinsam mit ${w.partner.kind === 'stadt' ? this.townName(w.partner.id) : (RIVAL_BY_ID.get(w.partner.id)?.name ?? w.partner.id)}` : '';
           extra.push(`Bauherr: ${ownerName(w)}${partner}`);
@@ -1353,7 +1353,7 @@ export class Hud {
         return p ? `<circle cx="${p.x}" cy="${p.y}" r="2.4" fill="${hex(color)}" class="m-rival"/>` : '';
       })
       .join('');
-    return `<div class="ledger-head"><div class="stamp-small">Flusskarte</div><h2>Das Tal</h2><p>Rote Punkte sind deine Schiffe, Quadrate deine Kontore. Zahlen am Fluss: Wassertiefe.</p></div>
+    return `<div class="ledger-head"><div class="stamp-small">Flusskarte</div><h2>${!this.map.id || this.map.id === 'tal' ? 'Das Tal' : this.map.name}</h2><p>Rote Punkte sind deine Schiffe, Quadrate deine Kontore. Zahlen am Fluss: Wassertiefe.</p></div>
       <p class="note swipe-hint">Karte zum Verschieben seitlich wischen.</p><div class="map-scroll"><svg class="paper-map" viewBox="${d.viewBox}" role="img" aria-label="Karte des Flusstals">${rivers}${notes}${towns}${rivals}${ships}</svg></div>
       <details class="more"><summary>Alle Abschnitte mit Tiefe und Brücken</summary><ul class="plain map-legend">${legend.join('')}</ul></details>`;
   }

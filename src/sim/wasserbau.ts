@@ -1,6 +1,6 @@
 import type { MapDef } from '../data/maps/valley.ts';
 import { baseBerths, HARBOR_DEPTH, HARBOR_LEVELS, LIGHTER_FEE } from '../data/harbors.ts';
-import { PROJECT_BY_ID, PROJECTS, type ProjectDef } from '../data/projects.ts';
+import { PROJECT_BY_ID, projectsOf, type ProjectDef } from '../data/projects.ts';
 import { RIVAL_BY_ID } from '../data/rivals.ts';
 import {
   addNews,
@@ -221,6 +221,7 @@ function rivalPartner(state: GameState, cost: number): PartnerOffer | null {
 
 /** Bauvorhaben beginnen, allein oder mit Stadt bzw. KI-Haus als Partner */
 export function startProjectWith(state: GameState, map: MapDef, id: string, kind?: 'stadt' | 'haus'): TradeResult {
+  if (!projectsOf(map).some((p) => p.id === id)) return fail('Dieses Bauvorhaben gibt es an diesem Fluss nicht.');
   if (!kind) return startProject(state, id);
   const offer = partnerOffer(state, map, id, kind);
   if (!offer) return fail(kind === 'stadt' ? 'Keine Stadt an diesem Abschnitt ist groß genug, um mitzubauen.' : 'Kein Handelshaus hat gerade genug Geld für einen Gemeinschaftsbau.');
@@ -489,7 +490,7 @@ function chance(d: number, id: string): number {
 /** Reiche KI-Häuser errichten im freien Spiel selbst Wasserbauten und nehmen Gebühren */
 function rivalsBuild(state: GameState, map: MapDef): NewsItem[] {
   const news: NewsItem[] = [];
-  const open = PROJECTS.filter((p) => FEE_KINDS.has(p.kind) && p.epoch <= state.epoch && !state.works.some((w) => w.id === p.id)).sort(
+  const open = projectsOf(map).filter((p) => FEE_KINDS.has(p.kind) && p.epoch <= state.epoch && !state.works.some((w) => w.id === p.id)).sort(
     (a, b) => a.cost - b.cost,
   );
   if (!open.length) return news;

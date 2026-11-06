@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { SegmentDef } from '../data/maps/valley.ts';
-import { PROJECT_BY_ID } from '../data/projects.ts';
+import { PROJECTS, type ProjectDef } from '../data/projects.ts';
 import type { Landscape } from './landscape.ts';
 import { boxGeo, coneGeo, cylGeo, Kit } from './kit.ts';
 import { buildBridge } from './towns.ts';
@@ -171,11 +171,13 @@ export class WaterWorks {
   private readonly land: Landscape;
   private readonly segments: SegmentDef[];
   private readonly oldBridges: Map<string, THREE.Object3D>;
+  private readonly projects: ProjectDef[];
 
-  constructor(scene: THREE.Scene, land: Landscape, segments: SegmentDef[], oldBridges: Map<string, THREE.Object3D>) {
+  constructor(scene: THREE.Scene, land: Landscape, segments: SegmentDef[], oldBridges: Map<string, THREE.Object3D>, projects: ProjectDef[] = PROJECTS) {
     this.land = land;
     this.segments = segments;
     this.oldBridges = oldBridges;
+    this.projects = projects;
     scene.add(this.root);
   }
 
@@ -186,7 +188,7 @@ export class WaterWorks {
     this.root.clear();
     for (const b of this.oldBridges.values()) b.visible = true;
     for (const w of works) {
-      const p = PROJECT_BY_ID.get(w.id);
+      const p = this.projects.find((x) => x.id === w.id);
       const seg = this.segments.find((s) => s.id === p?.seg);
       if (!p || !seg) continue;
       if (!w.done) {

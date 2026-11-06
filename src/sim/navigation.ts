@@ -180,7 +180,7 @@ export interface GroundingRisk {
 export function groundingRisks(state: GameState, map: MapDef, ship: Ship, v: Voyage): GroundingRisk[] {
   const segs = effectiveSegments(state, map);
   const draft = effectiveDraft(ship);
-  const lit = litSegments(state);
+  const lit = litSegments(state, map);
   const out: GroundingRisk[] = [];
   for (const leg of v.legs) {
     const seg = segs.find((s) => s.id === leg.seg);
@@ -223,7 +223,7 @@ function rollLeg(state: GameState, map: MapDef, ship: Ship, v: Voyage, index: nu
   if (!seg) return;
   // ist der Pegel seit der Abfahrt unter den Tiefgang gefallen, wird es so knapp wie möglich
   const clearance = Math.max(0, segmentDepth(seg, state.waterLevel) - effectiveDraft(ship));
-  const dark = isNight(hour) && !litSegments(state).includes(leg.seg);
+  const dark = isNight(hour) && !litSegments(state, map).includes(leg.seg);
   const chance = groundingChance(clearance, { careful: hasTrait(ship.captain, 'vorsichtig'), dark });
   if (chance <= 0) return;
   if (dice(ship.id, Math.floor(hour), index) >= chance) return;
@@ -258,7 +258,7 @@ function applyGrounding(state: GameState, map: MapDef, ship: Ship, at: Voyage, v
 export function voyageProgress(state: GameState, map: MapDef, ship: Ship, hours: number, events: GameEvent[]): { progress: number; real: number } {
   const v = ship.voyage;
   if (!v) return { progress: 0, real: 0 };
-  const lit = litSegments(state);
+  const lit = litSegments(state, map);
   const list = spans(v);
   let hour = state.hour - hours;
   let left = hours;

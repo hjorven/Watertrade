@@ -147,3 +147,22 @@ export const PROJECTS: ProjectDef[] = [
 ];
 
 export const PROJECT_BY_ID = new Map(PROJECTS.map((p) => [p.id, p]));
+
+/**
+ * Wasserbauten einer anderen Karte (Zufallsflüsse) in PROJECT_BY_ID eintragen, damit Gebühren, Pflege
+ * und Anzeige sie auch ohne Kartenparameter finden. Erzeugte Ids enthalten beide Städte des Abschnitts
+ * und überschneiden sich nicht mit denen des Tals; Einträge des Tals werden nie überschrieben.
+ */
+export function registerProjects(map: { projects?: ProjectDef[] }): void {
+  for (const p of map.projects ?? []) if (!PROJECTS.some((x) => x.id === p.id)) PROJECT_BY_ID.set(p.id, p);
+}
+
+/** Wasserbauten einer Karte: ihre eigene Liste oder die des Tals */
+export function projectsOf(map?: { projects?: ProjectDef[] }): ProjectDef[] {
+  return map?.projects ?? PROJECTS;
+}
+
+/** Wasserbau nach Id auf einer Karte */
+export function projectOn(map: { projects?: ProjectDef[] } | undefined, id: string): ProjectDef | undefined {
+  return map?.projects ? map.projects.find((p) => p.id === id) : PROJECT_BY_ID.get(id);
+}

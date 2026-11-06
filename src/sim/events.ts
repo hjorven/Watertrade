@@ -13,8 +13,8 @@ export const FORECAST_MAX = 5;
 const isWeather = (k: WorldEventKind) => k === 'hochwasser' || k === 'duerre';
 
 /** Vorhersagen, die der Spieler sieht: nur mit mindestens einer fertigen Pegelstation */
-export function visibleForecasts(state: GameState): WorldEvent[] {
-  return gaugeCount(state) > 0 ? (state.forecast ?? []) : [];
+export function visibleForecasts(state: GameState, map?: MapDef): WorldEvent[] {
+  return gaugeCount(state, map) > 0 ? (state.forecast ?? []) : [];
 }
 
 const meters = (v: number) => Math.abs(v).toFixed(1).replace('.', ',');
@@ -30,10 +30,10 @@ function roughWhen(d: number, e: WorldEvent): string {
 }
 
 /** Text der Pegelmeldung; ab zwei Stationen mit genauem Tag und Pegel */
-export function describeForecast(state: GameState, e: WorldEvent): string {
+export function describeForecast(state: GameState, e: WorldEvent, map?: MapDef): string {
   const d = day(state);
   const inDays = e.from - d;
-  const exact = gaugeCount(state) >= 2;
+  const exact = gaugeCount(state, map) >= 2;
   const when = exact
     ? inDays <= 0
       ? 'ab heute'
@@ -224,7 +224,7 @@ export function tickEvents(state: GameState, map: MapDef): NewsItem[] {
     const e = startEvent(state, map, kind);
     if (e && !isWeather(e.kind)) news.push(addNews(state, 'ereignis', startText(map, e)));
     // Wetter kündigt sich an: nur wer eine Pegelstation hat, erfährt es vorher
-    if (e && isWeather(e.kind) && gaugeCount(state) > 0) news.push(addNews(state, 'ereignis', warningText(state, e)));
+    if (e && isWeather(e.kind) && gaugeCount(state, map) > 0) news.push(addNews(state, 'ereignis', warningText(state, e, map)));
   }
   return news;
 }
@@ -241,10 +241,10 @@ function startText(map: MapDef, e: WorldEvent): string {
   return text[e.kind];
 }
 
-function warningText(state: GameState, e: WorldEvent): string {
+function warningText(state: GameState, e: WorldEvent, map?: MapDef): string {
   const cause =
     e.kind === 'hochwasser'
       ? 'Die Pegelstation meldet steigendes Wasser in den Bergen.'
       : 'Die Pegelstation meldet: Die Quellen in den Bergen werden schwach.';
-  return `${cause} ${describeForecast(state, e)}.`;
+  return `${cause} ${describeForecast(state, e, map)}.`;
 }
