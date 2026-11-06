@@ -1,10 +1,54 @@
 import type { MapDef } from '../data/maps/valley.ts';
 import { season } from './calendar.ts';
 import { addNews, day, pick, rand, randInt, type GameState, type NewsItem, type WorldEvent, type WorldEventKind } from './state.ts';
+import { gaugeCount } from './works.ts';
 
 /** Wahrscheinlichkeit für ein neues Ereignis pro Tag */
 const EVENT_CHANCE = 0.08;
 const MAX_EVENTS = 2;
+/** Hochwasser und Dürre kündigen sich so viele Tage vorher an (sichtbar nur mit Pegelstation) */
+export const FORECAST_MIN = 3;
+export const FORECAST_MAX = 5;
+
+const isWeather = (k: WorldEventKind) => k === 'hochwasser' || k === 'duerre';
+
+/** Vorhersagen, die der Spieler sieht: nur mit mindestens einer fertigen Pegelstation */
+export function visibleForecasts(state: GameState): WorldEvent[] {
+  return gaugeCount(state) > 0 ? (state.forecast ?? []) : [];
+}
+
+const meters = (v: number) => Math.abs(v).toFixed(1).replace('.', ',');
+
+/** Mit nur einer Station kennt man den Tag nicht genau: Spanne aus dem Ankündigungstag, ohne den echten Tag zu verraten */
+function roughWhen(d: number, e: WorldEvent): string {
+  const elapsed = d - (e.announced ?? d);
+  const lo = Math.max(1, FORECAST_MIN - elapsed);
+  const hi = Math.max(1, FORECAST_MAX - elapsed);
+  if (e.from <= d) return 'ab heute';
+  if (hi <= 1) return 'ab morgen';
+  return lo === hi ? `in ${lo} Tagen` : `in ${lo} bis ${hi} Tagen`;
+}
+
+/** Text der Pegelmeldung; ab zwei Stationen mit genauem Tag und Pegel */
+export function describeForecast(state: GameState, e: WorldEvent): string {
+  const d = day(state);
+  const inDays = e.from - d;
+  const exact = gaugeCount(state) >= 2;
+  const when = exact
+    ? inDays <= 0
+      ? 'ab heute'
+      : inDays === 1
+        ? 'ab morgen'
+        : `in ${inDays} Tagen (ab Tag ${e.from})`
+    : roughWhen(d, e);
+  const days = e.until - e.from + 1;
+  if (e.kind === 'hochwasser') {
+    return exact
+      ? `Hochwasser ${when}: etwa ${meters(e.value ?? 0)} m über normal, rund ${days} Tage lang`
+      : `Hochwasser ${when}`;
+  }
+  return exact ? `Dürre ${when}: der Fluss fällt um etwa ${meters(e.value ?? 0)} m, rund ${days} Tage lang` : `Dürre ${when}`;
+}
 
 /** Pegelverschiebung durch Hochwasser oder Dürre */
 export function eventWaterOffset(state: GameState): number {
@@ -62,7 +106,8 @@ function candidates(d: number): [WorldEventKind, number][] {
 function startEvent(state: GameState, map: MapDef, kind: WorldEventKind): WorldEvent | null {
   const d = day(state);
   const e: WorldEvent = { id: state.nextId++, kind, from: d, until: d };
-  const busy = (k: WorldEventKind) => state.events.some((x) => x.kind === k);
+  // angekündigte Wetterlagen zählen schon mit, damit sich Hochwasser und Dürre nicht überlagern
+  const busy = (k: WorldEventKind) => state.events.some((x) => x.kind === k) || (state.forecast ?? []).some((x) => x.kind === k);
   switch (kind) {
     case 'hochwasser':
       if (busy('hochwasser') || busy('duerre')) return null;
@@ -104,7 +149,16 @@ function startEvent(state: GameState, map: MapDef, kind: WorldEventKind): WorldE
       break;
     }
   }
-  state.events.push(e);
+  if (isWeather(kind)) {
+    // Hochwasser und Dürre kommen nicht über Nacht: sie beginnen erst nach einigen Tagen
+    const lead = randInt(state, FORECAST_MIN, FORECAST_MAX);
+    e.announced = d;
+    e.from += lead;
+    e.until += lead;
+    (state.forecast ??= []).push(e);
+  } else {
+    state.events.push(e);
+  }
   return e;
 }
 
@@ -138,6 +192,11 @@ export function tickEvents(state: GameState, map: MapDef): NewsItem[] {
   for (const e of state.events) applyEvent(state, e);
   const ended = state.events.filter((e) => e.until < d);
   state.events = state.events.filter((e) => e.until >= d);
+  const begun = (state.forecast ?? []).filter((e) => e.from <= d);
+  if (begun.length) {
+    state.forecast = state.forecast!.filter((e) => e.from > d);
+    state.events.push(...begun);
+  }
   for (const e of ended) {
     const text: Record<WorldEventKind, string> = {
       hochwasser: 'Das Hochwasser geht zurück.',
@@ -149,7 +208,8 @@ export function tickEvents(state: GameState, map: MapDef): NewsItem[] {
     };
     news.push(addNews(state, 'ereignis', text[e.kind]));
   }
-  if (state.events.length < MAX_EVENTS && rand(state) < EVENT_CHANCE) {
+  for (const e of begun) news.push(addNews(state, 'ereignis', startText(map, e)));
+  if (state.events.length + (state.forecast?.length ?? 0) < MAX_EVENTS && rand(state) < EVENT_CHANCE) {
     const list = candidates(d).filter(([, w]) => w > 0);
     const total = list.reduce((s, [, w]) => s + w, 0);
     let r = rand(state) * total;
@@ -162,17 +222,29 @@ export function tickEvents(state: GameState, map: MapDef): NewsItem[] {
       }
     }
     const e = startEvent(state, map, kind);
-    if (e) {
-      const text: Record<WorldEventKind, string> = {
-        hochwasser: 'Schneeschmelze in den Bergen: Hochwasser! Die Strömung ist reißend, unter Brücken wird es eng.',
-        duerre: 'Seit Wochen kein Regen. Der Fluss fällt, tiefe Kähne bleiben liegen.',
-        zoll: `Streit um Uferrechte: zwischen ${segName(map, e.seg)} wird ${e.value} Taler Zoll je Durchfahrt verlangt.`,
-        bruecke: `Die Brücke zwischen ${segName(map, e.seg)} ist eingestürzt! Trümmer sperren den Fluss.`,
-        stadtfest: `${townName(map, e.town)} feiert Kirmes. Bier und Brot werden knapp.`,
-        seuche: `In ${townName(map, e.town)} geht ein Fieber um. Die Apotheke sucht Arznei.`,
-      };
-      news.push(addNews(state, 'ereignis', text[e.kind]));
-    }
+    if (e && !isWeather(e.kind)) news.push(addNews(state, 'ereignis', startText(map, e)));
+    // Wetter kündigt sich an: nur wer eine Pegelstation hat, erfährt es vorher
+    if (e && isWeather(e.kind) && gaugeCount(state) > 0) news.push(addNews(state, 'ereignis', warningText(state, e)));
   }
   return news;
+}
+
+function startText(map: MapDef, e: WorldEvent): string {
+  const text: Record<WorldEventKind, string> = {
+    hochwasser: 'Schneeschmelze in den Bergen: Hochwasser! Die Strömung ist reißend, unter Brücken wird es eng.',
+    duerre: 'Seit Wochen kein Regen. Der Fluss fällt, tiefe Kähne bleiben liegen.',
+    zoll: `Streit um Uferrechte: zwischen ${segName(map, e.seg)} wird ${e.value} Taler Zoll je Durchfahrt verlangt.`,
+    bruecke: `Die Brücke zwischen ${segName(map, e.seg)} ist eingestürzt! Trümmer sperren den Fluss.`,
+    stadtfest: `${townName(map, e.town)} feiert Kirmes. Bier und Brot werden knapp.`,
+    seuche: `In ${townName(map, e.town)} geht ein Fieber um. Die Apotheke sucht Arznei.`,
+  };
+  return text[e.kind];
+}
+
+function warningText(state: GameState, e: WorldEvent): string {
+  const cause =
+    e.kind === 'hochwasser'
+      ? 'Die Pegelstation meldet steigendes Wasser in den Bergen.'
+      : 'Die Pegelstation meldet: Die Quellen in den Bergen werden schwach.';
+  return `${cause} ${describeForecast(state, e)}.`;
 }

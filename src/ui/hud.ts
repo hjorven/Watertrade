@@ -7,7 +7,7 @@ import { EPOCHS, SHIPS, UPGRADES } from '../data/ships.ts';
 import { dayInSeason, season, SEASON_NAME, year } from '../sim/calendar.ts';
 import { MAX_ACCEPTED, PENALTY } from '../sim/contracts.ts';
 import { buyPrice, sellPrice } from '../sim/economy.ts';
-import { describeEvent, EVENT_TITLE } from '../sim/events.ts';
+import { describeEvent, describeForecast, EVENT_TITLE, visibleForecasts } from '../sim/events.ts';
 import { hasYard, repairCost, timberPlan, upgradeCost } from '../sim/fleet.ts';
 import {
   bunkerPlan,
@@ -35,6 +35,7 @@ import { daysLeft, projectState } from '../sim/works.ts';
 import { betriebeIn, buildingAllowed, kontorUpkeepIn, playerWorth } from '../sim/house.ts';
 import { rivalWorth } from '../sim/rivals.ts';
 import { BLOCK_TEXT, segmentDepth } from '../sim/river.ts';
+import { goodPicker, priceBookPanel, shipBook } from './market-info.ts';
 import { GROWTH_THRESHOLD, LEVELS, levelOf, netFlow, nextLevelNeeds } from '../sim/towns.ts';
 
 /** Frische verderblicher Ware als kurzer Hinweis, etwa "Frische 82 %" */
@@ -58,7 +59,7 @@ export interface HudActions {
 }
 
 export type View = 'ship' | 'register' | 'news' | 'contracts' | 'works' | 'map';
-export type Tab = 'markt' | 'kontor' | 'werft' | 'kneipe' | 'route';
+export type Tab = 'markt' | 'kontor' | 'werft' | 'kneipe' | 'route' | 'buch';
 
 /** Was gerade sichtbar ist; die Kampagne schaltet Reiter und Bücher nach und nach frei */
 export interface HudFeatures {
@@ -233,8 +234,22 @@ export class Hud {
           this.actions.command('refresh', {});
           break;
         }
+        case 'bookGood':
+          // im Markt-Reiter klappt ein Klick auf die Ware das Preisbuch auf und wieder zu
+          if (this.tab === 'markt') {
+            this.marketGood = this.marketGood === d.good ? null : d.good!;
+            this.bookTown = null;
+          }
+          this.bookGood = d.good!;
+          this.actions.command('refresh', {});
+          break;
+        case 'bookTown':
+          this.bookTown = d.town!;
+          this.actions.command('refresh', {});
+          break;
         case 'tab':
           this.tab = d.tab as Tab;
+          this.bookTown = null;
           this.actions.command('refresh', {});
           break;
         case 'cmd': {
@@ -252,6 +267,10 @@ export class Hud {
 
   private goalsOpen = false;
   private folded = false;
+  /** Preisbuch: gewählte Ware und Stadt; im Markt-Reiter die aufgeklappte Ware */
+  private bookGood: string | null = null;
+  private bookTown: string | null = null;
+  private marketGood: string | null = null;
   private features: HudFeatures = ALL_FEATURES;
   private hintText: string | null = null;
   private hintDismissed: string | null = null;
@@ -301,7 +320,11 @@ export class Hud {
 
   render(state: GameState, selected: number): void {
     const w = wind(state);
-    const events = state.events.length ? `<span class="hide-narrow event-chip" title="${state.events.map((e) => describeEvent(this.map, e)).join('\n')}"><small>Lage</small><b>${state.events.map((e) => EVENT_TITLE[e.kind]).join(', ')}</b></span>` : '';
+    // angekündigte Wetterlagen (nur mit Pegelstation sichtbar) stehen mit in der Lage
+    const ahead = visibleForecasts(state);
+    const lage = [...state.events.map((e) => EVENT_TITLE[e.kind]), ...ahead.map((e) => `${EVENT_TITLE[e.kind]} (angekündigt)`)];
+    const lageTitle = [...state.events.map((e) => describeEvent(this.map, e)), ...ahead.map((e) => describeForecast(state, e))].join('\n');
+    const events = lage.length ? `<span class="hide-narrow event-chip" title="${lageTitle}"><small>Lage</small><b>${lage.join(', ')}</b></span>` : '';
     setHtml(
       this.top,
       `
@@ -357,12 +380,14 @@ export class Hud {
           ['werft', 'Werft'],
           ['kneipe', 'Kneipe'],
           ['route', 'Route'],
+          ['buch', 'Bücher'],
         ]
       : [
           ['markt', 'Fahrt'],
           ['route', 'Route'],
+          ['buch', 'Bücher'],
         ];
-    const visible = tabs.filter(([t]) => t === 'markt' || this.features.tabs.includes(t));
+    const visible = tabs.filter(([t]) => t === 'markt' || t === 'buch' || this.features.tabs.includes(t));
     tabs.length = 0;
     tabs.push(...visible);
     if (!tabs.some(([t]) => t === this.tab)) this.tab = 'markt';
@@ -370,7 +395,8 @@ export class Hud {
       .map(([t, label]) => `<button class="tab ${t === this.tab ? 'on' : ''}" data-act="tab" data-tab="${t}">${label}</button>`)
       .join('')}</nav>`;
     let body = '';
-    if (!ship.port) body = this.tab === 'route' ? this.renderRoute(ship) : this.renderVoyage(state, ship);
+    if (this.tab === 'buch') body = this.renderBooks(state, ship);
+    else if (!ship.port) body = this.tab === 'route' ? this.renderRoute(ship) : this.renderVoyage(state, ship);
     else if (this.tab === 'kontor') body = this.renderKontor(state, ship);
     else if (this.tab === 'werft') body = this.renderYard(state, ship);
     else if (this.tab === 'kneipe') body = this.renderTavern(state, ship);
@@ -414,7 +440,7 @@ export class Hud {
         const role = flow > 0 ? 'Überschuss' : flow < 0 ? 'Bedarf' : '';
         return `
         <tr>
-          <th scope="row">${swatch(g.id)}${g.name}<small>${Math.floor(m.stock)} t${role ? ` · ${role}` : ''}</small></th>
+          <th scope="row"><button class="link goodlink ${this.marketGood === g.id ? 'on' : ''}" data-act="bookGood" data-good="${g.id}" title="Preisbuch und Verlauf">${swatch(g.id)}${g.name}</button><small>${Math.floor(m.stock)} t${role ? ` · ${role}` : ''}</small></th>
           <td class="num">${bp}</td>
           <td class="num ${margin}">${sp}${avg !== null ? `<small>ø ${avg}</small>` : ''}</td>
           <td class="num">${aboard}${freshText(slot) ? `<small>${freshText(slot)}</small>` : ''}</td>
@@ -485,6 +511,7 @@ export class Hud {
         <thead><tr><th>Ware</th><th title="Preis je Tonne beim Kauf">Kauf</th><th title="Preis je Tonne beim Verkauf">Verkauf</th><th>Bord</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
+      ${this.marketGood && market[this.marketGood] ? priceBookPanel(state, this.map, this.marketGood, this.bookTown ?? town.id) : '<p class="note">Tipp: Auf eine Ware tippen zeigt Preisbuch und Preisverlauf.</p>'}
       ${raft}
       <h3>Ablegen nach</h3>
       <div class="dests">${departures}</div>
@@ -754,6 +781,18 @@ export class Hud {
       ${captain}`;
   }
 
+  /** Reiter Bücher: Preisbuch aller Städte und Schiffsbuch mit Gewinn je Fahrt */
+  private renderBooks(state: GameState, ship: Ship): string {
+    const here = ship.port ?? ship.voyage?.to ?? this.map.towns[0].id;
+    const firstCargo = GOODS.find((g) => ship.cargo[g.id])?.id;
+    const good = this.bookGood ?? firstCargo ?? Object.keys(state.markets[here] ?? {})[0] ?? GOODS[0].id;
+    return `<div class="ledger-head"><div class="stamp-small">Preisbuch</div><h2>Was kostet was am Fluss?</h2>
+        <p>Preise, die deine Schiffe gesehen haben, und was jede Fahrt eingebracht hat.</p></div>
+      ${goodPicker(state, good)}
+      ${priceBookPanel(state, this.map, good, this.bookTown ?? here)}
+      ${shipBook(this.map, ship)}`;
+  }
+
   /* ---------- Bücher ---------- */
 
   private renderRegister(state: GameState): string {
@@ -791,10 +830,12 @@ export class Hud {
   }
 
   private renderNews(state: GameState): string {
-    const events = state.events.length
+    // Vorhersagen der Pegelstationen stehen mit in der Lage am Fluss
+    const forecasts = visibleForecasts(state).map((e) => `<li><b>Pegelmeldung</b>: ${describeForecast(state, e)}</li>`);
+    const events = state.events.length || forecasts.length
       ? `<div class="contract-box"><h3>Lage am Fluss</h3><ul class="plain">${state.events
           .map((e) => `<li><b>${EVENT_TITLE[e.kind]}</b>: ${describeEvent(this.map, e)}<small> bis Tag ${e.until}</small></li>`)
-          .join('')}</ul></div>`
+          .join('')}${forecasts.join('')}</ul></div>`
       : '';
     const items = state.news
       .slice(0, 40)
