@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
+import { PostFx } from './postfx.ts';
 
 export class Stage {
   readonly scene = new THREE.Scene();
@@ -8,6 +9,9 @@ export class Stage {
   readonly renderer: THREE.WebGLRenderer;
   readonly labels: CSS2DRenderer;
   readonly controls: OrbitControls;
+  readonly postfx: PostFx;
+  readonly sun: THREE.DirectionalLight;
+  readonly hemi: THREE.HemisphereLight;
 
   constructor(container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -38,8 +42,10 @@ export class Stage {
     this.controls.screenSpacePanning = false;
 
     const hemi = new THREE.HemisphereLight(0xfff4dc, 0x6b5a3a, 1.4);
+    this.hemi = hemi;
     this.scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xffe2b0, 2.4);
+    this.sun = sun;
     sun.position.set(-90, 140, 60);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -54,11 +60,14 @@ export class Stage {
     sun.shadow.normalBias = 0.4;
     this.scene.add(sun);
 
+    this.postfx = new PostFx(this.renderer, this.scene, this.camera);
+
     const resize = () => {
       const w = container.clientWidth;
       const h = container.clientHeight;
       this.renderer.setSize(w, h);
       this.labels.setSize(w, h);
+      this.postfx.setSize(w, h);
       this.camera.aspect = w / h;
       // Bildmitte vom Kontorbuch weg verschieben: am Handy nach oben, sonst nach links
       if (w <= 720) this.camera.setViewOffset(w, h, 0, Math.round(h * 0.22), w, h);
@@ -81,7 +90,8 @@ export class Stage {
 
   render(): void {
     this.controls.update();
-    this.renderer.render(this.scene, this.camera);
+    this.postfx.focusOn(this.controls.target, this.camera, this.camera.position.distanceTo(this.controls.target));
+    this.postfx.render();
     this.labels.render(this.scene, this.camera);
   }
 }

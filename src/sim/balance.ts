@@ -55,7 +55,9 @@ export function runBalance(map: MapDef, days: number, start = 'oberau'): Balance
       const t = bestTrade(state, map, ship.id);
       if (t && t.perHour > 0) {
         buy(state, ship.id, t.good, t.amount);
-        if (cargoLoad(ship) > 0 && depart(state, map, ship.id, t.to)) trips++;
+        // bei Niedrigwasser liegt der volle Kahn zu tief: Ladung verringern, bis er fahren kann
+        while (cargoLoad(ship) > 0 && !depart(state, map, ship.id, t.to)) sell(state, ship.id, t.good, 5);
+        if (!ship.port) trips++;
       }
       if (ship.port) advance(state, map, 24); // nichts Lohnendes: einen Tag warten
     } else {
