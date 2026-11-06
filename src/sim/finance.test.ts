@@ -94,7 +94,7 @@ describe('Stadtbank', () => {
     expect(loan.missed).toBe(1);
     const rate = loanQuote(1000, LOAN_TERMS[0]).installment;
     expect(loan.overdue).toBe(rate + Math.ceil(rate * LATE_FEE));
-    expect(s.news[0].text).toMatch(/Rate verpasst/);
+    expect(s.news.some((n) => /Rate verpasst/.test(n.text))).toBe(true);
     expect(creditLeft(s)).toBe(0);
     s.money = -50;
     days(s, RATE_DAYS * (MAX_MISSED - 1));

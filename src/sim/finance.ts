@@ -1,5 +1,6 @@
 import type { MapDef } from '../data/maps/valley.ts';
 import { BUILDING_BY_ID } from '../data/buildings.ts';
+import { hasTrait } from '../data/captains.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import { SHIPS } from '../data/ships.ts';
 import { playerWorth } from './house.ts';
@@ -402,7 +403,7 @@ function hullFactor(ship: Ship): number {
   if (ship.type === 'floss') return 0;
   let f = 1;
   if (hasUpgrade(ship, 'beschlag')) f *= 0.6;
-  if (ship.captain?.trait === 'vorsichtig') f *= 0.5;
+  if (hasTrait(ship.captain, 'vorsichtig')) f *= 0.5;
   return f;
 }
 
