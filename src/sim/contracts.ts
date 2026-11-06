@@ -5,6 +5,7 @@ import { addNews, day, fail, getShip, rand, randInt, type Contract, type GameSta
 import { contractBonus, noteContractDone, noteContractFailed, offerWeight } from './standing.ts';
 import { tripPartialDelivery, tripSale } from './market-info.ts';
 import { needs } from './towns.ts';
+import { connectedTowns, playerTowns } from './works.ts';
 
 const MAX_OFFERS = 4;
 export const MAX_ACCEPTED = 3;
@@ -19,7 +20,11 @@ function townName(map: MapDef, id: string): string {
 function offer(state: GameState, map: MapDef): Contract | null {
   const d = day(state);
   const options: { town: string; good: string; weight: number }[] = [];
+  // nur Städte, die der Spieler von seinen Häfen aus erreichen kann (Karte mit ungebautem Kanal)
+  const anchors = playerTowns(state);
+  const reach = anchors.length ? connectedTowns(state, map, anchors) : null;
   for (const def of map.towns) {
+    if (reach && !reach.has(def.id)) continue;
     const want = needs(def, state.towns[def.id], d);
     // Städte, in denen du angesehen bist oder im Rat sitzt, vergeben öfter Aufträge an dich
     const favour = offerWeight(state, def.id);

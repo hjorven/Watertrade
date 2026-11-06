@@ -4,6 +4,7 @@ import { GOODS } from '../data/goods.ts';
 import { VALLEY } from '../data/maps/valley.ts';
 import { runBalance } from './balance.ts';
 import {
+  hoursToArrival,
   advance,
   buy,
   buyShip,
@@ -122,8 +123,8 @@ describe('Handel', () => {
     const s = start();
     const ship = s.ships[0];
     expect(buy(s, ship.id, 'holz', 30).ok).toBe(true);
-    const v = depart(s, VALLEY, ship.id, 'niedermuend')!;
-    advance(s, VALLEY, v.hours);
+    expect(depart(s, VALLEY, ship.id, 'niedermuend')).not.toBeNull();
+    advance(s, VALLEY, hoursToArrival(s, ship));
     const r = sell(s, ship.id, 'holz', 30);
     expect(r.profit!).toBeGreaterThan(0);
     expect(r.firstProfit).toBe(true);
@@ -147,8 +148,8 @@ describe('Handel', () => {
     const raft = buyShip(s, VALLEY, 'oberau', 'floss').ship!;
     const plan = planVoyage(s, VALLEY, raft.id, 'kesselbrueck')!;
     expect(plan.ok).toBe(true);
-    const v = depart(s, VALLEY, raft.id, 'kesselbrueck')!;
-    advance(s, VALLEY, v.hours);
+    expect(depart(s, VALLEY, raft.id, 'kesselbrueck')).not.toBeNull();
+    advance(s, VALLEY, hoursToArrival(s, raft));
     expect(planVoyage(s, VALLEY, raft.id, 'oberau')!.ok).toBe(false);
     const before = s.money;
     const r = dismantleRaft(s, raft.id);

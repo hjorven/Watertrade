@@ -3,7 +3,7 @@ import { CHAPTERS } from '../data/campaign.ts';
 import { VALLEY } from '../data/maps/valley.ts';
 import { chapterOneHint } from '../ui/tutorial.ts';
 import { runChapterOne, runSteamChapter } from './balance.ts';
-import { addShip, advance, buy, buyShip, depart, dismantleRaft, fillBunker, newGame, sell } from './game.ts';
+import { addShip, advance, buy, buyShip, depart, dismantleRaft, fillBunker, hoursToArrival, newGame, sell } from './game.ts';
 import { bunkerPlan, planVoyage, sailingHours } from './voyage.ts';
 import type { Voyage } from './state.ts';
 import { STEAM_MIN_HOURS, steamDays } from './steam.ts';
@@ -34,8 +34,8 @@ describe('Kapitel 1: Floßbau', () => {
     expect(plan.good).not.toBeNull();
     const before = s.money;
     buy(s, raft.id, plan.good!, plan.amount);
-    const v = depart(s, VALLEY, raft.id, plan.to)!;
-    advance(s, VALLEY, v.hours);
+    expect(depart(s, VALLEY, raft.id, plan.to)).not.toBeNull();
+    advance(s, VALLEY, hoursToArrival(s, raft));
     sell(s, raft.id, plan.good!, Infinity);
     dismantleRaft(s, raft.id);
     // Ladung und Floßholz bringen deutlich mehr als Holz und Lohn fürs Floß gekostet haben (rund 160 Taler)
@@ -54,9 +54,9 @@ describe('Kapitel 1: Floßbau', () => {
     expect(loadHint).toContain(name(plan.to));
     if (plan.good) buy(s, raft.id, plan.good, plan.amount);
     expect(chapterOneHint(s, VALLEY, raft, name)).toContain('Leg ab');
-    const v = depart(s, VALLEY, raft.id, plan.to)!;
+    expect(depart(s, VALLEY, raft.id, plan.to)).not.toBeNull();
     expect(chapterOneHint(s, VALLEY, kahn, name)).toContain('treibt');
-    advance(s, VALLEY, v.hours);
+    advance(s, VALLEY, hoursToArrival(s, raft));
     if (plan.good) {
       expect(chapterOneHint(s, VALLEY, raft, name)).toContain('Verkaufen');
       sell(s, raft.id, plan.good, Infinity);

@@ -4,6 +4,7 @@ import { windOfDay, withWind, type Conditions, type ShipType } from './river.ts'
 import type { PriceBookPage, PricePoint, TripRecord } from './market-info.ts';
 import type { TownMarket, TownState } from './towns.ts';
 import type { Season } from './calendar.ts';
+import type { CanalState } from './canal.ts';
 
 /** Datentypen des Spielstands und kleine Helfer, die alle Simulationsmodule brauchen */
 
@@ -41,6 +42,12 @@ export interface Voyage {
   hours: number;
   elapsed: number;
   toll?: number;
+  /** Stunden, die das Schiff nach einer Grundberührung noch festsitzt */
+  aground?: number;
+  /** Fortschritt (Stunden voller Fahrt), bei dem das Schiff auf Grund laufen wird */
+  groundAt?: number;
+  /** letzter Abschnitt, für den auf Grundberührung gewürfelt wurde */
+  checked?: number;
   /** davon Treidelgeld (ab der Motorzeit bergauf für Treidelschiffe) */
   towFee?: number;
   /** Zoll, den ein Schmuggler auf dieser Fahrt umgeht; bei der Ankunft droht eine Kontrolle */
@@ -388,6 +395,8 @@ export interface GameState {
   /** Tag, an dem die aktuelle Epoche begann (fehlt in älteren Spielständen) */
   epochDay?: number;
   works: Work[];
+  /** Großprojekt Kanal (nur auf Karten mit Kanal) */
+  canal?: CanalState;
   /** Brennstoffkosten seit Mitternacht */
   fuelToday: number;
   /** Ansehen je Stadt; fehlt in älteren Spielständen */

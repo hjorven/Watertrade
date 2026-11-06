@@ -32,6 +32,20 @@ import {
   type Voyage,
   effectiveSegments,
 } from '../sim/game.ts';
+import {
+  canTransship,
+  clearanceText,
+  draftWith,
+  groundingRisks,
+  isNight,
+  litSegments,
+  maxLoadFor,
+  nightSpeed,
+  progressFactor,
+  realHours,
+  shipsAlongside,
+  totalChance,
+} from '../sim/navigation.ts';
 import { PROJECTS } from '../data/projects.ts';
 import { daysLeft, projectState } from '../sim/works.ts';
 import { betriebeIn, betriebSlots, buildingAllowed, kontorUpkeepIn, playerWorth } from '../sim/house.ts';
@@ -575,7 +589,16 @@ export class Hud {
         const plan = planVoyage(state, this.map, ship.id, t.id);
         if (!plan) return '';
         if (!plan.ok) {
-          const why = plan.reasons.map((r) => r.reason).filter((r, i, a) => a.indexOf(r) === i).map((r) => BLOCK_TEXT[r]);
+          const reasons = plan.reasons.map((r) => r.reason).filter((r, i, a) => a.indexOf(r) === i);
+          const why = reasons.map((r) => BLOCK_TEXT[r]);
+          // nur zu tief beladen: sagen, mit wie viel Ladung es ginge (Leichtern)
+          if (load > 0 && reasons.length === 1 && reasons[0] === 'tiefgang') {
+            const max = maxLoadFor(state, this.map, ship, t.id);
+            if (max !== null && max < load) {
+              const hint = canTransship(state, town.id) ? 'im Kontor auf ein flacheres Schiff umladen' : 'Ladung verkaufen oder in einer Stadt mit Kontor leichtern';
+              return `<button class="btn dest" disabled title="Zu tief beladen: ${hint}"><b>${t.name}</b><small>zu tief beladen, mit höchstens ${max} t ginge es</small></button>`;
+            }
+          }
           return `<button class="btn dest" disabled><b>${t.name}</b><small>${why.join(', ') || 'kein Weg'}</small></button>`;
         }
         const v = plan.voyage;
@@ -591,7 +614,16 @@ export class Hud {
         if (coal.problem) return `<button class="btn dest" disabled title="${coal.problem}"><b>${t.name}</b><small>${coal.buy ? `${coal.buy} t Kohle fehlen` : 'Bunker zu klein'}</small></button>`;
         const coalText = coal.need ? `, Kohle ${String(coal.need).replace('.', ',')} t${coal.fromKontor ? `, ${coal.fromKontor} t aus dem Kontor` : ''}${coal.buy ? `, bunkert ${coal.buy} t für ${coal.cost} Taler` : ''}` : '';
         const tooDear = (v.toll ?? 0) + coal.cost > state.money;
-        return `<button class="btn dest" data-act="depart" data-to="${t.id}" ${tooDear ? 'disabled' : ''}><b>${t.name}</b><small>${dir}, ${fmtHours(v.hours)}${dockText}${toll}${coalText}</small></button>`;
+        // echte Dauer mit Nachtfahrt ab jetzt
+        const eta = realHours(state, ship.type, v);
+        const time = eta > v.hours + 0.25 ? `${fmtHours(eta)} mit Nacht` : fmtHours(v.hours);
+        const risks = groundingRisks(state, this.map, ship, v);
+        const tight = risks.length ? Math.min(...risks.map((r) => r.clearance)) : 0;
+        const risk = risks.length ? `, knapp ${clearanceText(tight)} unter dem Kiel` : '';
+        const riskTitle = risks.length
+          ? ` title="Knappe Tiefe: Gefahr einer Grundberührung ${Math.round(totalChance(risks) * 100)} % (Verschleiß und ein halber Tag Verzug). Weniger Ladung oder höheres Wasser hilft."`
+          : '';
+        return `<button class="btn dest${risks.length ? ' risky' : ''}" data-act="depart" data-to="${t.id}" ${tooDear ? 'disabled' : ''}${riskTitle}><b>${t.name}</b><small>${dir}, ${time}${dockText}${toll}${coalText}${risk}</small></button>`;
       })
       .join('');
 
@@ -716,10 +748,35 @@ export class Hud {
         <thead><tr><th>Ware</th><th>Lager</th><th>Bord</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
+      ${this.renderTransship(state, ship)}
       <h3>Eigene Betriebe</h3>
       <div class="yard">${betriebe || '<p class="note">Noch keine. Betriebe nehmen Rohware aus dem Lager und legen ihre Erzeugnisse dort ab.</p>'}</div>
       ${mine.length < slots ? '<h3>Neuen Betrieb bauen</h3>' : ''}<div class="yard">${options}</div>
       ${upgrade}`;
+  }
+
+  /** Leichtern: Ladung direkt auf ein anderes eigenes Schiff am Steg umladen */
+  private renderTransship(state: GameState, ship: Ship): string {
+    const others = shipsAlongside(state, ship);
+    if (!others.length || !canTransship(state, ship.port)) return '';
+    const aboard = GOODS.filter((g) => (ship.cargo[g.id]?.amount ?? 0) >= 1);
+    const rows = others
+      .map((o) => {
+        const free = capacityOf(o) - Math.ceil(cargoLoad(o));
+        const btns = aboard
+          .map((g) => {
+            const n = Math.min(Math.floor(ship.cargo[g.id].amount), free);
+            return `<button class="btn" data-act="cmd" data-cmd="transship" data-to="${o.id}" data-good="${g.id}" data-n="${n}" ${n > 0 ? '' : 'disabled'} title="${n} t ${g.name} auf die ${o.name}">${n > 0 ? n : ''} t ${g.name}</button>`;
+          })
+          .join('');
+        return `<div class="yard-row">
+          <div><b>${o.name}</b> <small>${shipClass(o).name} · frei ${free} t · Tiefgang ${String(effectiveDraft(o).toFixed(2)).replace('.', ',')} m, voll ${String(draftWith(o, capacityOf(o)).toFixed(2)).replace('.', ',')} m</small></div>
+          <div class="row-btns">${btns || '<small>nichts an Bord</small>'}</div></div>`;
+      })
+      .join('');
+    return `<h3>Umladen auf andere Schiffe (Leichtern)</h3>
+      <p class="note">Ladung der ${ship.name} (Tiefgang ${String(effectiveDraft(ship).toFixed(2)).replace('.', ',')} m) direkt auf ein Schiff am selben Steg legen, ohne Platz im Lager. So kommt ein tief beladenes Schiff über seichte Stellen, und flache Plätten fahren den Rest.</p>
+      <div class="yard">${rows}</div>`;
   }
 
   private renderYard(state: GameState, ship: Ship): string {
@@ -949,8 +1006,18 @@ export class Hud {
     const { leg, index } = voyagePosition(v);
     const seg = this.map.segments.find((s) => s.id === leg.seg)!;
     const cls = shipClass(ship);
-    const speed = seg.length / leg.hours;
+    const factor = (v.aground ?? 0) > 0 ? 0 : progressFactor(state, ship.type, leg.seg, state.hour);
+    const speed = (seg.length / leg.hours) * factor;
     const pct = Math.round((v.elapsed / v.hours) * 100);
+    const left = realHours(state, ship.type, v);
+    const night = isNight(state.hour);
+    const lit = litSegments(state).includes(leg.seg);
+    const status =
+      (v.aground ?? 0) > 0
+        ? `<p class="note warn">Auf Grund gelaufen. Die Mannschaft stakt und wartet auf Wasser, frei in etwa ${fmtHours(Math.ceil(v.aground!))}.</p>`
+        : night
+          ? `<p class="note">Nacht: ${lit ? 'Das Leuchtfeuer weist den Weg, volle Fahrt.' : nightSpeed(ship.type) > 0.5 ? 'Mit Scheinwerfern drei Viertel Fahrt.' : 'Halbe Fahrt bis zum Morgengrauen.'}</p>`
+          : '';
     const cargo = GOODS.filter((g) => ship.cargo[g.id])
       .map((g) => {
         const f = freshText(ship.cargo[g.id]);
@@ -973,7 +1040,6 @@ export class Hud {
       .map((l, i) => `<li class="${i < index ? 'done' : i === index ? 'now' : ''}">${this.townName(l.from)} → ${this.townName(l.to)} <small>${fmtHours(l.hours)}</small></li>`)
       .join('');
     const captain = ship.captain ? `${ship.route?.active ? '<p class="note">Der Kapitän fährt die Handelsroute.</p>' : ''}${this.captainBox(state, ship, false)}` : '';
-    void state;
     return `
       <div class="ledger-head">
         <div class="stamp-small">Unterwegs</div>
@@ -981,8 +1047,9 @@ export class Hud {
         <p>${how} ${speed.toFixed(1).replace('.', ',')} km/h über Grund, Strömung ${String(seg.current).replace('.', ',')} km/h.</p>
       </div>
       <div class="progress"><div style="width:${pct}%"></div></div>
-      <p class="note">${fmtHours(v.elapsed)} von ${fmtHours(v.hours)}${v.toll ? ` · ${paidLabel(v)} bezahlt: ${v.toll} Taler` : ''}${v.evaded ? ` · ${v.evaded} Taler Zoll umgangen, Kontrolle möglich` : ''}</p>
+      <p class="note">Ankunft in etwa ${fmtHours(left)}${v.toll ? ` · ${paidLabel(v)} bezahlt: ${v.toll} Taler` : ''}${v.evaded ? ` · ${v.evaded} Taler Zoll umgangen, Kontrolle möglich` : ''}</p>
       ${dockNote(v)}
+      ${status}
       <ol class="route">${route}</ol>
       <p class="note">Ladung: ${cargo || 'leer'} · Zustand ${Math.round(ship.condition * 100)} %${cls.coal ? ` · Bunker ${Math.floor(ship.bunker ?? 0)} t Kohle` : ''}</p>
       ${captain}`;

@@ -7,14 +7,16 @@ const cache = new WeakMap<MapDef, { key: string; segs: SegmentDef[] }>();
 
 export function effectiveSegments(state: GameState, map: MapDef): SegmentDef[] {
   const finished = (state.works ?? []).filter((w) => w.done);
-  if (!finished.length) return map.segments;
+  const gated = map.segments.some((s) => s.requires);
+  if (!finished.length && !gated) return map.segments;
   // Verlandung mindert die zusätzliche Tiefe; im Schlüssel auf Prozent gerundet, damit der Zwischenspeicher hält
   const silt = new Map(finished.map((w) => [w.id, Math.round(Math.min(1, Math.max(0, w.silt ?? 0)) * 100) / 100]));
   const done = finished.map((w) => w.id);
   const key = finished.map((w) => (silt.get(w.id) ? `${w.id}~${silt.get(w.id)}` : w.id)).join(',');
   const hit = cache.get(map);
   if (hit && hit.key === key) return hit.segs;
-  const segs = map.segments.map((seg) => {
+  // Abschnitte wie ein Kanal existieren erst, wenn ihr Bauvorhaben fertig ist
+  const segs = map.segments.filter((seg) => !seg.requires || done.includes(seg.requires)).map((seg) => {
     const s: SegmentDef = { ...seg };
     for (const id of done) {
       const p = PROJECT_BY_ID.get(id);
@@ -83,4 +85,37 @@ export function gaugeCount(state: GameState): number {
 /** Abschnitte mit fertigem Leuchtfeuer, für die Nachtfahrt */
 export function litSegments(state: GameState): string[] {
   return (state.works ?? []).filter((w) => w.done && PROJECT_BY_ID.get(w.id)?.effect.light).map((w) => PROJECT_BY_ID.get(w.id)!.seg);
+}
+
+/**
+ * Städte, die von den Ausgangsstädten über vorhandene Abschnitte erreichbar sind (ohne Rücksicht
+ * auf Wasserstand oder Schiffstyp). Auf Karten ohne gesperrte Abschnitte (z. B. ein Kanal, der erst
+ * gebaut wird) hängt alles zusammen, dann kommen alle Städte zurück.
+ */
+export function connectedTowns(state: GameState, map: MapDef, from: Iterable<string>): Set<string> {
+  if (!map.segments.some((s) => s.requires)) return new Set(map.towns.map((t) => t.id));
+  const segs = effectiveSegments(state, map);
+  const seen = new Set<string>(from);
+  const queue = [...seen];
+  while (queue.length) {
+    const node = queue.pop()!;
+    for (const s of segs) {
+      const next = s.from === node ? s.to : s.to === node ? s.from : null;
+      if (next && !seen.has(next)) {
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return seen;
+}
+
+/** Häfen, an denen der Spieler etwas hat: Schiffe (auch Fahrtziele) und Kontore */
+export function playerTowns(state: GameState): string[] {
+  const out = new Set<string>(Object.keys(state.kontore));
+  for (const s of state.ships) {
+    if (s.port) out.add(s.port);
+    if (s.voyage) out.add(s.voyage.to);
+  }
+  return [...out];
 }

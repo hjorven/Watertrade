@@ -8,6 +8,8 @@ export interface RiverDef {
   points: [number, number][];
   /** Nebenfluss: mündet an Position t in den genannten Fluss */
   joins?: { river: string; t: number };
+  /** Gemauerter Kanal statt natürlichem Fluss (gerade, ohne Mündung, Schleusen) */
+  canal?: boolean;
 }
 
 /** Ein Betrieb in der Stadt: verbraucht Eingangswaren und erzeugt Ausgangswaren, einmal pro Tag */
@@ -39,10 +41,18 @@ export interface SegmentDef extends Segment {
   river: string;
   fromT: number;
   toT: number;
+  /** Kanalabschnitt (für Anzeige und Rendering) */
+  canal?: boolean;
+  /** Der Abschnitt existiert erst, wenn dieses Bauvorhaben fertig ist (Eintrag in state.works) */
+  requires?: string;
 }
 
 export interface MapDef {
+  /** Karten-id, z. B. 'zwei-taeler'; fehlt sie, ist es das Tal */
+  id?: string;
   name: string;
+  /** Ausdehnung der Welt in Welteinheiten, wenn sie vom Tal (220 x 140) abweicht */
+  bounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
   rivers: RiverDef[];
   towns: TownDef[];
   segments: SegmentDef[];
