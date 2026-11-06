@@ -125,6 +125,57 @@ export interface RivalState {
   ships: RivalShip[];
   kontore: string[];
   profit: number;
+  /** Verärgerung über den Spieler, 0..100 (siehe rivalry.ts) */
+  anger?: number;
+  /** Vom Spieler verkaufte Tonnen je Revierware beim letzten Tageswechsel */
+  seen?: Record<string, number>;
+  /** Laufende Vergeltung gegen den Spieler */
+  retaliation?: Retaliation | null;
+  /** Anteile in Spielerhand, 0..100 % */
+  shares?: number;
+  /** Tage in Folge mit Schulden */
+  debtDays?: number;
+  /** Anzahl Schiffe, für die schon ein Kaufplan im Flussboten stand */
+  planned?: number;
+}
+
+export interface Retaliation {
+  kind: 'unterbieten' | 'leerkaufen';
+  good: string;
+  town: string;
+  until: number; // letzter Tag
+}
+
+/** Gebietsabkommen: Der Spieler lässt `playerGood` in Ruhe, das Haus `houseGood` */
+export interface Pact {
+  house: string;
+  playerGood: string;
+  houseGood: string;
+  from: number; // Tag
+  until: number; // letzter Tag
+  /** vom Spieler verkaufte Tonnen von playerGood bei Abschluss */
+  baseline: number;
+}
+
+export interface AuctionLot {
+  town: string;
+  min: number;
+  bid: number; // 0 = noch kein Gebot
+  /** 'player' oder Haus-ID */
+  bidder: string | null;
+}
+
+/** Versteigerung der Kontore eines Hauses im Konkurs */
+export interface Auction {
+  house: string; // Name des gefallenen Hauses
+  until: number; // letzter Tag
+  lots: AuctionLot[];
+}
+
+export interface FallenHouse {
+  id: string;
+  how: 'konkurs' | 'uebernahme';
+  day: number;
 }
 
 export type WorldEventKind = 'hochwasser' | 'duerre' | 'zoll' | 'bruecke' | 'stadtfest' | 'seuche';
@@ -218,6 +269,14 @@ export interface GameState {
   priceBook?: Record<string, PriceBookPage>;
   /** Beobachteter Preisverlauf: Stadt -> Ware -> Punkte */
   priceHistory?: Record<string, Record<string, PricePoint[]>>;
+  /** Gebietsabkommen mit KI-Häusern */
+  pacts?: Pact[];
+  /** bis zu diesem Tag schließt nach einem Vertragsbruch niemand ein Abkommen */
+  pactBanUntil?: number;
+  /** laufende Versteigerung von Kontoren */
+  auction?: Auction | null;
+  /** Häuser, die pleitegingen oder übernommen wurden */
+  housesGone?: FallenHouse[];
 }
 
 export function shipClass(ship: { type: string }): ShipClass {
