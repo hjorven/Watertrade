@@ -323,6 +323,14 @@ export interface GameState {
   contracts: Contract[];
   nextId: number;
   rng: number;
+  /**
+   * Tagesmarkt: Startwert für getrennte Zufallsströme. Ist er gesetzt, ziehen Ereignisse, Aufträge,
+   * Kapitäne und Konkurrenz jeden Tag (bzw. jede Stunde) aus einem eigenen Strom, der nur vom
+   * Startwert abhängt. So läuft der Tag für alle gleich ab, egal was der Spieler tut.
+   */
+  fairSeed?: number;
+  /** Tagesmarkt: Stand je Zufallsstrom [Zeitpunkt, Zustand], damit mehrere Aufrufe im selben Zeitpunkt weiterziehen */
+  fairStreams?: Record<string, [number, number]>;
   ledger: Ledger;
   /** Technische Epoche: 1 Treidelzeit, 2 Dampf, 3 Motor */
   epoch: number;
@@ -419,6 +427,37 @@ export function rand(state: GameState): number {
   t = Math.imul(t ^ (t >>> 15), t | 1);
   t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+/** Startwert eines Zufallsstroms aus Grundwert, Name und Zeitpunkt (Tag oder Stunde) */
+export function streamSeed(seed: number, name: string, tick: number): number {
+  let h = (seed ^ 0x9e3779b9) >>> 0;
+  for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 16777619);
+  h = Math.imul(h ^ (tick | 0), 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return h | 0;
+}
+
+/**
+ * Führt fn mit einem eigenen Zufallsstrom aus, wenn der Spielstand einen fairSeed hat (Tagesmarkt).
+ * Jeder Strom beginnt zu jedem Zeitpunkt (tick) neu aus dem Startwert; wird er im selben Zeitpunkt
+ * mehrmals benutzt (Bildrate teilt eine Stunde in mehrere Schritte), zieht er dort weiter.
+ * Der gemeinsame Strom state.rng bleibt unberührt. Ohne fairSeed ändert sich nichts.
+ */
+export function withStream<T>(state: GameState, name: string, tick: number, fn: () => T): T {
+  if (state.fairSeed === undefined) return fn();
+  const streams = (state.fairStreams ??= {});
+  const saved = state.rng;
+  const last = streams[name];
+  state.rng = last && last[0] === tick ? last[1] : streamSeed(state.fairSeed, name, tick);
+  try {
+    return fn();
+  } finally {
+    streams[name] = [tick, state.rng];
+    state.rng = saved;
+  }
 }
 
 export function pick<T>(state: GameState, list: T[]): T {

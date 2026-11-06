@@ -10,7 +10,7 @@ import { weakenHouse } from './rivalry.ts';
 import { EPOCHS, epochOfYear, MIN_FRESH, PERISH, SHIPS } from '../data/ships.ts';
 import { dueEpoch, TOW_FEE_EPOCH } from './epochs.ts';
 import { YEAR_DAYS, year } from './calendar.ts';
-import { addNews, day, shipClass, type GameEvent, type GameState, type NewsItem } from './state.ts';
+import { addNews, day, shipClass, withStream, type GameEvent, type GameState, type NewsItem } from './state.ts';
 import { tickWorks } from './works.ts';
 import { observe, tickMarketInfo, tripArrive, tripSail } from './market-info.ts';
 import { initialMarket, initialTown, tickTown } from './towns.ts';
@@ -44,6 +44,10 @@ export interface NewGameOptions {
   startYear?: number;
   /** KI-Haus, das geschwächt startet (Kapitel mit Übernahme-Ziel) */
   weakHouse?: string;
+  /** Tage nach Jahresbeginn, an dem das Spiel startet (z. B. 30 = erster Sommertag) */
+  startDay?: number;
+  /** Tagesmarkt: getrennte Zufallsströme je System aus diesem Startwert (siehe withStream) */
+  fairSeed?: number;
 }
 
 export const START_MONEY = 500;
@@ -83,14 +87,16 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
     contracts: [],
     nextId: 1,
     rng: opts.seed ?? 20260601,
+    ...(opts.fairSeed !== undefined ? { fairSeed: opts.fairSeed } : {}),
     ledger: { day: 0, wages: 0, upkeep: 0, production: 0 },
     epoch: opts.epoch ?? 1,
     epochAuto: opts.epoch === undefined,
     works: (opts.works ?? []).map((id) => ({ id, started: 0, done: true })),
     fuelToday: 0,
   };
-  if (opts.startYear && opts.startYear > 1) {
-    state.hour += (opts.startYear - 1) * YEAR_DAYS * 24;
+  const startDays = Math.max(0, (opts.startYear ?? 1) - 1) * YEAR_DAYS + Math.max(0, Math.floor(opts.startDay ?? 0));
+  if (startDays > 0) {
+    state.hour += startDays * 24;
     state.waterLevel = waterLevel(state.hour / 24 + 1);
     state.ice = isIce(day(state));
   }
@@ -99,8 +105,8 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
   addShip(state, opts.startShip ?? 'treidelkahn', opts.startTown);
   for (const t of opts.extraShips ?? []) addShip(state, t, opts.startTown);
   for (const town of opts.kontore ?? []) state.kontore[town] = { level: 1, stock: {} };
-  refreshTavern(state, map);
-  if (state.rivalsActive) state.rivals = initialRivals(state);
+  withStream(state, 'kneipe', 0, () => refreshTavern(state, map));
+  if (state.rivalsActive) state.rivals = withStream(state, 'konkurrenz-start', 0, () => initialRivals(state));
   state.priceBook = {};
   state.priceHistory = {};
   observe(state, opts.startTown);
@@ -186,8 +192,28 @@ function pushNews(events: GameEvent[], items: NewsItem[], important: boolean): v
   for (const item of items) events.push({ type: 'news', item, important });
 }
 
+/**
+ * Tagesmarkt: fn zu einer festen Spielstunde ausführen, damit Zeitpunkte wie idleUntil
+ * und der Pegel bei der Routenplanung nicht von der Bildrate abhängen. Ohne fairSeed läuft fn zur aktuellen Stunde.
+ */
+function atHour<T>(state: GameState, hour: number, fn: () => T): T {
+  if (state.fairSeed === undefined) return fn();
+  const real = state.hour;
+  const level = state.waterLevel;
+  state.hour = hour;
+  // Pegel zur festen Stunde, die Routenplanung der Konkurrenz hängt davon ab
+  state.waterLevel = waterLevel(hour / 24 + 1) + eventWaterOffset(state);
+  try {
+    return fn();
+  } finally {
+    state.hour = real;
+    state.waterLevel = level;
+  }
+}
+
 function step(state: GameState, map: MapDef, hours: number, events: GameEvent[]): void {
   const before = day(state);
+  const hourBefore = state.hour;
   state.hour += hours;
   const after = day(state);
   for (let d = before + 1; d <= after; d++) {
@@ -213,10 +239,12 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
         events.push({ type: 'epoch', epoch: e });
       }
     }
-    pushNews(events, tickEvents(state, map), true);
-    pushNews(events, tickContracts(state, map), false);
-    if (state.rivalsActive) pushNews(events, tickRivals(state, map), false);
-    if (d % TAVERN_DAYS === 0) refreshTavern(state, map);
+    pushNews(events, withStream(state, 'ereignisse', d, () => tickEvents(state, map)), true);
+    pushNews(events, withStream(state, 'auftraege', d, () => tickContracts(state, map)), false);
+    if (state.rivalsActive) {
+      pushNews(events, atHour(state, (d - 1) * 24, () => withStream(state, 'konkurrenz', d, () => tickRivals(state, map))), false);
+    }
+    if (d % TAVERN_DAYS === 0) withStream(state, 'kneipe', d, () => refreshTavern(state, map));
     pushNews(events, tickMarketInfo(state, map), false);
     state.ice = isIce(d);
     events.push({ type: 'newDay', day: d });
@@ -255,7 +283,17 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     }
     if (ship.route?.active && ship.port && !ship.voyage) runRoute(state, map, ship);
   }
-  if (state.rivalsActive) moveRivals(state, map, hours);
+  if (state.rivalsActive) {
+    if (state.fairSeed === undefined) moveRivals(state, map, hours);
+    else {
+      // Tagesmarkt: Konkurrenz rückt in ganzen Stunden vor, damit Bildrate und Zeitraffer
+      // ihre Entscheidungen nicht verschieben. Die Anzeige rechnet den Stundenbruchteil dazu.
+      // gleiche Rundung wie day(), damit Tageswechsel und volle Stunde im selben Schritt liegen
+      const from = Math.floor(hourBefore) + 1;
+      const to = Math.floor(state.hour);
+      for (let h = from; h <= to; h++) atHour(state, h, () => withStream(state, 'konkurrenz-fahrt', h, () => moveRivals(state, map, 1)));
+    }
+  }
 }
 
 export function anySailing(state: GameState): boolean {

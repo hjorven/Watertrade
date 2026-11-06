@@ -11,8 +11,37 @@ export interface DailyEntry {
   mine: boolean;
 }
 
-/** Trägt das Tagesergebnis ein. Pro Tag zählt das beste Ergebnis, schlechtere werden ignoriert. */
-export async function submitDaily(wealth: number, day: string = todayUtc()): Promise<Result<{ wealth: number; improved: boolean }>> {
+export interface DailyBegin {
+  /** true: erster Versuch des Tages, wird gewertet. false: nur Übungsrunde. */
+  scored: boolean;
+  /** schon eingetragenes Ergebnis des Tages, sonst null */
+  wealth: number | null;
+}
+
+/**
+ * Meldet den Beginn eines Tagesmarkts beim Server. Nur der erste Versuch je Tag wird gewertet,
+ * das merkt sich der Server, nicht der Spielstand.
+ */
+export async function beginDaily(day: string = todayUtc()): Promise<Result<DailyBegin>> {
+  const sb = getClient();
+  if (!sb) return offline();
+  const session = await ensureSession();
+  if (!session.ok) return session;
+  try {
+    const { data, error } = await sb.rpc('daily_begin', { p_day: day });
+    if (error) return fail(error);
+    const d = (data ?? {}) as { scored?: boolean; wealth?: number | null };
+    return { ok: true, data: { scored: d.scored === true, wealth: typeof d.wealth === 'number' ? d.wealth : null } };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Trägt das Ergebnis des gewerteten Versuchs ein. Es zählt nur das erste Ergebnis je Tag,
+ * ein späteres wird nicht angenommen (accepted = false, wealth = das gespeicherte Ergebnis).
+ */
+export async function submitDaily(wealth: number, day: string = todayUtc()): Promise<Result<{ wealth: number; accepted: boolean }>> {
   if (!Number.isFinite(wealth) || wealth < 0) return { ok: false, error: 'Ungültiges Vermögen.', offline: false };
   const sb = getClient();
   if (!sb) return offline();
@@ -20,19 +49,34 @@ export async function submitDaily(wealth: number, day: string = todayUtc()): Pro
   if (!session.ok) return session;
   const value = Math.floor(wealth);
   try {
-    const { data: old, error: readError } = await sb
-      .from('daily_results')
-      .select('wealth')
-      .eq('day', day)
-      .eq('user_id', session.data.id)
-      .maybeSingle();
-    if (readError) return fail(readError);
-    if (old && old.wealth >= value) return { ok: true, data: { wealth: old.wealth, improved: false } };
-    const { error } = await sb
-      .from('daily_results')
-      .upsert({ day, user_id: session.data.id, wealth: value }, { onConflict: 'day,user_id' });
+    const { data, error } = await sb.rpc('daily_submit', { p_day: day, p_wealth: value });
     if (error) return fail(error);
-    return { ok: true, data: { wealth: value, improved: true } };
+    const d = (data ?? {}) as { accepted?: boolean; wealth?: number | null };
+    return { ok: true, data: { wealth: typeof d.wealth === 'number' ? d.wealth : value, accepted: d.accepted === true } };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Eigener Stand eines Tages: Versuch begonnen, eingetragenes Ergebnis. Legt keine Anmeldung an;
+ * ohne bestehende Sitzung gilt der Tag als unberührt.
+ */
+export async function myDaily(day: string = todayUtc()): Promise<Result<{ started: boolean; wealth: number | null }>> {
+  const sb = getClient();
+  if (!sb) return offline();
+  try {
+    const me = await sb.auth.getSession();
+    const id = me.data.session?.user.id;
+    if (!id) return { ok: true, data: { started: false, wealth: null } };
+    const [attempt, result] = await Promise.all([
+      sb.from('daily_attempts').select('day').eq('day', day).eq('user_id', id).maybeSingle(),
+      sb.from('daily_results').select('wealth').eq('day', day).eq('user_id', id).maybeSingle(),
+    ]);
+    if (attempt.error) return fail(attempt.error);
+    if (result.error) return fail(result.error);
+    const wealth = (result.data as { wealth: number } | null)?.wealth ?? null;
+    return { ok: true, data: { started: !!attempt.data || wealth !== null, wealth } };
   } catch (e) {
     return fail(e);
   }

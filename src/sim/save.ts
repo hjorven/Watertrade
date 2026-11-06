@@ -17,6 +17,8 @@ export interface SaveGame {
   startHour?: number;
   /** Tagesmarkt: Kalendertag (UTC) */
   dailyDay?: string;
+  /** Tagesmarkt: gewerteter Versuch, sonst Übungsrunde */
+  dailyScored?: boolean;
   state: GameState;
 }
 
