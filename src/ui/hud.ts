@@ -1,6 +1,7 @@
 import { BUILDING_BY_ID, BUILDINGS, betriebUpkeep, KONTOR_CAPACITY, KONTOR_PRICE, KONTOR_SLOTS, KONTOR_UPGRADE } from '../data/buildings.ts';
 import { CAPTAIN_RANKS, captainRank, traitText } from '../data/captains.ts';
 import { fairWage, LOYALTY_POACH, LOYALTY_WARN } from '../sim/captains.ts';
+import { renderCanal } from './canal-panel.ts';
 import { GOOD_BY_ID, GOODS } from '../data/goods.ts';
 import type { MapDef, TownDef } from '../data/maps/valley.ts';
 import { RIVAL_BY_ID } from '../data/rivals.ts';
@@ -69,6 +70,8 @@ import {
   upkeepCost,
 } from '../sim/wasserbau.ts';
 import { sailingHours } from '../sim/voyage.ts';
+import { totalDebt } from '../sim/finance.ts';
+import { renderBank } from './bank.ts';
 import { rivalWorth } from '../sim/rivals.ts';
 import { renderRivalry } from './rivalry.ts';
 import { BLOCK_TEXT, segmentDepth } from '../sim/river.ts';
@@ -91,6 +94,18 @@ import {
 } from '../sim/routes.ts';
 import type { RoutePlan, TradeRoute } from '../sim/state.ts';
 
+/** Bank und Versicherung im Handelsregister, leer ohne Kredite und Verträge */
+function financeLine(state: GameState): string {
+  const f = state.finance;
+  if (!f) return '';
+  const debt = totalDebt(state);
+  const parts = [debt ? `Schulden bei der Stadtbank ${fmt(debt)} Taler` : ''];
+  const g = f.ledger;
+  if (g.repaid || g.premiums || g.payouts) parts.push(`gestern ${fmt(g.repaid)} an die Bank, ${fmt(g.premiums)} Versicherung, ${fmt(g.payouts)} Schäden ersetzt`);
+  const text = parts.filter(Boolean).join('; ');
+  return text ? `<li>${text}</li>` : '';
+}
+
 /** Frische verderblicher Ware als kurzer Hinweis, etwa "Frische 82 %" */
 function freshText(slot: { fresh?: number } | undefined): string {
   if (!slot || slot.fresh === undefined || slot.fresh > 0.995) return '';
@@ -112,7 +127,7 @@ export interface HudActions {
 }
 
 export type View = 'ship' | 'register' | 'news' | 'contracts' | 'works' | 'map';
-export type Tab = 'markt' | 'kontor' | 'werft' | 'kneipe' | 'route' | 'buch' | 'rathaus';
+export type Tab = 'markt' | 'kontor' | 'werft' | 'kneipe' | 'route' | 'buch' | 'bank' | 'rathaus';
 
 /** Was gerade sichtbar ist; die Kampagne schaltet Reiter und Bücher nach und nach frei */
 export interface HudFeatures {
@@ -120,7 +135,7 @@ export interface HudFeatures {
   views: View[];
 }
 export const ALL_FEATURES: HudFeatures = {
-  tabs: ['markt', 'kontor', 'werft', 'kneipe', 'route', 'rathaus'],
+  tabs: ['markt', 'kontor', 'werft', 'kneipe', 'route', 'bank', 'rathaus'],
   views: ['ship', 'register', 'news', 'contracts', 'works', 'map'],
 };
 
@@ -504,6 +519,7 @@ export class Hud {
           ['kneipe', 'Kneipe'],
           ['route', 'Route'],
           ['buch', 'Bücher'],
+          ['bank', 'Bank'],
           ['rathaus', 'Rathaus'],
         ]
       : [
@@ -525,6 +541,7 @@ export class Hud {
     else if (this.tab === 'werft') body = this.renderYard(state, ship);
     else if (this.tab === 'kneipe') body = this.renderTavern(state, ship);
     else if (this.tab === 'route') body = this.renderRoute(state, ship);
+    else if (this.tab === 'bank') body = renderBank(state, this.map, ship);
     else if (this.tab === 'rathaus') body = this.renderTownHall(state, ship);
     else body = this.renderPort(state, ship);
     return nav + body;
@@ -1099,6 +1116,7 @@ export class Hud {
       <ul class="plain">
         <li>Gewinn bisher: <b>${fmt(state.totalProfit)}</b> Taler, ${state.stats.trips} Fahrten, ${state.stats.contracts} Aufträge erfüllt</li>
         <li>Gestern: Löhne ${fmt(l.wages)}, Unterhalt ${fmt(l.upkeep)}${l.fuel ? `, Brennstoff ${fmt(l.fuel)}` : ''}, eigene Erzeugung im Wert von ${fmt(l.production)} Taler</li>
+        ${financeLine(state)}
         ${kontore || '<li>Noch keine Kontore</li>'}
       </ul>
       ${renderRivalry(state, this.map)}${this.renderRouteSummary(state)}`;
@@ -1255,6 +1273,7 @@ export class Hud {
       <p>Brücken, Schleusen, Kanäle und Fahrrinnen verändern den Fluss für immer. Wer baut, darf von fremden Schiffen eine Durchfahrtsgebühr nehmen. Eine Stadt oder ein Handelshaus trägt auf Wunsch die Hälfte und bekommt dafür die Hälfte der Gebühren. Ausgebaggerte Rinnen verlanden, wenn niemand sie pflegt.</p></div>
       ${ledger}
       <div class="yard">${list}</div>
+      ${renderCanal(state, this.map, (id) => this.townName(id))}
       <div class="ledger-head"><div class="stamp-small">Häfen</div><h2>Häfen ausbauen</h2>
       <p>Ein besserer Hafen schlägt schneller um, hat mehr Liegeplätze und tieferes Wasser am Kai. Zu tiefe Schiffe müssen sonst über Schuten geleichtert werden, das dauert doppelt so lange und kostet einen halben Taler je Tonne.</p></div>
       <div class="yard">${harbors}</div>`;

@@ -53,10 +53,12 @@ import { buildHarbor, dredge, setFee, setUpkeep, startProjectWith } from './sim/
 import type { FeeLevel } from './sim/state.ts';
 import { activePlan, resetBook, stopsOf, winterSeasonsOf } from './sim/routes.ts';
 import type { RoutePlan } from './sim/state.ts';
+import { deliverToCanal, startCanalStage } from './sim/canal.ts';
 import { EPOCHS } from './data/ships.ts';
 import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
 import { buildTownhouse, found, joinCouncil, leaveCouncil } from './sim/standing.ts';
 import { goalDone, goalProgress, restoreCompleted } from './sim/goals.ts';
+import { payOverdueNow, repayLoan, setInsured, takeLoan } from './sim/finance.ts';
 import { deserialize, SAVE_VERSION, serialize, type GameMode, type SaveGame } from './sim/save.ts';
 import { LEVELS, levelOf } from './sim/towns.ts';
 import { chapterOneHint } from './ui/tutorial.ts';
@@ -391,6 +393,14 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
     case 'leaveCouncil':
       r = leaveCouncil(state, town);
       break;
+    case 'canalStart':
+      r = startCanalStage(state, VALLEY);
+      ok = 'glocke';
+      break;
+    case 'canalDeliver':
+      r = deliverToCanal(state, VALLEY, d.kontor ? { kontor: String(d.kontor) } : { ship: n('ship') }, String(d.good), n('n'));
+      ok = 'verkauf';
+      break;
     case 'accept':
       r = acceptContract(state, n('id'));
       ok = 'stempel';
@@ -398,6 +408,22 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
     case 'deliver':
       r = deliverContract(state, selected, n('id'));
       ok = r.taler > 0 ? 'muenzen' : 'verkauf';
+      break;
+    case 'takeLoan':
+      r = takeLoan(state, town, n('n'), n('days'));
+      ok = 'muenzen';
+      break;
+    case 'repayLoan':
+      r = repayLoan(state, n('id'));
+      ok = 'muenzen';
+      break;
+    case 'payOverdue':
+      r = payOverdueNow(state, n('id'));
+      ok = 'muenzen';
+      break;
+    case 'insure':
+      r = setInsured(state, selected, n('on') === 1);
+      ok = 'stempel';
       break;
     case 'routeAddStop':
     case 'routeDelStop':
@@ -684,8 +710,8 @@ function startGame(s: GameState, sess: Session): void {
 /** Die Kampagne führt Reiter und Bücher nach und nach ein, alle anderen Modi zeigen alles */
 function featuresFor(sess: Session): HudFeatures {
   const n = sess.mode === 'kampagne' ? (sess.chapter?.number ?? 99) : 99;
-  if (n <= 1) return { tabs: ['markt', 'werft'], views: ['ship', 'news', 'map'] };
-  if (n === 2) return { tabs: ['markt', 'kontor', 'werft', 'kneipe', 'route', 'rathaus'], views: ['ship', 'news', 'map', 'contracts', 'register'] };
+  if (n <= 1) return { tabs: ['markt', 'werft', 'bank'], views: ['ship', 'news', 'map'] };
+  if (n === 2) return { tabs: ['markt', 'kontor', 'werft', 'kneipe', 'route', 'bank', 'rathaus'], views: ['ship', 'news', 'map', 'contracts', 'register'] };
   return ALL_FEATURES;
 }
 
@@ -890,6 +916,8 @@ const epochMusic = (e: number) => (e >= 3 ? 'epoche3' : e === 2 ? 'epoche2' : 'e
 
 function handleEvents(events: GameEvent[]): void {
   let changed = false;
+  // die Bank kann bei einer Pfändung das gewählte Schiff nehmen
+  if (!current()) selected = state.ships[0]?.id ?? -1;
   for (const e of events) {
     if (e.type === 'epoch') {
       hud.stamp('Neue Zeit', EPOCHS[e.epoch - 1].name);
