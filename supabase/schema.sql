@@ -57,6 +57,100 @@ create table public.daily_results (
 create index daily_results_day_wealth_idx on public.daily_results (day, wealth desc);
 
 ------------------------------------------------------------------------------
+-- 1b. Tagesmarkt: ein gewerteter Versuch je Tag (Migration 20261106200000_tagesmarkt_ein_versuch)
+--     daily_begin(day) beim Start, daily_submit(day, wealth) am Ende. Kein direktes Schreiben in daily_results.
+------------------------------------------------------------------------------
+
+create table if not exists public.daily_attempts (
+  day date not null,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  started_at timestamptz not null default now(),
+  primary key (day, user_id)
+);
+
+alter table public.daily_attempts enable row level security;
+
+drop policy if exists "eigene daily versuche lesbar" on public.daily_attempts;
+create policy "eigene daily versuche lesbar" on public.daily_attempts for select to authenticated
+  using (user_id = (select auth.uid()));
+
+-- Versuch beginnen. Erlaubt ist der heutige Tag (UTC) und, kurz nach Mitternacht, der gestrige. Künftige Tage nie.
+create or replace function public.daily_begin(p_day date)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_today date := (now() at time zone 'utc')::date;
+  v_started timestamptz;
+  v_wealth integer;
+  v_new boolean;
+begin
+  if auth.uid() is null then
+    raise exception 'nicht angemeldet';
+  end if;
+  if p_day is null or p_day < v_today - 1 or p_day > v_today then
+    raise exception 'tagesmarkt nicht von heute';
+  end if;
+
+  insert into public.daily_attempts (day, user_id)
+  values (p_day, auth.uid())
+  on conflict (day, user_id) do nothing;
+  v_new := found;
+
+  select started_at into v_started from public.daily_attempts where day = p_day and user_id = auth.uid();
+  select wealth into v_wealth from public.daily_results where day = p_day and user_id = auth.uid();
+
+  return jsonb_build_object('scored', v_new, 'started_at', v_started, 'wealth', v_wealth);
+end;
+$$;
+
+-- Ergebnis eintragen. Zählt nur, wenn der Versuch begonnen wurde und noch kein Ergebnis existiert.
+create or replace function public.daily_submit(p_day date, p_wealth integer)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_started timestamptz;
+  v_wealth integer;
+begin
+  if auth.uid() is null then
+    raise exception 'nicht angemeldet';
+  end if;
+  if p_wealth is null or p_wealth < 0 or p_wealth > 100000000 then
+    raise exception 'ungültiges vermögen';
+  end if;
+
+  select started_at into v_started from public.daily_attempts where day = p_day and user_id = auth.uid();
+  if v_started is null then
+    raise exception 'kein gewerteter versuch';
+  end if;
+  -- Ein Versuch muss innerhalb von zwei Tagen abgeschlossen sein
+  if now() > v_started + interval '2 days' then
+    raise exception 'versuch abgelaufen';
+  end if;
+
+  insert into public.daily_results (day, user_id, wealth)
+  values (p_day, auth.uid(), p_wealth)
+  on conflict (day, user_id) do nothing;
+  if found then
+    return jsonb_build_object('accepted', true, 'wealth', p_wealth);
+  end if;
+
+  select wealth into v_wealth from public.daily_results where day = p_day and user_id = auth.uid();
+  return jsonb_build_object('accepted', false, 'wealth', v_wealth);
+end;
+$$;
+
+revoke execute on function public.daily_begin(date) from public, anon;
+revoke execute on function public.daily_submit(date, integer) from public, anon;
+grant execute on function public.daily_begin(date) to authenticated;
+grant execute on function public.daily_submit(date, integer) to authenticated;
+
+------------------------------------------------------------------------------
 -- 2. Online-Handelsliga (serverseitig gerechnet, Client kann nicht schummeln)
 ------------------------------------------------------------------------------
 
@@ -115,11 +209,7 @@ create policy "eigene saves" on public.saves for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 create policy "daily lesbar" on public.daily_results for select using (true);
-create policy "eigenes daily eintragen" on public.daily_results for insert to authenticated
-  with check (user_id = (select auth.uid()));
--- FIX: Ein Ergebnis pro Tag darf verbessert werden (upsert), aber nur das eigene
-create policy "eigenes daily verbessern" on public.daily_results for update to authenticated
-  using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+-- Eintragen nur über public.daily_submit (Abschnitt 1b), ein Ergebnis je Tag, kein Verbessern
 
 -- Markt und Liga nur lesbar, geschrieben wird über die Funktionen unten
 create policy "markt lesbar" on public.league_market for select using (true);

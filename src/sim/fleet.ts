@@ -284,7 +284,7 @@ export function runRoute(state: GameState, map: MapDef, ship: Ship): string | nu
     return log;
   }
   if (!depart(state, map, ship.id, target)) {
-    const why = departProblem(state, map, ship.id, target) ?? 'kein Geld für den Zoll';
+    const why = departProblem(state, map, ship.id, target) ?? 'kein Geld für Zoll oder Treidelgeld';
     r.note = `wartet: ${why.replace(/\.$/, '')}`;
     r.next = nextIndex;
     r.retryAt = state.hour + 12;

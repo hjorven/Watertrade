@@ -9,6 +9,7 @@ import { dayInSeason, season, SEASON_NAME, year } from '../sim/calendar.ts';
 import { MAX_ACCEPTED, PENALTY } from '../sim/contracts.ts';
 import { buyPrice, sellPrice } from '../sim/economy.ts';
 import { describeEvent, describeForecast, EVENT_TITLE, visibleForecasts } from '../sim/events.ts';
+import { epochProgress, epochProgressText } from '../sim/epochs.ts';
 import { hasYard, repairCost, timberPlan, upgradeCost } from '../sim/fleet.ts';
 import {
   bunkerPlan,
@@ -36,7 +37,7 @@ import { daysLeft, projectState } from '../sim/works.ts';
 import { betriebeIn, betriebSlots, buildingAllowed, kontorUpkeepIn, playerWorth } from '../sim/house.ts';
 import { extraSlots } from '../sim/standing.ts';
 import { closedLine, renderRathaus, seasonLine, standingLine } from './standing-panel.ts';
-import { HARBOR_LEVELS } from '../data/harbors.ts';
+import { HARBOR_LEVELS, LIGHTER_FEE } from '../data/harbors.ts';
 import {
   berths,
   dredgeCost,
@@ -100,10 +101,24 @@ const fmtHours = (h: number) => {
   return min === 0 ? `${whole} Std` : `${whole} Std ${min} Min`;
 };
 
+const m1 = (x: number) => x.toFixed(1).replace('.', ',');
+
+/** Warnung im Hafen, wenn das Schiff für den Kai zu tief geht: Umschlag dann über Schuten */
+function quayWarning(state: GameState, ship: Ship, town: string): string {
+  const quay = quayDepth(state, town);
+  const now = effectiveDraft(ship);
+  const full = effectiveDraft({ ...ship, cargo: { _: { amount: capacityOf(ship), cost: 0 } } });
+  const how = `Umschlag über Schuten: halb so schnell und ${LIGHTER_FEE.toLocaleString('de-DE')} Taler je Tonne Leichtergeld. Ein ausgebauter Hafen (Wasserbau, Kaimauer) hilft.`;
+  if (now > quay) return `<p class="note warn"><b>Zu tief für den Kai:</b> ${m1(now)} m Tiefgang, nur ${m1(quay)} m Wasser am Kai. ${how}</p>`;
+  if (full > quay) return `<p class="note warn"><b>Voll beladen zu tief für den Kai:</b> ${m1(full)} m Tiefgang, nur ${m1(quay)} m Wasser am Kai. ${how}</p>`;
+  return '';
+}
+
 /** Hinweis, solange ein Schiff zu Beginn oder am Ende einer Fahrt am Anleger umschlägt */
-const dockNote = (v: { elapsed: number; hours: number; dock?: number; dockEnd?: number }) => {
-  if (v.dock && v.elapsed < v.dock) return `<p class="note">Wird noch beladen, legt in ${fmtHours(v.dock - v.elapsed)} ab.</p>`;
-  if (v.dockEnd && v.elapsed > v.hours - v.dockEnd) return `<p class="note">Liegt am Kai und wird gelöscht.</p>`;
+const dockNote = (v: Voyage) => {
+  const lighter = v.fees?.some((f) => f.work === 'leichtern') ? ' über Schuten (zu tief für den Kai)' : '';
+  if (v.dock && v.elapsed < v.dock) return `<p class="note">Wird noch${lighter} beladen, legt in ${fmtHours(v.dock - v.elapsed)} ab.</p>`;
+  if (v.dockEnd && v.elapsed > v.hours - v.dockEnd) return `<p class="note">Liegt am Kai und wird${lighter} gelöscht.</p>`;
   return '';
 };
 
@@ -358,7 +373,7 @@ export class Hud {
       this.top,
       `
       <span><small>Kasse</small><b>${fmt(state.money)} Taler</b></span>
-      <span title="${EPOCHS[state.epoch - 1].name}"><small>${SEASON_NAME[season(day(state))]} · Jahr ${year(day(state))}</small><b>${dayInSeason(day(state))}. Tag, ${clock(state.hour)}</b></span>
+      <span title="${epochProgressText(state)}"><small>${SEASON_NAME[season(day(state))]} · Jahr ${year(day(state))}</small><b>${dayInSeason(day(state))}. Tag, ${clock(state.hour)}</b></span>
       <span class="river-stat" title="Pegel und Wind bestimmen, welche Schiffe wie schnell fahren"><small>Fluss</small><b>${state.waterLevel >= 0 ? '+' : '−'}${Math.abs(state.waterLevel).toFixed(1).replace('.', ',')} m${state.ice ? ', Eis' : ''} · Wind ${windText(w)}</b></span>${events}`,
     );
     this.newsKey = state.news[0] ? `${state.news[0].day}|${state.news[0].text}` : '';
@@ -501,10 +516,12 @@ export class Hud {
         const v = plan.voyage;
         const dir = v.legs.every((l) => l.downstream) ? 'talwärts' : v.legs.every((l) => !l.downstream) ? 'bergwärts' : 'tal- und bergwärts';
         const fees = feeSum(v.fees);
-        const zoll = (v.toll ?? 0) - fees;
-        const toll = `${zoll ? `, Zoll ${zoll}` : v.evaded ? `, ${v.evaded} Zoll umgangen, Kontrolle möglich` : ''}${fees ? `, Gebühren ${fees}` : ''}`;
+        const tow = v.towFee ?? 0;
+        const zoll = (v.toll ?? 0) - fees - tow;
+        const toll = `${zoll ? `, Zoll ${zoll}` : v.evaded ? `, ${v.evaded} Zoll umgangen, Kontrolle möglich` : ''}${fees ? `, Gebühren ${fees}` : ''}${tow ? `, Treidelgeld ${tow}` : ''}`;
         const dockH = (v.dock ?? 0) + (v.dockEnd ?? 0);
-        const dockText = dockH >= 0.5 ? ` (davon ${fmtHours(dockH)} Laden und Löschen)` : '';
+        const lighter = v.fees?.some((f) => f.work === 'leichtern') ? ', muss leichtern' : '';
+        const dockText = (dockH >= 0.5 ? ` (davon ${fmtHours(dockH)} Laden und Löschen)` : '') + lighter;
         const coal = bunkerPlan(state, ship, sailingHours(v), v.toll ?? 0);
         if (coal.problem) return `<button class="btn dest" disabled title="${coal.problem}"><b>${t.name}</b><small>${coal.buy ? `${coal.buy} t Kohle fehlen` : 'Bunker zu klein'}</small></button>`;
         const coalText = coal.need ? `, Kohle ${String(coal.need).replace('.', ',')} t${coal.buy ? `, bunkert ${coal.buy} t für ${coal.cost} Taler` : ''}` : '';
@@ -546,6 +563,7 @@ export class Hud {
       ${this.renderTownInfo(state, town, industries)}
       ${contracts}
       <p class="note">Laderaum <b>${load}/${cap} t</b> · Tiefgang ${effectiveDraft(ship).toFixed(1).replace('.', ',')} m${kontor ? ' · Kontorbonus' : ''}${bunker}</p>
+      ${quayWarning(state, ship, town.id)}
       ${bunkerBtn}
       <table class="market">
         <thead><tr><th>Ware</th><th title="Preis je Tonne beim Kauf">Kauf</th><th title="Preis je Tonne beim Verkauf">Verkauf</th><th>Bord</th><th></th></tr></thead>
@@ -682,7 +700,7 @@ export class Hud {
       : '';
     return `${this.portHead(town, 'Werft')}${state_}
       ${ship.type === 'floss' ? '' : `<button class="btn wide ${cost > 0 ? 'primary' : ''}" data-act="cmd" data-cmd="repair" ${cost > 0 && state.money >= cost ? '' : 'disabled'}>Überholen<small>${cost > 0 ? `${fmt(cost)} Taler` : 'nicht nötig'}</small></button>`}
-      ${ups}${newShips}`;
+      ${ups}${newShips}${epochNote(state)}`;
   }
 
   /** Kapitän an Bord: Erfahrung, Treue, Lohn mit Knöpfen zum Anpassen */
@@ -844,7 +862,7 @@ export class Hud {
         <p>${how} ${speed.toFixed(1).replace('.', ',')} km/h über Grund, Strömung ${String(seg.current).replace('.', ',')} km/h.</p>
       </div>
       <div class="progress"><div style="width:${pct}%"></div></div>
-      <p class="note">${fmtHours(v.elapsed)} von ${fmtHours(v.hours)}${v.toll ? ` · ${v.fees?.length ? 'Zoll und Gebühren' : 'Zoll'} bezahlt: ${v.toll} Taler` : ''}${v.evaded ? ` · ${v.evaded} Taler Zoll umgangen, Kontrolle möglich` : ''}</p>
+      <p class="note">${fmtHours(v.elapsed)} von ${fmtHours(v.hours)}${v.toll ? ` · ${paidLabel(v)} bezahlt: ${v.toll} Taler` : ''}${v.evaded ? ` · ${v.evaded} Taler Zoll umgangen, Kontrolle möglich` : ''}</p>
       ${dockNote(v)}
       <ol class="route">${route}</ol>
       <p class="note">Ladung: ${cargo || 'leer'} · Zustand ${Math.round(ship.condition * 100)} %${cls.coal ? ` · Bunker ${Math.floor(ship.bunker ?? 0)} t Kohle` : ''}</p>
@@ -1182,4 +1200,25 @@ export class Hud {
     setTimeout(() => el.classList.add('out'), 2600);
     setTimeout(() => el.remove(), 3400);
   }
+}
+
+/** Hinweis in der Werft, was die nächste Epoche bringt (nur freies Spiel) */
+function epochNote(state: GameState): string {
+  if (!state.epochAuto) return '';
+  const p = epochProgress(state);
+  if (!p.next) return '';
+  const parts = p.conditions.map((c) => `${c.label} (${Math.min(c.value, c.target)}/${c.target})`);
+  return `<p class="note">Die Zeit „${p.next.name}“ beginnt, sobald alles erfüllt ist: ${parts.join(', ')}. Spätestens im Jahr ${p.next.latestYear}.</p>`;
+}
+
+/** Was beim Ablegen bezahlt wurde: Zoll, Gebühren, Treidelgeld */
+function paidLabel(v: Voyage): string {
+  const tow = v.towFee ?? 0;
+  const fees = feeSum(v.fees);
+  const parts: string[] = [];
+  if ((v.toll ?? 0) - tow - fees > 0) parts.push('Zoll');
+  if (fees > 0) parts.push('Gebühren');
+  if (tow > 0) parts.push('Treidelgeld');
+  if (parts.length <= 1) return parts[0] ?? 'Zoll';
+  return `${parts.slice(0, -1).join(', ')} und ${parts[parts.length - 1]}`;
 }

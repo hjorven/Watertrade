@@ -1846,3 +1846,10 @@ ul.ranks li.done b::after {
 .tripbook .num {
   font-size: 15px;
 }
+
+/* Wasserbau: Hinweis, wenn ein Schiff für den Kai zu tief geht */
+.note.warn {
+  border-left: 3px solid var(--stamp);
+  padding: 4px 8px;
+  background: rgb(168 50 42 / 0.07);
+}
