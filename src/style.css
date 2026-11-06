@@ -1460,3 +1460,131 @@ ul.plain small {
     align-items: stretch;
   }
 }
+
+/* --- Aufgeräumte Oberfläche --- */
+.stats span {
+  white-space: nowrap;
+}
+
+.ledger {
+  padding-top: 22px;
+}
+
+.fold {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 28px;
+  height: 18px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.fold::before {
+  content: '▾';
+}
+
+.fold:hover {
+  border-color: var(--line);
+}
+
+.ledger.folded {
+  overflow: hidden;
+}
+
+.ledger.folded .fold::before {
+  content: '▸';
+}
+
+.ledger.folded .ledger-body,
+.ledger.folded .goals,
+.ledger.folded .hint {
+  display: none;
+}
+
+.ledger.folded .fleet {
+  margin-bottom: 0;
+}
+
+.goals .goal-list li.extra {
+  display: none;
+}
+
+.goals.all .goal-list li.extra {
+  display: list-item;
+}
+
+.hint {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  font-size: 14px;
+  line-height: 1.4;
+  background: rgb(63 127 154 / 0.1);
+  border-left: 3px solid var(--water);
+}
+
+.hint[hidden] {
+  display: none;
+}
+
+.hint .link {
+  font-size: 12px;
+  flex: none;
+}
+
+.market .acts.trade {
+  display: flex;
+  gap: 3px;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+
+.market .acts.trade .sellall {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+
+.market .acts.trade .btn {
+  padding: 3px 6px;
+}
+
+details.more {
+  margin-top: 2px;
+}
+
+details.more summary {
+  font-size: 12px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  list-style: none;
+}
+
+details.more summary::before {
+  content: '▸ ';
+}
+
+details.more[open] summary::before {
+  content: '▾ ';
+}
+
+details.more .note {
+  margin: 4px 0 0;
+}
+
+@media (min-width: 721px) {
+  .ledger.folded {
+    width: auto;
+    min-width: 200px;
+  }
+}

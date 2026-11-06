@@ -50,8 +50,18 @@ export interface HudActions {
   command(cmd: string, data: Record<string, string | number>): void;
 }
 
-type View = 'ship' | 'register' | 'news' | 'contracts' | 'works' | 'map';
-type Tab = 'markt' | 'kontor' | 'werft' | 'kneipe' | 'route';
+export type View = 'ship' | 'register' | 'news' | 'contracts' | 'works' | 'map';
+export type Tab = 'markt' | 'kontor' | 'werft' | 'kneipe' | 'route';
+
+/** Was gerade sichtbar ist; die Kampagne schaltet Reiter und Bücher nach und nach frei */
+export interface HudFeatures {
+  tabs: Tab[];
+  views: View[];
+}
+export const ALL_FEATURES: HudFeatures = {
+  tabs: ['markt', 'kontor', 'werft', 'kneipe', 'route'],
+  views: ['ship', 'register', 'news', 'contracts', 'works', 'map'],
+};
 
 const fmtHours = (h: number) => {
   if (h >= 48) return `${(h / 24).toFixed(1).replace('.', ',')} Tage`;
@@ -139,7 +149,9 @@ export class Hud {
         </div>
       </header>
       <aside class="ledger">
+        <button class="fold" data-act="fold" aria-label="Kontorbuch ein- oder ausklappen" title="Kontorbuch ein- oder ausklappen"></button>
         <section class="goals"></section>
+        <div class="hint" hidden></div>
         <nav class="fleet" aria-label="Flotte"></nav>
         <div class="ledger-body" aria-live="polite"></div>
       </aside>
@@ -197,7 +209,15 @@ export class Hud {
           break;
         case 'goals':
           this.goalsOpen = !this.goalsOpen;
-          this.goals.classList.toggle('closed', !this.goalsOpen);
+          this.goals.classList.toggle('all', this.goalsOpen);
+          break;
+        case 'fold':
+          this.folded = !this.folded;
+          this.root.querySelector('.ledger')!.classList.toggle('folded', this.folded);
+          break;
+        case 'hintClose':
+          this.hintDismissed = this.hintText;
+          this.setHint(this.hintText);
           break;
         case 'view': {
           const v = d.view as View;
@@ -223,7 +243,29 @@ export class Hud {
     });
   }
 
-  private goalsOpen = true;
+  private goalsOpen = false;
+  private folded = false;
+  private features: HudFeatures = ALL_FEATURES;
+  private hintText: string | null = null;
+  private hintDismissed: string | null = null;
+
+  /** Reiter und Bücher ein- und ausblenden */
+  setFeatures(f: HudFeatures): void {
+    this.features = f;
+    this.root.querySelectorAll<HTMLButtonElement>('.views .btn').forEach((b) => {
+      b.hidden = !f.views.includes(b.dataset.view as View);
+    });
+    if (!f.views.includes(this.view)) this.view = 'ship';
+  }
+
+  /** Kurzer Hinweis über der Flotte, zum Beispiel der nächste Schritt im ersten Kapitel */
+  setHint(text: string | null): void {
+    this.hintText = text;
+    const el = this.root.querySelector<HTMLElement>('.hint')!;
+    const show = !!text && text !== this.hintDismissed;
+    el.hidden = !show;
+    if (show) setHtml(el, `<span>${text}</span><button class="link" data-act="hintClose" aria-label="Hinweis schließen">ok</button>`);
+  }
 
   /** Ziele des Kapitels; null blendet die Liste aus (freies Spiel) */
   renderGoals(title: string | null, goals: { text: string; done: boolean; progress: string }[]): void {
@@ -234,9 +276,14 @@ export class Hud {
     const done = goals.filter((g) => g.done).length;
     setHtml(
       this.goals,
-      `<button class="goals-head" data-act="goals"><span>${title}</span><small>${done}/${goals.length} Ziele</small></button>
+      `<button class="goals-head" data-act="goals" title="Alle Ziele zeigen"><span>${title}</span><small>${done}/${goals.length} Ziele ${this.goalsOpen ? '▴' : '▾'}</small></button>
       <ul class="goal-list">${goals
-        .map((g) => `<li class="${g.done ? 'done' : ''}">${g.text}${g.done ? '' : `<small>${g.progress}</small>`}</li>`)
+        .map((g, i) => {
+          // eingeklappt: nur die nächsten zwei offenen Ziele
+          const rank = goals.slice(0, i).filter((x) => !x.done).length;
+          const extra = g.done || rank >= 2 ? ' extra' : '';
+          return `<li class="${g.done ? 'done' : ''}${extra}">${g.text}${g.done || !g.progress ? '' : `<small>${g.progress}</small>`}</li>`;
+        })
         .join('')}</ul>`,
     );
   }
@@ -251,11 +298,9 @@ export class Hud {
     setHtml(
       this.top,
       `
-      <span><small>Kasse</small><b>${fmt(state.money)}</b> Taler</span>
-      <span><small>${SEASON_NAME[season(day(state))]} · Jahr ${year(day(state))}</small><b>${dayInSeason(day(state))}. Tag</b> ${clock(state.hour)}</span>
-      <span class="hide-narrow"><small>Pegel</small><b>${state.waterLevel >= 0 ? '+' : '−'}${Math.abs(state.waterLevel).toFixed(1).replace('.', ',')} m</b>${state.ice ? ' Eis' : ''}</span>
-      <span class="hide-narrow"><small>Wind</small><b>${windText(w)}</b></span>
-      <span class="hide-narrow hide-mid"><small>Epoche</small><b>${EPOCHS[state.epoch - 1].name}</b></span>${events}`,
+      <span><small>Kasse</small><b>${fmt(state.money)} Taler</b></span>
+      <span title="${EPOCHS[state.epoch - 1].name}"><small>${SEASON_NAME[season(day(state))]} · Jahr ${year(day(state))}</small><b>${dayInSeason(day(state))}. Tag, ${clock(state.hour)}</b></span>
+      <span class="hide-narrow" title="Pegel und Wind bestimmen, welche Schiffe wie schnell fahren"><small>Fluss</small><b>${state.waterLevel >= 0 ? '+' : '−'}${Math.abs(state.waterLevel).toFixed(1).replace('.', ',')} m${state.ice ? ', Eis' : ''} · Wind ${windText(w)}</b></span>${events}`,
     );
     this.newsKey = state.news[0] ? `${state.news[0].day}|${state.news[0].text}` : '';
     if (this.view === 'news') this.newsSeen = this.newsKey;
@@ -310,6 +355,9 @@ export class Hud {
           ['markt', 'Fahrt'],
           ['route', 'Route'],
         ];
+    const visible = tabs.filter(([t]) => t === 'markt' || this.features.tabs.includes(t));
+    tabs.length = 0;
+    tabs.push(...visible);
     if (!tabs.some(([t]) => t === this.tab)) this.tab = 'markt';
     const nav = `<nav class="tabs">${tabs
       .map(([t, label]) => `<button class="tab ${t === this.tab ? 'on' : ''}" data-act="tab" data-tab="${t}">${label}</button>`)
@@ -363,11 +411,10 @@ export class Hud {
           <td class="num">${bp}</td>
           <td class="num ${margin}">${sp}${avg !== null ? `<small>ø ${avg}</small>` : ''}</td>
           <td class="num">${aboard}</td>
-          <td class="acts">
-            <button class="btn" data-act="buy" data-good="${g.id}" data-n="1" ${canBuy ? '' : 'disabled'}>+1</button>
-            <button class="btn" data-act="buy" data-good="${g.id}" data-n="10" ${canBuy ? '' : 'disabled'}>+10</button>
-            <button class="btn" data-act="sell" data-good="${g.id}" data-n="1" ${aboard ? '' : 'disabled'}>−1</button>
-            <button class="btn" data-act="sell" data-good="${g.id}" data-n="all" ${aboard ? '' : 'disabled'}>alles</button>
+          <td class="acts trade">
+            <button class="btn" data-act="buy" data-good="${g.id}" data-n="1" ${canBuy ? '' : 'disabled'} title="1 t kaufen">+1</button>
+            <button class="btn" data-act="buy" data-good="${g.id}" data-n="10" ${canBuy ? '' : 'disabled'} title="10 t kaufen">+10</button>
+            ${aboard ? `<button class="btn sellall" data-act="sell" data-good="${g.id}" data-n="all" title="alles verkaufen">Verkaufen</button>` : ''}
           </td>
         </tr>`;
       })
@@ -412,14 +459,13 @@ export class Hud {
 
     return `
       ${this.portHead(town, kontor ? 'Eigenes Kontor' : 'Hafen')}
-      ${this.renderTownInfo(state, town)}
+      ${this.renderTownInfo(state, town, industries)}
       ${contracts}
-      <p class="note">${ship.name} (${shipClass(ship).name}): ${load}/${cap} t geladen, Tiefgang ${effectiveDraft(ship).toFixed(1).replace('.', ',')} m${kontor ? ', Verkauf mit Kontorbonus' : ''}</p>
+      <p class="note">Laderaum <b>${load}/${cap} t</b> · Tiefgang ${effectiveDraft(ship).toFixed(1).replace('.', ',')} m${kontor ? ' · Kontorbonus' : ''}</p>
       <table class="market">
-        <thead><tr><th>Ware</th><th>Kauf</th><th>Verkauf</th><th>Bord</th><th></th></tr></thead>
+        <thead><tr><th>Ware</th><th title="Preis je Tonne beim Kauf">Kauf</th><th title="Preis je Tonne beim Verkauf">Verkauf</th><th>Bord</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      ${industries}
       ${raft}
       <h3>Ablegen nach</h3>
       <div class="dests">${departures}</div>
@@ -623,7 +669,7 @@ export class Hud {
       <p class="fine">Menge 0 heißt: bis der Laderaum voll ist, oder alles verkaufen. Mit einer Preisgrenze kauft der Kapitän nicht zu teuer und verkauft nicht zu billig.</p>`;
   }
 
-  private renderTownInfo(state: GameState, town: TownDef): string {
+  private renderTownInfo(state: GameState, town: TownDef, more = ''): string {
     const t = state.towns[town.id];
     const level = levelOf(t.population);
     const next = LEVELS[level + 1];
@@ -634,8 +680,11 @@ export class Hud {
     return `<div class="town-info">
       <span><b>${LEVELS[level].name}</b> · ${Math.round(t.population)} Einwohner · ${trend}</span>
       <div class="meter" title="Versorgung ${sat} %"><div style="width:${sat}%"></div><i style="left:${GROWTH_THRESHOLD * 100}%"></i></div>
-      <small>Versorgung ${sat} %${next ? `, ab ${next.from} Einwohnern ${next.name}${wants.length ? ` (will dann auch ${wants.join(', ')})` : ''}` : ''}</small>
       ${ev.join('')}
+      <details class="more"><summary>Mehr über ${town.name}</summary>
+        <small>Versorgung ${sat} %${next ? `, ab ${next.from} Einwohnern ${next.name}${wants.length ? ` (will dann auch ${wants.join(', ')})` : ''}` : ''}</small>
+        ${more}
+      </details>
     </div>`;
   }
 
@@ -846,7 +895,7 @@ export class Hud {
     this.toasts.prepend(el);
     setTimeout(() => el.classList.add('out'), 4200);
     setTimeout(() => el.remove(), 4800);
-    while (this.toasts.children.length > 4) this.toasts.lastElementChild!.remove();
+    while (this.toasts.children.length > 3) this.toasts.lastElementChild!.remove();
   }
 
   private stampQueue: [string, string][] = [];
