@@ -7,7 +7,19 @@ export interface TownPlacement {
   center: THREE.Vector3;
   mooring: THREE.Vector3; // Liegeplatz des Kahns am Steg
   radius: number;
+  /** Bauplätze am Ufer: 0–3 Kontore, danach Betriebe */
+  lots: Lot[];
 }
+
+export interface Lot {
+  pos: THREE.Vector3;
+  facing: number; // Drehung um y, Front zum Fluss
+}
+
+/** Kontorplätze nah am Steg, Betriebe weiter das Ufer entlang */
+const LOT_ALONG = [-5.5, 5.5, -11, 11, -17, 17, -23, 23, -29, 29, -35, 35, -41, 41, -47, 47];
+const LOT_COUNT = 10;
+export const KONTOR_LOTS = 4;
 
 export function placeTown(land: Landscape, def: TownDef): TownPlacement {
   const p = land.pointAt(def.river, def.riverT);
@@ -16,7 +28,27 @@ export function placeTown(land: Landscape, def: TownDef): TownPlacement {
   const radius = 5 + def.houses * 0.42;
   const center = p.clone().addScaledVector(n, hw + 3 + radius);
   const mooring = p.clone().addScaledVector(n, Math.max(0.6, hw - 1.3));
-  return { def, center, mooring, radius };
+  const len = land.curve(def.river).getLength();
+  // Plätze, die über das Flussende hinausragen würden, entfallen; dafür rücken weiter entfernte nach
+  const usable = LOT_ALONG.filter((along) => {
+    const t = def.riverT + along / len;
+    return t > 0.015 && t < 0.985;
+  }).slice(0, LOT_COUNT);
+  const lots: Lot[] = usable.map((along) => {
+    const t = def.riverT + along / len;
+    const q = land.pointAt(def.river, t);
+    const qn = land.normalAt(def.river, t).multiplyScalar(def.side);
+    let off = hw + 5;
+    let pos = q.clone().addScaledVector(qn, off);
+    // in Kurven nicht ins Wasser bauen
+    for (let i = 0; i < 6 && land.riverDistance(pos.x, pos.z).d < RIVER_HALF_WIDTH + 3.2; i++) {
+      off += 1;
+      pos = q.clone().addScaledVector(qn, off);
+    }
+    pos.y = land.heightAt(pos.x, pos.z);
+    return { pos, facing: Math.atan2(qn.x, qn.z) + Math.PI };
+  });
+  return { def, center, mooring, radius, lots };
 }
 
 const WALLS = [0xf1e6cf, 0xe8d6b3, 0xd9c09a, 0xefe0c4, 0xc9a77f];
@@ -71,6 +103,7 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
     if (land.riverDistance(x, z).d < RIVER_HALF_WIDTH + 2.2) continue;
     if (spots.some((p) => Math.hypot(p.x - x, p.z - z) < 2.9)) continue;
     if (land.heightAt(x, z) > 9) continue; // nicht an den Steilhang
+    if (place.lots.some((l) => Math.hypot(l.pos.x - x, l.pos.z - z) < 4.2)) continue; // Bauplätze freihalten
     spots.push({ x, z, d: r + rand() * 2 });
   }
   spots.sort((p, q) => p.d - q.d);

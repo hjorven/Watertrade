@@ -1,6 +1,7 @@
 import { BUILDING_BY_ID, KONTOR_CAPACITY, KONTOR_PRICE, KONTOR_SLOTS, KONTOR_UPGRADE } from '../data/buildings.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
+import { SHIPS } from '../data/ships.ts';
 import { price } from './economy.ts';
 import { captainWages } from './fleet.ts';
 import { cargoLoad, day, fail, type GameState, type TradeResult } from './state.ts';
@@ -131,4 +132,18 @@ function roomOf(state: GameState, town: string): number {
 /** Ganze Tonnen im Kontor (Betriebe erzeugen Bruchteile) */
 export function kontorAmount(state: GameState, town: string, good: string): number {
   return Math.floor(state.kontore[town]?.stock[good]?.amount ?? 0);
+}
+
+/** Vermögen des Handelshauses für das Handelsregister: Geld, Schiffe zum Zeitwert, Kontore, Betriebe, Lager */
+export function playerWorth(state: GameState): number {
+  let w = state.money;
+  for (const s of state.ships) w += SHIPS[s.type].price * 0.7 * (0.5 + 0.5 * s.condition);
+  for (const k of Object.values(state.kontore)) {
+    w += KONTOR_PRICE;
+    for (let l = 2; l <= k.level; l++) w += KONTOR_UPGRADE[l];
+    for (const slot of Object.values(k.stock)) w += slot.cost;
+  }
+  for (const b of state.betriebe) w += (BUILDING_BY_ID.get(b.type)?.price ?? 0) * 0.5;
+  for (const s of state.ships) for (const slot of Object.values(s.cargo)) w += slot.cost;
+  return Math.round(w);
 }

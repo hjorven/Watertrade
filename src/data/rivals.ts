@@ -35,7 +35,7 @@ export const RIVALS: RivalDef[] = [
   {
     id: 'kessler',
     name: 'Gebrüder Kessler',
-    color: 0xb5452a,
+    color: 0xc98a1e,
     description: 'Aggressive Preise, kaufen Märkte leer.',
     home: 'niedermuend',
     money: 1200,

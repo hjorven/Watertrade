@@ -178,14 +178,30 @@ export class ShipView {
   private readonly land: Landscape;
   private readonly type: ShipClass;
   private time = Math.random() * 10;
+  /** liegt gerade am Steg */
+  docked = false;
 
-  constructor(land: Landscape, type: ShipClass, shipId: number) {
+  private readonly pennant: THREE.Mesh;
+
+  /** shipId < 0: Schiff der Konkurrenz, nicht anwählbar */
+  constructor(land: Landscape, type: ShipClass, shipId: number, flagColor = 0xa8322a) {
     this.land = land;
     this.type = type;
     this.shipId = shipId;
     this.model = buildModel(type);
     this.group.add(this.model.root);
-    this.group.userData.shipId = shipId;
+    if (shipId >= 0) this.group.userData.shipId = shipId;
+
+    // Wimpel am Heck in der Farbe des Handelshauses
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.5, 5), mat(0x3a2a1a));
+    pole.position.set(-1.75, 0.85, 0);
+    this.pennant = new THREE.Mesh(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, -0.36, 0), new THREE.Vector3(-0.75, -0.18, 0)]),
+      new THREE.MeshStandardMaterial({ color: flagColor, side: THREE.DoubleSide, roughness: 0.9 }),
+    );
+    this.pennant.geometry.computeVertexNormals();
+    this.pennant.position.set(-1.75, 1.58, 0);
+    this.model.root.add(pole, this.pennant);
 
     const wakeGeo = new THREE.BufferGeometry();
     wakeGeo.setAttribute('position', new THREE.Float32BufferAttribute([2.2, 0, 0, -5, 0, -2.2, -5, 0, 2.2], 3));
@@ -237,9 +253,9 @@ export class ShipView {
   }
 
   /** Ladung anzeigen: Anteil je Ware in Farben */
-  setCargo(load: { color: number; amount: number }[]): void {
+  setCargo(load: { color: number; amount: number }[], capacity = this.type.capacity): void {
     const total = load.reduce((s, l) => s + l.amount, 0);
-    const filled = total === 0 ? 0 : Math.max(1, Math.round((total / this.type.capacity) * CRATE_SLOTS));
+    const filled = total === 0 ? 0 : Math.max(1, Math.min(CRATE_SLOTS, Math.round((total / capacity) * CRATE_SLOTS)));
     const colors: number[] = [];
     for (const l of load) {
       const n = total === 0 ? 0 : Math.round((l.amount / total) * filled);
@@ -259,6 +275,7 @@ export class ShipView {
     const offset = (slot % 2 === 1 ? 1 : -1) * Math.ceil(slot / 2) * 7;
     this.group.position.set(mooring.x + tan.x * offset, 0, mooring.z + tan.z * offset);
     this.group.rotation.set(0, Math.atan2(-tan.z, tan.x), 0);
+    this.docked = true;
     this.wake.visible = false;
     if (this.horse) this.horse.visible = false;
     if (this.towLine) this.towLine.visible = false;
@@ -277,6 +294,7 @@ export class ShipView {
     this.group.position.set(p.x + n.x * lane, 0, p.z + n.z * lane);
     const heading = Math.atan2(-tan.z, tan.x) + (downstream ? 0 : Math.PI);
     this.group.rotation.set(0, heading, 0);
+    this.docked = false;
     this.wake.visible = this.type.propulsion !== 'drift';
     if (this.model.sail) this.model.sail.scale.set(1, 1, 1);
 
@@ -302,6 +320,7 @@ export class ShipView {
     this.model.root.position.y = Math.sin(this.time * 1.7) * 0.04;
     this.model.root.rotation.x = Math.sin(this.time * 1.3) * 0.02;
     this.marker.rotation.y += dt * 0.6;
+    this.pennant.rotation.y = Math.sin(this.time * 3.1) * 0.35;
     if (this.towLine?.visible && this.horse && this.model.mastTop) {
       this.group.updateMatrixWorld();
       const a = new THREE.Vector3();

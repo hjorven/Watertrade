@@ -830,3 +830,340 @@ body {
   width: 2px;
   background: var(--ink);
 }
+
+/* --- M4: Bücher, Reiter, Kontor, Route --- */
+.views {
+  display: flex;
+  gap: 3px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+.views .btn {
+  position: relative;
+}
+
+.badge {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 4px;
+  color: var(--stamp);
+}
+
+.btn.on .badge {
+  color: #f0b0a8;
+}
+
+.event-chip b {
+  font-size: 14px;
+  color: var(--stamp);
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin: 0 -4px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  font: inherit;
+  font-size: 14px;
+  font-variant: small-caps;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+  padding: 4px 10px;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--ink);
+}
+
+.tab.on {
+  color: var(--ink);
+  font-weight: 700;
+  background: var(--paper);
+  border-color: var(--line);
+}
+
+.contract-box {
+  border: 1px dashed var(--stamp);
+  padding: 6px 10px 8px;
+  margin: 8px 0;
+  background: rgb(168 50 42 / 0.04);
+}
+
+.contract-box h3 {
+  margin-top: 0;
+}
+
+.contract-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px dotted var(--line);
+}
+
+.contract-row span {
+  flex: 1;
+  font-size: 14px;
+}
+
+.contract-row small {
+  display: block;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.row-btns {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.yard-row .row-btns .btn {
+  white-space: nowrap;
+}
+
+ul.plain {
+  margin: 6px 0;
+  padding-left: 18px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+ul.plain small {
+  color: var(--ink-soft);
+}
+
+.market.kontor .acts {
+  grid-template-columns: repeat(2, auto);
+}
+
+.market.kontor .acts .btn {
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+.meter.bad div {
+  background: var(--stamp);
+}
+
+.town-info .event {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--stamp);
+}
+
+.captain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 15px;
+}
+
+.captain small {
+  flex-basis: 100%;
+  order: 2;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.chip .auto {
+  font-style: normal;
+  font-size: 10px;
+  margin-left: 5px;
+  padding: 0 3px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+}
+
+.stops {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.stop {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 6px 8px;
+  background: rgb(255 255 255 / 0.25);
+}
+
+.stop.next {
+  border-color: var(--ink);
+  box-shadow: inset 3px 0 0 var(--stamp);
+}
+
+.stop-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.stop-head small {
+  color: var(--stamp);
+  font-size: 12px;
+}
+
+.stop-head .link {
+  margin-left: auto;
+}
+
+.orders {
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+  font-size: 14px;
+}
+
+.orders li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.orders li small {
+  color: var(--ink-soft);
+}
+
+.orders .link {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.orders .muted {
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.order-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.order-form select,
+.order-form input {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: #fbf5e6;
+  border: 1px solid var(--ink-soft);
+  border-radius: 2px;
+  padding: 2px 4px;
+}
+
+.order-form input {
+  width: 56px;
+}
+
+.order-form.add-stop {
+  margin-top: 4px;
+}
+
+.register .flag,
+.flag {
+  display: inline-block;
+  width: 12px;
+  height: 9px;
+  margin-right: 6px;
+  vertical-align: baseline;
+  border: 1px solid rgb(0 0 0 / 0.3);
+}
+
+.register tr.me th,
+.register tr.me td {
+  font-weight: 700;
+  background: rgb(168 50 42 / 0.07);
+}
+
+.register tbody th small {
+  font-weight: 400;
+}
+
+.news {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.news li {
+  padding: 6px 0;
+  border-bottom: 1px dotted var(--line);
+}
+
+.news li small {
+  display: inline-block;
+  min-width: 58px;
+  color: var(--ink-soft);
+  font-variant: small-caps;
+}
+
+.news .news-ereignis {
+  color: var(--stamp);
+}
+
+@media (max-width: 1180px) {
+  .stats .hide-mid {
+    display: none;
+  }
+  .event-chip {
+    display: none !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .topbar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .views {
+    order: 3;
+    padding-left: 0;
+    border-left: none;
+  }
+  .views .btn {
+    font-size: 12px;
+    padding: 2px 6px;
+  }
+  .tab {
+    padding: 3px 7px;
+    font-size: 13px;
+  }
+  .toasts {
+    top: 104px;
+  }
+}
+
+.register tbody th {
+  white-space: normal;
+}
+
+.register thead th:nth-child(2) {
+  text-align: left;
+}
+
+.contract-row .swatch {
+  flex: none;
+}
+
+.btn.on:hover:not(:disabled) {
+  background: #47382a;
+}
