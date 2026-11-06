@@ -56,3 +56,20 @@ export const SHIPS: Record<string, ShipClass> = {
     description: 'Schnell und geräumig bei gutem Wind, bei Flaute langsam. Der Mast passt nicht unter jede Brücke.',
   },
 };
+
+export interface Upgrade {
+  id: string;
+  name: string;
+  text: string;
+  /** Anteil am Schiffspreis */
+  cost: number;
+}
+
+export const UPGRADES: Upgrade[] = [
+  { id: 'laderaum', name: 'Erweiterter Laderaum', text: '+20 % Ladung', cost: 0.35 },
+  { id: 'antrieb', name: 'Stärkerer Antrieb', text: '+12 % Geschwindigkeit (bessere Pferde oder Segel)', cost: 0.3 },
+  { id: 'kiel', name: 'Flacher Kiel', text: '15 % weniger Tiefgang', cost: 0.4 },
+  { id: 'beschlag', name: 'Kupferbeschlag', text: '40 % weniger Verschleiß', cost: 0.25 },
+];
+
+export const UPGRADE_BY_ID = new Map(UPGRADES.map((u) => [u.id, u]));

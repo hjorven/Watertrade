@@ -142,7 +142,7 @@ export const VALLEY: MapDef = {
       population: 1000,
       target: 80,
       produces: {},
-      consumes: { brot: 3, fisch: 2, bier: 2, salz: 2, glas: 0.5, kohle: 2 },
+      consumes: { brot: 3, fisch: 2, bier: 2, salz: 2, glas: 0.5, kohle: 2, arznei: 0.4 },
       industries: [
         { name: 'Tischlerei', inputs: { bretter: 2 }, outputs: { moebel: 1 } },
         { name: 'Weberei', inputs: { wolle: 3 }, outputs: { stoff: 2 } },
@@ -180,6 +180,7 @@ export const VALLEY: MapDef = {
       industries: [
         { name: 'Brauerei', inputs: { getreide: 3 }, outputs: { bier: 2 } },
         { name: 'Bäckerei', inputs: { mehl: 3 }, outputs: { brot: 4 } },
+        { name: 'Apotheke', inputs: { glas: 0.5, salz: 1 }, outputs: { arznei: 1 } },
       ],
       shipyard: ['plaette', 'treidelkahn', 'segelkahn'],
     },

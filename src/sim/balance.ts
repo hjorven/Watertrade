@@ -5,6 +5,7 @@
 import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { buyCost, sellRevenue } from './economy.ts';
+import { repair } from './fleet.ts';
 import { advance, buy, cargoLoad, depart, newGame, planVoyage, sell, shipClass, type GameState } from './game.ts';
 
 export interface BalanceReport {
@@ -42,8 +43,8 @@ function bestTrade(state: GameState, map: MapDef, shipId: number) {
   return best;
 }
 
-export function runBalance(map: MapDef, days: number, start = 'oberau'): BalanceReport {
-  const state = newGame(map, start);
+export function runBalance(map: MapDef, days: number, start = 'oberau', opts: { rivals?: boolean; seed?: number } = {}): BalanceReport {
+  const state = newGame(map, { startTown: start, rivals: opts.rivals ?? true, seed: opts.seed });
   const ship = state.ships[0];
   const moneyByDay: number[] = [];
   let trips = 0;
@@ -52,6 +53,7 @@ export function runBalance(map: MapDef, days: number, start = 'oberau'): Balance
   while (state.hour < days * 24) {
     if (ship.port) {
       for (const good of Object.keys(ship.cargo)) sell(state, ship.id, good, Infinity);
+      if (ship.condition < 0.6) repair(state, map, ship.id);
       const t = bestTrade(state, map, ship.id);
       if (t && t.perHour > 0) {
         buy(state, ship.id, t.good, t.amount);
