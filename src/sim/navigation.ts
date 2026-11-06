@@ -205,7 +205,6 @@ function applyGrounding(state: GameState, map: MapDef, ship: Ship, at: Voyage, v
   const before = ship.condition;
   ship.condition = Math.max(0, ship.condition - loss);
   // Versicherung: hier reportDamage(state, ship, 'grund', { condition: before - ship.condition }) aufrufen
-  void before;
   const { leg } = voyagePosition(at);
   const name = (id: string) => map.towns.find((t) => t.id === id)?.name ?? id;
   const lost = Math.round((before - ship.condition) * 100);
