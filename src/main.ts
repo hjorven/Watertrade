@@ -1,6 +1,6 @@
 import './style.css';
 import * as THREE from 'three';
-import { CHAPTERS, type Chapter } from './data/campaign.ts';
+import { CHAPTERS, chapterForSave, type Chapter } from './data/campaign.ts';
 import { CHALLENGES, DAILY_DAYS } from './data/challenges.ts';
 import { newDailyGame } from './sim/daily.ts';
 import { challengeGame } from './sim/challenge.ts';
@@ -9,7 +9,7 @@ import { OnlineScreens } from './ui/online-screens.ts';
 import { GOOD_BY_ID, GOODS } from './data/goods.ts';
 import { VALLEY } from './data/maps/valley.ts';
 import { canalProgress } from './sim/canal.ts';
-import { mapById, mapFor, randomMap, randomMapResult, stateFitsMap } from './data/maps/index.ts';
+import { mapById, mapFor, mapIdOf, randomMap, randomMapResult, stateFitsMap } from './data/maps/index.ts';
 import { CHECK_DAYS } from './sim/mapcheck.ts';
 import { mapPreviewSvg } from './ui/mappreview.ts';
 import { projectsOf } from './data/projects.ts';
@@ -842,7 +842,8 @@ function loadSlot(slot: string): boolean {
 
 function startSave(save: SaveGame): boolean {
   if (!save?.state || !Array.isArray(save.state.ships)) return false;
-  const chapter = [...CHAPTERS, ...CHALLENGES].find((c) => c.id === save.chapter);
+  // Kapitel, die die Karte gewechselt haben (K5 Kanal), laden alte Stände mit ihren alten Zielen
+  const chapter = chapterForSave(save.chapter, mapIdOf(save.state), VALLEY.id!) ?? CHALLENGES.find((c) => c.id === save.chapter);
   const daysPlayed = save.startHour !== undefined ? (save.state.hour - save.startHour) / 24 : 0;
   const loaded = upgradeState(save.state, mapFor(save.state));
   // nur Kampagnenkapitel wurden umgebaut, Herausforderungen behalten ihre Nummern

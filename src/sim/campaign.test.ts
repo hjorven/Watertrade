@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHAPTERS } from '../data/campaign.ts';
+import { CHAPTERS, chapterForSave } from '../data/campaign.ts';
 import { VALLEY } from '../data/maps/valley.ts';
 import { chapterOneHint } from '../ui/tutorial.ts';
 import { runCanalChapter, runChapterOne, runSteamChapter } from './balance.ts';
@@ -199,6 +199,12 @@ describe('Kapitel 5: Kanal über den Rücken', () => {
     expect(k5.money).toBeLessThan(cost);
   });
 
+  it('alte Spielstände auf der Talkarte behalten die frühere Fassung', () => {
+    expect(chapterForSave('k5', VALLEY.id!, VALLEY.id!)?.title).toBe('Die große Stadt');
+    expect(chapterForSave('k5', ZWEI_TAELER.id!, VALLEY.id!)).toBe(k5);
+    expect(chapterForSave('k4', VALLEY.id!, VALLEY.id!)).toBe(CHAPTERS.find((c) => c.id === 'k4'));
+  });
+
   it('nach Nordhafen kommt man erst durch den Kanal', () => {
     const north = k5.goals.find((g) => g.type === 'deliver')!;
     expect(north.type === 'deliver' && NORTH_TOWN_IDS.includes(north.town)).toBe(true);
@@ -208,16 +214,17 @@ describe('Kapitel 5: Kanal über den Rücken', () => {
     expect(planVoyage(s, ZWEI_TAELER, s.ships[0].id, 'nordhafen')?.ok).toBe(true);
   });
 
-  it('Bot: der Kanal ist im Median nach 300 bis 550 Tagen eingeweiht', () => {
+  it('Bot: der Kanal ist im Median nach 250 bis 450 Tagen eingeweiht', () => {
     const runs = [1, 2, 3, 4].map((seed) => runCanalChapter(ZWEI_TAELER, k5, 900, seed));
     for (const r of runs) {
       expect(r.doneOn).not.toBeNull();
-      // Abschnitte der Reihe nach, mindestens die Arbeitstage
+      // alle Abschnitte fertig, jeder frühestens nach seinen Arbeitstagen
       expect(r.stageDays).toHaveLength(SCHEITELKANAL.stages.length);
+      r.stageDays.forEach((d, i) => expect(d - (r.stageDays[i - 1] ?? 0)).toBeGreaterThanOrEqual(SCHEITELKANAL.stages[i].days));
     }
     const days = runs.map((r) => r.doneOn!);
-    expect(median(days)).toBeGreaterThanOrEqual(300);
-    expect(median(days)).toBeLessThan(550);
+    expect(median(days)).toBeGreaterThanOrEqual(250);
+    expect(median(days)).toBeLessThan(450);
   }, 120_000);
 });
 

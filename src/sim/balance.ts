@@ -569,6 +569,8 @@ export function runCanalChapter(map: MapDef, chapter: Chapter, maxDays: number, 
             needs[g] -= amount;
           }
         }
+        // in einer Kanalstadt gleich abliefern, sonst zur Baustelle fahren
+        if (def.sites.includes(ship.port)) for (const g of Object.keys(ship.cargo)) deliverToCanal(state, map, { ship: ship.id }, g, Infinity);
         if (cargoLoad(ship) > 0 && depart(state, map, ship.id, site)) continue;
         for (const good of Object.keys(ship.cargo)) sell(state, ship.id, good, Infinity);
         // sonst zum nächsten Ort mit einer fehlenden Ware (Markt oder eigenes Kontor), wenn noch keiner dorthin fährt
