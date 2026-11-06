@@ -1,5 +1,6 @@
 import { BUILDING_BY_ID, BUILDINGS, betriebUpkeep, KONTOR_CAPACITY, KONTOR_PRICE, KONTOR_SLOTS, KONTOR_UPGRADE } from '../data/buildings.ts';
-import { TRAITS } from '../data/captains.ts';
+import { CAPTAIN_RANKS, captainRank, traitText } from '../data/captains.ts';
+import { fairWage, LOYALTY_POACH, LOYALTY_WARN } from '../sim/captains.ts';
 import { GOOD_BY_ID, GOODS } from '../data/goods.ts';
 import type { MapDef, TownDef } from '../data/maps/valley.ts';
 import { RIVAL_BY_ID } from '../data/rivals.ts';
@@ -465,7 +466,7 @@ export class Hud {
         }
         const v = plan.voyage;
         const dir = v.legs.every((l) => l.downstream) ? 'talwärts' : v.legs.every((l) => !l.downstream) ? 'bergwärts' : 'tal- und bergwärts';
-        const toll = v.toll ? `, Zoll ${v.toll}` : '';
+        const toll = v.toll ? `, Zoll ${v.toll}` : v.evaded ? `, ${v.evaded} Zoll umgangen, Kontrolle möglich` : '';
         const coal = bunkerPlan(state, ship, v.hours, v.toll ?? 0);
         if (coal.problem) return `<button class="btn dest" disabled title="${coal.problem}"><b>${t.name}</b><small>${coal.buy ? `${coal.buy} t Kohle fehlen` : 'Bunker zu klein'}</small></button>`;
         const coalText = coal.need ? `, Kohle ${String(coal.need).replace('.', ',')} t${coal.buy ? `, bunkert ${coal.buy} t für ${coal.cost} Taler` : ''}` : '';
@@ -646,18 +647,41 @@ export class Hud {
       ${ups}${newShips}`;
   }
 
+  /** Kapitän an Bord: Erfahrung, Treue, Lohn mit Knöpfen zum Anpassen */
+  private captainBox(state: GameState, ship: Ship, dismiss: boolean): string {
+    const c = ship.captain!;
+    const fair = fairWage(c);
+    const rank = CAPTAIN_RANKS[captainRank(c.km)];
+    const next = CAPTAIN_RANKS[captainRank(c.km) + 1];
+    const loyalty = Math.round(c.loyalty ?? 70);
+    const mood = loyalty >= 60 ? 'zufrieden' : loyalty >= LOYALTY_WARN ? 'unruhig' : loyalty >= LOYALTY_POACH ? 'unzufrieden' : 'sieht sich um';
+    const target = Math.max(fair, c.offer?.wage ?? 0);
+    const who = c.offer ? (c.offer.from ? (RIVAL_BY_ID.get(c.offer.from)?.name ?? c.offer.from) : 'Ein anderer Reeder') : '';
+    const promise = c.promised && c.promised.until >= Math.floor(state.hour / 24) + 1 ? `, zugesagt bis Tag ${c.promised.until}` : '';
+    const offer = c.offer
+      ? `<p class="note">${who} bietet ${c.name} ${c.offer.wage} Taler am Tag. Zahlst du nicht mindestens so viel, geht ${c.name} ${ship.port ? 'morgen hier' : 'im nächsten Hafen'} von Bord.</p>`
+      : '';
+    return `<div class="captain"><b>${c.name}</b> führt die ${ship.name}
+        <small>${traitText(c)}</small>
+        <small>${rank.name}, ${fmt(c.km ?? 0)} km gefahren${next ? `, ${next.name} ab ${fmt(next.km)} km` : ''} · Treue ${loyalty} von 100, ${mood}</small>
+        <small>Lohn ${c.wage} Taler am Tag${promise}, wert ist ${c.name.split(' ')[0]} ${fair}</small>
+        <span class="wage-btns"><button class="btn" data-act="cmd" data-cmd="wage" data-wage="${c.wage - 1}" ${c.wage > 1 ? '' : 'disabled'} aria-label="Lohn senken">Lohn −1</button>
+        <button class="btn" data-act="cmd" data-cmd="wage" data-wage="${c.wage + 1}" aria-label="Lohn erhöhen">Lohn +1</button>
+        ${c.wage < target ? `<button class="btn primary" data-act="cmd" data-cmd="wage" data-wage="${target}">Auf ${target} erhöhen</button>` : ''}
+        ${dismiss ? '<button class="btn" data-act="cmd" data-cmd="dismiss">Entlassen</button>' : ''}</span></div>${offer}`;
+  }
+
   private renderTavern(state: GameState, ship: Ship): string {
     const town = this.map.towns.find((t) => t.id === ship.port)!;
     const c = ship.captain;
     const mine = c
-      ? `<div class="captain"><b>${c.name}</b> führt die ${ship.name}<small>${TRAITS[c.trait].name}: ${TRAITS[c.trait].text} · Lohn ${c.wage} am Tag</small>
-         <button class="btn" data-act="cmd" data-cmd="dismiss">Entlassen</button></div>`
+      ? this.captainBox(state, ship, true)
       : `<p>${ship.type === 'floss' ? 'Ein Floß steuert sich selbst.' : `Die ${ship.name} hat keinen Kapitän. Ohne Kapitän fährt sie nur auf deinen Befehl, mit Kapitän kann sie Handelsrouten allein fahren.`}</p>`;
     const list = state.tavern[town.id] ?? [];
     const guests = list.length
       ? list
           .map(
-            (x) => `<div class="yard-row"><div><b>${x.name}</b> <small>${TRAITS[x.trait].name}: ${TRAITS[x.trait].text}</small>
+            (x) => `<div class="yard-row"><div><b>${x.name}</b> <small>${CAPTAIN_RANKS[captainRank(x.km)].name}, ${fmt(x.km ?? 0)} km · ${traitText(x)}</small>
               <small class="desc">Lohn ${x.wage} Taler am Tag, Handgeld ${x.hire}</small></div>
               <button class="btn" data-act="cmd" data-cmd="hire" data-id="${x.id}" ${state.money >= x.hire && ship.type !== 'floss' ? '' : 'disabled'}>Anheuern</button></div>`,
           )
@@ -767,7 +791,7 @@ export class Hud {
     const route = v.legs
       .map((l, i) => `<li class="${i < index ? 'done' : i === index ? 'now' : ''}">${this.townName(l.from)} → ${this.townName(l.to)} <small>${fmtHours(l.hours)}</small></li>`)
       .join('');
-    const captain = ship.captain ? `<p class="note">Kapitän: ${ship.captain.name} (${TRAITS[ship.captain.trait].name})${ship.route?.active ? ', fährt Handelsroute' : ''}</p>` : '';
+    const captain = ship.captain ? `${ship.route?.active ? '<p class="note">Der Kapitän fährt die Handelsroute.</p>' : ''}${this.captainBox(state, ship, false)}` : '';
     void state;
     return `
       <div class="ledger-head">
@@ -776,7 +800,7 @@ export class Hud {
         <p>${how} ${speed.toFixed(1).replace('.', ',')} km/h über Grund, Strömung ${String(seg.current).replace('.', ',')} km/h.</p>
       </div>
       <div class="progress"><div style="width:${pct}%"></div></div>
-      <p class="note">${fmtHours(v.elapsed)} von ${fmtHours(v.hours)}${v.toll ? ` · Zoll bezahlt: ${v.toll} Taler` : ''}</p>
+      <p class="note">${fmtHours(v.elapsed)} von ${fmtHours(v.hours)}${v.toll ? ` · Zoll bezahlt: ${v.toll} Taler` : ''}${v.evaded ? ` · ${v.evaded} Taler Zoll umgangen, Kontrolle möglich` : ''}</p>
       <ol class="route">${route}</ol>
       <p class="note">Ladung: ${cargo || 'leer'} · Zustand ${Math.round(ship.condition * 100)} %${cls.coal ? ` · Bunker ${Math.floor(ship.bunker ?? 0)} t Kohle` : ''}</p>
       ${captain}`;

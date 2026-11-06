@@ -1,4 +1,5 @@
 import type { MapDef, SegmentDef } from '../data/maps/valley.ts';
+import { hasTrait } from '../data/captains.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import { available, buyCost } from './economy.ts';
 import { explainBlock, findRoute, segmentDepth, travelTime, type BlockReason, type ShipType } from './river.ts';
@@ -50,9 +51,13 @@ export function planRoute(
 export function planVoyage(state: GameState, map: MapDef, shipId: number, to: string): VoyagePlan | null {
   const ship = getShip(state, shipId);
   if (!ship.port || ship.port === to) return null;
-  const boost = ship.captain?.trait === 'treidelmeister' && ship.type !== 'segelkahn' ? 1.2 : 1;
+  const boost = hasTrait(ship.captain, 'treidelmeister') && ship.type !== 'segelkahn' ? 1.2 : 1;
   const plan = planRoute(state, map, ship.port, to, effectiveType(state, ship), boost);
-  if (plan.ok && ship.captain?.trait === 'schmuggler') plan.voyage.toll = 0;
+  // Der Schmuggler fährt am Zoll vorbei; was er spart, merkt sich die Fahrt für eine mögliche Kontrolle
+  if (plan.ok && hasTrait(ship.captain, 'schmuggler') && (plan.voyage.toll ?? 0) > 0) {
+    plan.voyage.evaded = plan.voyage.toll;
+    plan.voyage.toll = 0;
+  }
   return plan;
 }
 
@@ -172,7 +177,7 @@ export const ICE_WEAR = 1.5;
 
 export function wearRate(ship: Ship, extra = 1): number {
   let w = WEAR_PER_HOUR * extra;
-  if (ship.captain?.trait === 'vorsichtig') w *= 0.5;
+  if (hasTrait(ship.captain, 'vorsichtig')) w *= 0.5;
   if (hasUpgrade(ship, 'beschlag')) w *= 0.6;
   if (ship.type === 'floss') w = 0;
   return w;

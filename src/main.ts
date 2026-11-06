@@ -19,6 +19,7 @@ import { buildBridge, buildTown, placeTown, type TownView } from './render/towns
 import { dateText, dayInSeason, dayOfYear, season, SEASON_NAME, SEASONS, type Season } from './sim/calendar.ts';
 import { acceptContract, deliverContract } from './sim/contracts.ts';
 import { dismissCaptain, hireCaptain, repair, upgrade } from './sim/fleet.ts';
+import { setCaptainWage } from './sim/captains.ts';
 import {
   advance,
   buy,
@@ -332,6 +333,9 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
       break;
     case 'dismiss':
       r = dismissCaptain(state, selected);
+      break;
+    case 'wage':
+      r = setCaptainWage(state, selected, n('wage'));
       break;
     case 'project':
       r = startProject(state, String(d.id));

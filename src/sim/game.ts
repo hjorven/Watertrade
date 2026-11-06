@@ -1,5 +1,6 @@
 import type { MapDef } from '../data/maps/valley.ts';
 import { isIce, waterLevel } from './calendar.ts';
+import { captainArrived, tickCaptains } from './captains.ts';
 import { tickContracts } from './contracts.ts';
 import { eventWaterOffset, tickEvents } from './events.ts';
 import { addShip, refreshTavern, runRoute } from './fleet.ts';
@@ -182,6 +183,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
       }
     }
     tickHouse(state);
+    pushNews(events, tickCaptains(state, map), true);
     pushNews(events, tickWorks(state, map), true);
     if (state.epochAuto) {
       const e = epochOfYear(year(d));
@@ -226,6 +228,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
         ship.port = v.to;
         ship.voyage = null;
         tripArrive(state, ship);
+        pushNews(events, captainArrived(state, map, ship, v), true);
         events.push({ type: 'arrived', ship: ship.id, town: v.to, auto: !!ship.route?.active });
       }
     }
