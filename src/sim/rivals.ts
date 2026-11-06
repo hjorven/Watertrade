@@ -128,7 +128,7 @@ function bestDeal(state: GameState, map: MapDef, r: RivalState, ship: RivalShip)
       if (!m2) continue;
       const revenue = sellRevenue(good.base, m2, amount, r.kontore.includes(dest) ? 0.95 : 0.9) * freshAfter(goodId, hours, ship.type);
       // Gebühren für fremde Bauwerke schmälern den Gewinn
-      // ... ebenso Diesel und Kohle für die Fahrt (sonst fahren Motorschiffe in Epoche 3 mit Verlust)
+      // ... ebenso Diesel für die Fahrt (sonst fahren Motorschiffe in Epoche 3 mit Verlust)
       const profit = revenue - cost - fee - fuelPerHour(cls) * hours;
       if (profit < amount * 2) continue;
       const score = (profit * (def.favorite[goodId] ?? 1)) / (hours + 8);
@@ -138,10 +138,14 @@ function bestDeal(state: GameState, map: MapDef, r: RivalState, ship: RivalShip)
   return best;
 }
 
-/** Geschätzte Brennstoffkosten je Fahrstunde (Kohle oder Diesel), etwas über dem Grundpreis */
+/**
+ * Geschätzte Dieselkosten je Fahrstunde, etwas über dem Grundpreis.
+ * Kohle bleibt bewusst außen vor: Dampfer rechnen sich auch so, und die Kohlenachfrage
+ * der Häuser ist Teil der Kapitel-4-Balance (Dampfer versorgen).
+ */
 function fuelPerHour(cls: (typeof SHIPS)[string]): number {
   const fuel = fuelOf(cls);
-  if (!fuel) return 0;
+  if (!fuel || fuel.good !== 'diesel') return 0;
   return fuel.rate * (GOODS.find((g) => g.id === fuel.good)?.base ?? 12) * 1.2;
 }
 
@@ -203,7 +207,7 @@ function decide(state: GameState, map: MapDef, r: RivalState, ship: RivalShip): 
   if (rand(state) < 0.5) {
     const others = map.towns.filter((t) => t.id !== here);
     const target = rand(state) < 0.4 ? (r.home ?? homeOf(state, def.home, state.rivals.indexOf(r))) : others[Math.floor(rand(state) * others.length)].id;
-    // Leerfahrten nur, wenn sie nichts kosten: Dampfer und Motorschiffe warten lieber auf Ladung
+    // Leerfahrten nur ohne Dieselkosten: Motorschiffe warten lieber auf Ladung
     if (target !== here && !fuelPerHour(SHIPS[ship.type]) && sailTo(state, map, ship, target, r)) return;
   }
   ship.idleUntil = state.hour + 18 + Math.floor(rand(state) * 12);
