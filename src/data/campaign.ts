@@ -152,28 +152,28 @@ export const CHAPTERS: Chapter[] = [
   {
     id: 'k5',
     number: 5,
-    title: 'Die große Stadt',
+    title: 'Über den Rücken',
     intro: [
-      'Niedermünd wächst über seine Mauern hinaus. Fabriken entstehen, Arbeiter ziehen zu, und alle wollen Brot, Bier, Möbel und Stoff.',
-      'Wer diese Stadt versorgt, versorgt das halbe Land. Ein Schleppverband trägt so viel wie fünf Kähne, braucht aber tiefes Wasser bis zur Mündung.',
+      'Hinter dem Waldrücken liegt ein zweites Tal: Die Schwarzach fließt nach Norden, an Kohlengruben, Tuchwebern und dem großen Nordhafen vorbei. Kein Schiff kommt hinüber.',
+      'Ein Kanal von Altenfurt nach Tuchingen würde beide Flüsse verbinden. Erst Landmesser, dann Erdarbeiter mit Brot, Werkzeug und Holz, dann Schleusen aus Brettern und Kalk. Bei Frost ruht der Bau. Die Kaufleute von Altenfurt haben dir das Geld für den Anfang anvertraut, das Baulager steht bei ihnen am Hafen.',
     ],
-    outro: 'Niedermünd ist eine Großstadt, und ihre Speicher tragen deine Farben.',
-    startTown: 'niedermuend',
-    money: 10000,
+    outro: 'Die ersten Kähne steigen die Schleusentreppe hinauf. Korn aus dem Tal fährt nach Norden, Kohle und Tuch kommen zurück. Der Kanal trägt deinen Namen.',
+    startTown: 'altenfurt',
+    money: 40000,
     startShip: 'raddampfer',
     extraShips: ['treidelkahn'],
     allowedShips: [],
     rivals: true,
     epoch: 2,
     startYear: 8,
-    kontore: ['niedermuend', 'muehlheim'],
+    kontore: ['altenfurt'],
     works: ['bruecke-kessel', 'schleuse-erzbach'],
+    map: 'zwei-taeler',
     goals: [
-      { type: 'townLevel', town: 'niedermuend', level: 3, text: 'Lass Niedermünd zur Großstadt wachsen' },
-      { type: 'ships', count: 1, shipType: 'schleppverband', text: 'Stell einen Schleppverband in Dienst' },
-      { type: 'project', id: 'hafen-niedermuend', text: 'Bau die Tiefwasserrinne vor Niedermünd' },
-      { type: 'betriebe', count: 6, text: 'Lass sechs eigene Betriebe arbeiten' },
-      { type: 'routes', count: 3, text: 'Lass drei Schiffe Handelsrouten fahren' },
+      { type: 'canalStage', stage: 1, text: 'Lass die Trasse über den Waldrücken vermessen' },
+      { type: 'canalStage', stage: 2, text: 'Grab den Durchstich am Scheitel' },
+      { type: 'project', id: 'scheitelkanal', text: 'Weihe den Scheitelkanal ein' },
+      { type: 'deliver', town: 'nordhafen', good: 'getreide', amount: 100, text: 'Bring 100 t Getreide nach Nordhafen' },
     ],
   },
   {
@@ -204,3 +204,44 @@ export const CHAPTERS: Chapter[] = [
     ],
   },
 ];
+
+/**
+ * Frühere Fassungen von Kapiteln, die jetzt auf einer anderen Karte spielen.
+ * Ältere Spielstände laufen auf ihrer Karte weiter und behalten ihre damaligen Ziele.
+ */
+export const LEGACY_CHAPTERS: Chapter[] = [
+  {
+    id: 'k5',
+    number: 5,
+    title: 'Die große Stadt',
+    intro: [
+      'Niedermünd wächst über seine Mauern hinaus. Fabriken entstehen, Arbeiter ziehen zu, und alle wollen Brot, Bier, Möbel und Stoff.',
+      'Wer diese Stadt versorgt, versorgt das halbe Land. Ein Schleppverband trägt so viel wie fünf Kähne, braucht aber tiefes Wasser bis zur Mündung.',
+    ],
+    outro: 'Niedermünd ist eine Großstadt, und ihre Speicher tragen deine Farben.',
+    startTown: 'niedermuend',
+    money: 10000,
+    startShip: 'raddampfer',
+    extraShips: ['treidelkahn'],
+    allowedShips: [],
+    rivals: true,
+    epoch: 2,
+    startYear: 8,
+    kontore: ['niedermuend', 'muehlheim'],
+    works: ['bruecke-kessel', 'schleuse-erzbach'],
+    goals: [
+      { type: 'townLevel', town: 'niedermuend', level: 3, text: 'Lass Niedermünd zur Großstadt wachsen' },
+      { type: 'ships', count: 1, shipType: 'schleppverband', text: 'Stell einen Schleppverband in Dienst' },
+      { type: 'project', id: 'hafen-niedermuend', text: 'Bau die Tiefwasserrinne vor Niedermünd' },
+      { type: 'betriebe', count: 6, text: 'Lass sechs eigene Betriebe arbeiten' },
+      { type: 'routes', count: 3, text: 'Lass drei Schiffe Handelsrouten fahren' },
+    ],
+  },
+];
+
+/** Kapitel zu einem Spielstand: die aktuelle Fassung, oder die frühere, wenn der Stand auf einer anderen Karte liegt */
+export function chapterForSave(id: string | undefined, mapId: string, valleyId: string): Chapter | undefined {
+  const current = CHAPTERS.find((c) => c.id === id);
+  if (!current || (current.map ?? valleyId) === mapId) return current;
+  return LEGACY_CHAPTERS.find((c) => c.id === id && (c.map ?? valleyId) === mapId) ?? current;
+}
