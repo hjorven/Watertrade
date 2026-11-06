@@ -913,7 +913,7 @@ export class Hud {
       })
       .join('');
     return `<div class="ledger-head"><div class="stamp-small">Flusskarte</div><h2>Das Tal</h2><p>Rote Punkte sind deine Schiffe, Quadrate deine Kontore. Zahlen am Fluss: Wassertiefe.</p></div>
-      <div class="map-scroll"><svg class="paper-map" viewBox="${d.viewBox}" role="img" aria-label="Karte des Flusstals">${rivers}${notes}${towns}${rivals}${ships}</svg></div>
+      <p class="note swipe-hint">Karte zum Verschieben seitlich wischen.</p><div class="map-scroll"><svg class="paper-map" viewBox="${d.viewBox}" role="img" aria-label="Karte des Flusstals">${rivers}${notes}${towns}${rivals}${ships}</svg></div>
       <details class="more"><summary>Alle Abschnitte mit Tiefe und Brücken</summary><ul class="plain map-legend">${legend.join('')}</ul></details>`;
   }
 

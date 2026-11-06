@@ -1647,3 +1647,13 @@ body.no-game .toasts {
     max-height: none;
   }
 }
+
+.swipe-hint {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .swipe-hint {
+    display: block;
+  }
+}
