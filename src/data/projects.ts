@@ -4,12 +4,16 @@ export interface ProjectEffect {
   current?: number; // Änderung der Strömung in km/h
   bridgeHeight?: number; // neue Durchfahrtshöhe
   iceFree?: boolean;
+  /** Pegelstation: kündigt Hochwasser und Dürre im Flussboten an */
+  gauge?: boolean;
+  /** Leuchtfeuer: Abschnitt ist nachts befeuert (Wirkung in der Nachtfahrt) */
+  light?: boolean;
 }
 
 export interface ProjectDef {
   id: string;
   name: string;
-  kind: 'schleuse' | 'bruecke' | 'vertiefung' | 'kanal';
+  kind: 'schleuse' | 'bruecke' | 'vertiefung' | 'kanal' | 'pegel' | 'leuchtfeuer';
   seg: string;
   cost: number;
   days: number;
@@ -84,6 +88,61 @@ export const PROJECTS: ProjectDef[] = [
     epoch: 3,
     effect: { depth: 1, current: -0.4 },
     text: 'Leitwerke und Buhnen halten den Strom zwischen Mühlheim und Altenfurt tief.',
+  },
+  {
+    id: 'pegel-oberau',
+    name: 'Pegelhaus am Oberlauf',
+    kind: 'pegel',
+    seg: 'oberau-kessel',
+    cost: 1800,
+    days: 8,
+    epoch: 1,
+    effect: { gauge: true },
+    text: 'Ein Pegelwärter liest täglich die Latte unter Oberau ab und schickt Boten talwärts. Der Flussbote kündigt Hochwasser und Dürre 3 bis 5 Tage vorher an.',
+  },
+  {
+    id: 'pegel-erzbach',
+    name: 'Pegel am Erzbach',
+    kind: 'pegel',
+    seg: 'grube-glas',
+    cost: 1500,
+    days: 6,
+    epoch: 1,
+    effect: { gauge: true },
+    text: 'Eine zweite Messstelle in den Bergen. Schon allein meldet sie Hochwasser und Dürre vorher; zusammen mit dem Pegelhaus am Oberlauf nennt der Flussbote den genauen Tag und den erwarteten Pegel.',
+  },
+  {
+    id: 'leuchtfeuer-muehl',
+    name: 'Leuchtfeuer bei Mühlheim',
+    kind: 'leuchtfeuer',
+    seg: 'muehl-alten',
+    cost: 2400,
+    days: 10,
+    epoch: 1,
+    effect: { light: true },
+    text: 'Ein Feuerturm am Ufer zwischen Mühlheim und Altenfurt. Nachts finden Schiffer hier sicher ihren Weg.',
+  },
+  {
+    id: 'leuchtfeuer-weiden',
+    name: 'Leuchtfeuer am Weidenhofer Bogen',
+    kind: 'leuchtfeuer',
+    seg: 'alten-weiden',
+    cost: 2800,
+    days: 12,
+    epoch: 1,
+    effect: { light: true },
+    text: 'Zwischen Altenfurt und Weidenhof zeigt ein Feuer die Fahrrinne im weiten Bogen. Nachtfahrt wird hier sicher.',
+  },
+  {
+    id: 'leuchtfeuer-muendung',
+    name: 'Leuchtturm an der Mündung',
+    kind: 'leuchtfeuer',
+    seg: 'weiden-nieder',
+    cost: 3200,
+    days: 14,
+    epoch: 1,
+    effect: { light: true },
+    text: 'Ein hoher Leuchtturm vor Niedermünd führt die Schiffe nachts durch die Sandbänke.',
   },
 ];
 

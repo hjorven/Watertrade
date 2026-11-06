@@ -7,7 +7,7 @@ import { EPOCHS, SHIPS, UPGRADES } from '../data/ships.ts';
 import { dayInSeason, season, SEASON_NAME, year } from '../sim/calendar.ts';
 import { MAX_ACCEPTED, PENALTY } from '../sim/contracts.ts';
 import { buyPrice, sellPrice } from '../sim/economy.ts';
-import { describeEvent, EVENT_TITLE } from '../sim/events.ts';
+import { describeEvent, describeForecast, EVENT_TITLE, visibleForecasts } from '../sim/events.ts';
 import { hasYard, repairCost, timberPlan, upgradeCost } from '../sim/fleet.ts';
 import {
   bunkerPlan,
@@ -791,10 +791,12 @@ export class Hud {
   }
 
   private renderNews(state: GameState): string {
-    const events = state.events.length
+    // Vorhersagen der Pegelstationen stehen mit in der Lage am Fluss
+    const forecasts = visibleForecasts(state).map((e) => `<li><b>Pegelmeldung</b>: ${describeForecast(state, e)}</li>`);
+    const events = state.events.length || forecasts.length
       ? `<div class="contract-box"><h3>Lage am Fluss</h3><ul class="plain">${state.events
           .map((e) => `<li><b>${EVENT_TITLE[e.kind]}</b>: ${describeEvent(this.map, e)}<small> bis Tag ${e.until}</small></li>`)
-          .join('')}</ul></div>`
+          .join('')}${forecasts.join('')}</ul></div>`
       : '';
     const items = state.news
       .slice(0, 40)
