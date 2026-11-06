@@ -5,6 +5,7 @@ import { eventWaterOffset, tickEvents } from './events.ts';
 import { addShip, refreshTavern, runRoute } from './fleet.ts';
 import { tickHouse } from './house.ts';
 import { initialRivals, moveRivals, tickRivals } from './rivals.ts';
+import { weakenHouse } from './rivalry.ts';
 import { EPOCHS, epochOfYear, MIN_FRESH, PERISH, SHIPS } from '../data/ships.ts';
 import { dueEpoch, TOW_FEE_EPOCH } from './epochs.ts';
 import { YEAR_DAYS, year } from './calendar.ts';
@@ -38,6 +39,8 @@ export interface NewGameOptions {
   works?: string[];
   /** Spielbeginn im Jahr (für spätere Kapitel) */
   startYear?: number;
+  /** KI-Haus, das geschwächt startet (Kapitel mit Übernahme-Ziel) */
+  weakHouse?: string;
 }
 
 export const START_MONEY = 500;
@@ -98,6 +101,7 @@ export function newGame(map: MapDef, startTownOrOptions: string | NewGameOptions
   state.priceBook = {};
   state.priceHistory = {};
   observe(state, opts.startTown);
+  if (opts.weakHouse) weakenHouse(state, opts.weakHouse);
   return state;
 }
 
@@ -138,7 +142,8 @@ export function upgradeState(state: GameState, map: MapDef): GameState {
     ship.bunker ??= SHIPS[ship.type]?.bunker ?? 0;
   }
   if (!Object.keys(s.tavern).length) refreshTavern(s, map);
-  if (s.rivalsActive && !s.rivals.length) s.rivals = initialRivals(s);
+  // nicht neu anlegen, wenn alle Häuser pleite oder übernommen sind
+  if (s.rivalsActive && !s.rivals.length && !s.housesGone?.length) s.rivals = initialRivals(s);
   return s;
 }
 

@@ -4,6 +4,7 @@ import type { MapDef } from '../data/maps/valley.ts';
 import { SHIPS } from '../data/ships.ts';
 import { price } from './economy.ts';
 import { captainWages } from './fleet.ts';
+import { sharesWorth } from './rivalry.ts';
 import { addToSlot, cargoLoad, day, fail, type GameState, type TradeResult } from './state.ts';
 
 export { KONTOR_UPKEEP, kontorUpkeep } from '../data/buildings.ts';
@@ -170,6 +171,9 @@ export function playerWorth(state: GameState): number {
     for (const [g, slot] of Object.entries(k.stock)) w += stockValue(state, town, g, slot);
   }
   for (const b of state.betriebe) w += (BUILDING_BY_ID.get(b.type)?.price ?? 0) * 0.5;
+  // Anteile an anderen Häusern und hinterlegte Gebote
+  w += sharesWorth(state);
+  for (const lot of state.auction?.lots ?? []) if (lot.bidder === 'player') w += lot.bid;
   // unterwegs zählt die Ladung zum Markt am Ziel
   for (const s of state.ships) for (const [g, slot] of Object.entries(s.cargo)) w += stockValue(state, s.port ?? s.voyage?.to ?? null, g, slot);
   return Math.round(w);

@@ -35,6 +35,7 @@ import { PROJECTS } from '../data/projects.ts';
 import { daysLeft, projectState } from '../sim/works.ts';
 import { betriebeIn, buildingAllowed, kontorUpkeepIn, playerWorth } from '../sim/house.ts';
 import { rivalWorth } from '../sim/rivals.ts';
+import { renderRivalry } from './rivalry.ts';
 import { BLOCK_TEXT, segmentDepth } from '../sim/river.ts';
 import { goodPicker, priceBookPanel, shipBook } from './market-info.ts';
 import { GROWTH_THRESHOLD, LEVELS, levelOf, netFlow, nextLevelNeeds } from '../sim/towns.ts';
@@ -828,7 +829,8 @@ export class Hud {
         <li>Gewinn bisher: <b>${fmt(state.totalProfit)}</b> Taler, ${state.stats.trips} Fahrten, ${state.stats.contracts} Aufträge erfüllt</li>
         <li>Gestern: Löhne ${fmt(l.wages)}, Unterhalt ${fmt(l.upkeep)}${l.fuel ? `, Brennstoff ${fmt(l.fuel)}` : ''}, eigene Erzeugung im Wert von ${fmt(l.production)} Taler</li>
         ${kontore || '<li>Noch keine Kontore</li>'}
-      </ul>`;
+      </ul>
+      ${renderRivalry(state, this.map)}`;
   }
 
   private renderNews(state: GameState): string {

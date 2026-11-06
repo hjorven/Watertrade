@@ -15,6 +15,10 @@ export interface RivalDef {
   preferredShip: string;
   /** Baut Kontore in Städten, die es oft anläuft */
   builds: boolean;
+  /** Waren, die das Haus als sein Revier ansieht: Wer sie in Mengen verkauft, verärgert es */
+  turf: string[];
+  /** Vertragstreue 0..1: Wie zuverlässig das Haus Gebietsabkommen hält, wenn es knapp bei Kasse ist */
+  honor: number;
 }
 
 export const RIVALS: RivalDef[] = [
@@ -31,6 +35,8 @@ export const RIVALS: RivalDef[] = [
     expandAt: 2500,
     preferredShip: 'treidelkahn',
     builds: false,
+    turf: ['holz', 'bretter', 'moebel'],
+    honor: 0.9,
   },
   {
     id: 'kessler',
@@ -45,6 +51,8 @@ export const RIVALS: RivalDef[] = [
     expandAt: 1800,
     preferredShip: 'treidelkahn',
     builds: false,
+    turf: ['getreide', 'mehl', 'kohle'],
+    honor: 0.4,
   },
   {
     id: 'ahlers',
@@ -59,6 +67,8 @@ export const RIVALS: RivalDef[] = [
     expandAt: 4000,
     preferredShip: 'plaette',
     builds: true,
+    turf: ['brot', 'fisch', 'salz'],
+    honor: 0.95,
   },
   {
     id: 'nordstrom',
@@ -73,6 +83,8 @@ export const RIVALS: RivalDef[] = [
     expandAt: 3000,
     preferredShip: 'segelkahn',
     builds: false,
+    turf: ['werkzeug', 'glas'],
+    honor: 0.75,
   },
 ];
 
