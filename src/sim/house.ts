@@ -5,6 +5,7 @@ import { SHIPS } from '../data/ships.ts';
 import { price } from './economy.ts';
 import { captainWages } from './fleet.ts';
 import { addToSlot, cargoLoad, day, fail, type GameState, type TradeResult } from './state.ts';
+import { extraSlots, standingWorth } from './standing.ts';
 
 export { KONTOR_UPKEEP, kontorUpkeep } from '../data/buildings.ts';
 
@@ -45,6 +46,12 @@ export function upgradeKontor(state: GameState, town: string): TradeResult {
   return { ok: true, message: `Kontor auf Stufe ${k.level} ausgebaut: ${KONTOR_CAPACITY[k.level]} t Lager.`, amount: 0, taler: cost };
 }
 
+/** Bauplätze für Betriebe am Kontor: je nach Ausbaustufe, dazu einer für hohes Ansehen */
+export function betriebSlots(state: GameState, town: string): number {
+  const k = state.kontore[town];
+  return k ? KONTOR_SLOTS[k.level] + extraSlots(state, town) : 0;
+}
+
 export function betriebeIn(state: GameState, town: string) {
   return state.betriebe.filter((b) => b.town === town);
 }
@@ -63,7 +70,7 @@ export function buildBetrieb(state: GameState, map: MapDef, town: string, type: 
   if (!b) return fail('Unbekannter Betrieb.');
   if (!k) return fail('Betriebe brauchen ein Kontor in der Stadt.');
   if (!buildingAllowed(map, town, type)) return fail(`Für eine ${b.name} fehlt hier das Vorkommen.`);
-  if (betriebeIn(state, town).length >= KONTOR_SLOTS[k.level]) return fail('Kein Bauplatz mehr. Das Kontor ausbauen.');
+  if (betriebeIn(state, town).length >= betriebSlots(state, town)) return fail('Kein Bauplatz mehr. Das Kontor ausbauen.');
   if (state.money < b.price) return fail(`${b.name} kostet ${b.price} Taler.`);
   state.money -= b.price;
   state.betriebe.push({ id: state.nextId++, type, town, active: true, lastShare: 0 });
@@ -170,6 +177,7 @@ export function playerWorth(state: GameState): number {
     for (const [g, slot] of Object.entries(k.stock)) w += stockValue(state, town, g, slot);
   }
   for (const b of state.betriebe) w += (BUILDING_BY_ID.get(b.type)?.price ?? 0) * 0.5;
+  w += standingWorth(state);
   // unterwegs zählt die Ladung zum Markt am Ziel
   for (const s of state.ships) for (const [g, slot] of Object.entries(s.cargo)) w += stockValue(state, s.port ?? s.voyage?.to ?? null, g, slot);
   return Math.round(w);

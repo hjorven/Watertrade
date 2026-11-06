@@ -3,6 +3,7 @@ import { GOOD_BY_ID } from '../data/goods.ts';
 import { available, buyCost } from './economy.ts';
 import { explainBlock, findRoute, segmentDepth, travelTime, type BlockReason, type ShipType } from './river.ts';
 import { effectiveSegments } from './works.ts';
+import { playerToll } from './standing.ts';
 import { conditions, effectiveDraft, effectiveType, getShip, hasUpgrade, shipClass, type GameState, type Leg, type Ship, type Voyage } from './state.ts';
 
 export type VoyagePlan = { ok: true; voyage: Voyage } | { ok: false; reasons: { seg: SegmentDef; reason: BlockReason }[] };
@@ -51,6 +52,8 @@ export function planVoyage(state: GameState, map: MapDef, shipId: number, to: st
   if (!ship.port || ship.port === to) return null;
   const boost = ship.captain?.trait === 'treidelmeister' && ship.type !== 'segelkahn' ? 1.2 : 1;
   const plan = planRoute(state, map, ship.port, to, effectiveType(state, ship), boost);
+  // Ratssitz: halber Zoll auf den Abschnitten an der eigenen Ratsstadt
+  if (plan.ok && plan.voyage.toll) plan.voyage.toll = playerToll(state, map, plan.voyage.legs, (seg) => tollOn(state, seg));
   if (plan.ok && ship.captain?.trait === 'schmuggler') plan.voyage.toll = 0;
   return plan;
 }

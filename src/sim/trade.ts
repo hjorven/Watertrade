@@ -3,6 +3,7 @@ import { GOOD_BY_ID } from '../data/goods.ts';
 import { available, price, SELL_FACTOR, type MarketEntry } from './economy.ts';
 import { FRESH_GOODS } from '../data/ships.ts';
 import { addToSlot, capacityOf, cargoLoad, fail, getShip, shipClass, type CargoSlot, type GameState, type Ship, type TradeResult } from './state.ts';
+import { buyDiscount, noteSale } from './standing.ts';
 
 /** Händlerblut am Ruder: etwas bessere Preise */
 const HAENDLER = 0.04;
@@ -37,7 +38,8 @@ function buyInto(
   const good = GOOD_BY_ID.get(goodId);
   const m = state.markets[town][goodId];
   if (!good || !m) return fail('Diese Ware wird hier nicht gehandelt.');
-  const rebate = opts.haendler ? 1 - HAENDLER : 1;
+  // Händlerblut und Ansehen in der Stadt machen den Einkauf billiger
+  const rebate = (opts.haendler ? 1 - HAENDLER : 1) * (1 - buyDiscount(state, town));
   const max = Math.min(wanted, space, available(m));
   let amount = 0;
   let cost = 0;
@@ -93,6 +95,8 @@ function sellFrom(
   slot.cost -= costShare;
   slot.amount -= amount;
   if (slot.amount < 0.001) delete cargo[goodId];
+  // Lieferung in die Knappheit bringt Ansehen
+  noteSale(state, town, goodId, amount, m.stock, m.target);
   m.stock += amount;
   state.money += revenue;
 

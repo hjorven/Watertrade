@@ -169,6 +169,20 @@ export interface Work {
   done: boolean;
 }
 
+/** Ansehen des Spielers in einer Stadt (sim/standing.ts) */
+export interface TownStanding {
+  /** durch Handel und Aufträge verdientes Ansehen, verblasst langsam */
+  earned: number;
+  /** heute schon aus Verkäufen verdient (Tagesgrenze) */
+  today: number;
+  /** gestiftete Bauten */
+  foundations: string[];
+  townhouse: boolean;
+  council: boolean;
+  /** zuletzt gemeldeter Rang, für die Nachricht beim Aufstieg */
+  rank: number;
+}
+
 export interface GameState {
   money: number;
   hour: number; // Spielstunden seit Start
@@ -209,6 +223,8 @@ export interface GameState {
   works: Work[];
   /** Brennstoffkosten seit Mitternacht */
   fuelToday: number;
+  /** Ansehen je Stadt; fehlt in älteren Spielständen */
+  standing?: Record<string, TownStanding>;
 }
 
 export function shipClass(ship: { type: string }): ShipClass {

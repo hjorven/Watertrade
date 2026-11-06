@@ -48,6 +48,7 @@ import {
 import { startProject } from './sim/works.ts';
 import { EPOCHS } from './data/ships.ts';
 import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
+import { buildTownhouse, found, joinCouncil, leaveCouncil } from './sim/standing.ts';
 import { goalDone, goalProgress } from './sim/goals.ts';
 import { deserialize, SAVE_VERSION, serialize, type GameMode, type SaveGame } from './sim/save.ts';
 import { LEVELS, levelOf, netFlow } from './sim/towns.ts';
@@ -317,6 +318,21 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
       r = startProject(state, String(d.id));
       ok = 'glocke';
       break;
+    case 'found':
+      r = found(state, town, String(d.id));
+      ok = 'glocke';
+      break;
+    case 'townhouse':
+      r = buildTownhouse(state, town);
+      ok = 'erfolg';
+      break;
+    case 'council':
+      r = joinCouncil(state, town);
+      ok = 'stempel';
+      break;
+    case 'leaveCouncil':
+      r = leaveCouncil(state, town);
+      break;
     case 'accept':
       r = acceptContract(state, n('id'));
       ok = 'stempel';
@@ -546,7 +562,7 @@ function startGame(s: GameState, sess: Session): void {
 function featuresFor(sess: Session): HudFeatures {
   const n = sess.mode === 'kampagne' ? (sess.chapter?.number ?? 99) : 99;
   if (n <= 1) return { tabs: ['markt', 'werft'], views: ['ship', 'news', 'map'] };
-  if (n === 2) return { tabs: ['markt', 'kontor', 'werft', 'kneipe', 'route'], views: ['ship', 'news', 'map', 'contracts', 'register'] };
+  if (n === 2) return { tabs: ['markt', 'kontor', 'werft', 'kneipe', 'route', 'rathaus'], views: ['ship', 'news', 'map', 'contracts', 'register'] };
   return ALL_FEATURES;
 }
 

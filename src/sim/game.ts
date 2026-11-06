@@ -9,6 +9,7 @@ import { EPOCHS, epochOfYear, MIN_FRESH, PERISH, SHIPS } from '../data/ships.ts'
 import { YEAR_DAYS, year } from './calendar.ts';
 import { addNews, day, shipClass, type GameEvent, type GameState, type NewsItem } from './state.ts';
 import { tickWorks } from './works.ts';
+import { tickStanding, townNews, townOptions } from './standing.ts';
 import { initialMarket, initialTown, tickTown } from './towns.ts';
 import { wearFactor, wearRate } from './voyage.ts';
 
@@ -164,13 +165,15 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
   const after = day(state);
   for (let d = before + 1; d <= after; d++) {
     for (const def of map.towns) {
-      const r = tickTown(def, state.markets[def.id], state.towns[def.id]);
+      const r = tickTown(def, state.markets[def.id], state.towns[def.id], townOptions(state, def.id, d));
+      pushNews(events, townNews(state, def, r), false);
       if (r.levelUp !== undefined || r.levelDown !== undefined) {
         const up = r.levelUp !== undefined;
         events.push({ type: 'townLevel', town: def.id, level: (r.levelUp ?? r.levelDown)!, up, newGoods: r.newGoods });
       }
     }
     tickHouse(state);
+    pushNews(events, tickStanding(state, map), false);
     pushNews(events, tickWorks(state, map), true);
     if (state.epochAuto) {
       const e = epochOfYear(year(d));

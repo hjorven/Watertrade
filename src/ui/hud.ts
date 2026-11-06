@@ -32,10 +32,12 @@ import {
 } from '../sim/game.ts';
 import { PROJECTS } from '../data/projects.ts';
 import { daysLeft, projectState } from '../sim/works.ts';
-import { betriebeIn, buildingAllowed, kontorUpkeepIn, playerWorth } from '../sim/house.ts';
+import { betriebeIn, betriebSlots, buildingAllowed, kontorUpkeepIn, playerWorth } from '../sim/house.ts';
+import { extraSlots } from '../sim/standing.ts';
+import { closedLine, renderRathaus, seasonLine, standingLine } from './standing-panel.ts';
 import { rivalWorth } from '../sim/rivals.ts';
 import { BLOCK_TEXT, segmentDepth } from '../sim/river.ts';
-import { GROWTH_THRESHOLD, LEVELS, levelOf, netFlow, nextLevelNeeds } from '../sim/towns.ts';
+import { GROWTH_THRESHOLD, LEVELS, levelOf, netFlow, nextLevelNeeds, CRISIS_THRESHOLD } from '../sim/towns.ts';
 
 /** Frische verderblicher Ware als kurzer Hinweis, etwa "Frische 82 %" */
 function freshText(slot: { fresh?: number } | undefined): string {
@@ -58,7 +60,7 @@ export interface HudActions {
 }
 
 export type View = 'ship' | 'register' | 'news' | 'contracts' | 'works' | 'map';
-export type Tab = 'markt' | 'kontor' | 'werft' | 'kneipe' | 'route';
+export type Tab = 'markt' | 'kontor' | 'werft' | 'kneipe' | 'route' | 'rathaus';
 
 /** Was gerade sichtbar ist; die Kampagne schaltet Reiter und Bücher nach und nach frei */
 export interface HudFeatures {
@@ -66,7 +68,7 @@ export interface HudFeatures {
   views: View[];
 }
 export const ALL_FEATURES: HudFeatures = {
-  tabs: ['markt', 'kontor', 'werft', 'kneipe', 'route'],
+  tabs: ['markt', 'kontor', 'werft', 'kneipe', 'route', 'rathaus'],
   views: ['ship', 'register', 'news', 'contracts', 'works', 'map'],
 };
 
@@ -361,6 +363,7 @@ export class Hud {
           ['werft', 'Werft'],
           ['kneipe', 'Kneipe'],
           ['route', 'Route'],
+          ['rathaus', 'Rathaus'],
         ]
       : [
           ['markt', 'Fahrt'],
@@ -379,8 +382,14 @@ export class Hud {
     else if (this.tab === 'werft') body = this.renderYard(state, ship);
     else if (this.tab === 'kneipe') body = this.renderTavern(state, ship);
     else if (this.tab === 'route') body = this.renderRoute(ship);
+    else if (this.tab === 'rathaus') body = this.renderTownHall(state, ship);
     else body = this.renderPort(state, ship);
     return nav + body;
+  }
+
+  private renderTownHall(state: GameState, ship: Ship): string {
+    const town = this.map.towns.find((t) => t.id === ship.port)!;
+    return `${this.portHead(town, 'Rathaus')}${renderRathaus(state, town)}`;
   }
 
   private portHead(town: TownDef, stamp: string): string {
@@ -452,7 +461,7 @@ export class Hud {
       .join('');
 
     const industries = town.industries.length
-      ? `<p class="note">Betriebe der Stadt: ${town.industries.map((i) => `${i.name} (${flows(i.inputs)} → ${flows(i.outputs)})`).join(', ')} pro Tag</p>`
+      ? `<p class="note">Betriebe der Stadt: ${town.industries.map((i) => `${i.name} (${flows(i.inputs)} → ${flows(i.outputs)})${state.towns[town.id].closed?.includes(i.name) ? ' geschlossen' : ''}`).join(', ')} pro Tag</p>`
       : '';
 
     const raft =
@@ -533,7 +542,7 @@ export class Hud {
       .join('');
 
     const mine = betriebeIn(state, town.id);
-    const slots = KONTOR_SLOTS[k.level];
+    const slots = betriebSlots(state, town.id);
     const betriebe = mine
       .map((b) => {
         const t = BUILDING_BY_ID.get(b.type)!;
@@ -561,7 +570,7 @@ export class Hud {
     const upgrade =
       k.level < 3
         ? `<button class="btn wide" data-act="cmd" data-cmd="upgradeKontor" ${state.money >= KONTOR_UPGRADE[k.level + 1] ? '' : 'disabled'}>Kontor ausbauen auf Stufe ${k.level + 1}
-          <small>${fmt(KONTOR_UPGRADE[k.level + 1])} Taler: ${KONTOR_CAPACITY[k.level + 1]} t Lager, ${KONTOR_SLOTS[k.level + 1]} Bauplätze, Unterhalt ${kontorUpkeepIn(state, town.id, k.level + 1)} am Tag</small></button>`
+          <small>${fmt(KONTOR_UPGRADE[k.level + 1])} Taler: ${KONTOR_CAPACITY[k.level + 1]} t Lager, ${KONTOR_SLOTS[k.level + 1] + extraSlots(state, town.id)} Bauplätze, Unterhalt ${kontorUpkeepIn(state, town.id, k.level + 1)} am Tag</small></button>`
         : '';
     return `${this.portHead(town, `Kontor Stufe ${k.level}`)}
       <div class="town-info"><span>Lager <b>${used}</b> von ${KONTOR_CAPACITY[k.level]} t · Bauplätze ${mine.length}/${slots} · Unterhalt ${kontorUpkeepIn(state, town.id)} am Tag</span>
@@ -702,14 +711,18 @@ export class Hud {
     const next = LEVELS[level + 1];
     const wants = nextLevelNeeds(town, t).map((g) => GOOD_BY_ID.get(g)!.name);
     const sat = Math.round(t.satisfaction * 100);
-    const trend = t.satisfaction > GROWTH_THRESHOLD ? 'wächst' : 'stagniert';
+    const shrinking = t.satisfaction < CRISIS_THRESHOLD || t.population > town.population + 0.5;
+    const trend = t.satisfaction > GROWTH_THRESHOLD ? 'wächst' : shrinking ? 'schrumpft' : 'stagniert';
     const ev = state.events.filter((e) => e.town === town.id).map((e) => `<b class="event">${describeEvent(this.map, e)}</b>`);
     return `<div class="town-info">
       <span><b>${LEVELS[level].name}</b> · ${Math.round(t.population)} Einwohner · ${trend}</span>
+      ${standingLine(state, town)}
       <div class="meter" title="Versorgung ${sat} %"><div style="width:${sat}%"></div><i style="left:${GROWTH_THRESHOLD * 100}%"></i></div>
       ${ev.join('')}
+      ${closedLine(state, town)}
       <details class="more"><summary>Mehr über ${town.name}</summary>
         <small>Versorgung ${sat} %${next ? `, ab ${next.from} Einwohnern ${next.name}${wants.length ? ` (will dann auch ${wants.join(', ')})` : ''}` : ''}</small>
+        ${seasonLine(state, town)}
         ${more}
       </details>
     </div>`;

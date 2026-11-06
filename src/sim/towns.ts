@@ -1,4 +1,5 @@
 import type { TownDef } from '../data/maps/valley.ts';
+import { season, type Season } from './calendar.ts';
 import type { MarketEntry } from './economy.ts';
 
 /** Lager wächst durch Produktion höchstens bis zu diesem Vielfachen des Zielbestands */
@@ -33,9 +34,42 @@ export const MAX_POPULATION = 8000;
 /** Zufriedenheit, ab der eine Stadt wächst. Ohne Spieler pendeln sich Städte knapp darunter ein. */
 export const GROWTH_THRESHOLD = 0.75;
 
+/** Zufriedenheit, unter der eine gewachsene Stadt doppelt so schnell schrumpft */
+export const SHRINK_THRESHOLD = 0.6;
+/** Notlage: darunter schrumpft eine Stadt auch unter ihre Startgröße, und Stadtbetriebe schließen */
+export const CRISIS_THRESHOLD = 0.45;
+/** So weit kann eine Stadt in der Not unter ihre Startgröße fallen */
+export const MIN_POP_SHARE = 0.7;
+/** Tage in der Not, bis ein Stadtbetrieb schließt */
+export const CLOSE_DAYS = 12;
+/** Tage guter Versorgung, bis ein geschlossener Betrieb wieder öffnet */
+export const REOPEN_DAYS = 15;
+
+/**
+ * Bedarf nach Jahreszeit: Faktor auf Waren, die eine Stadt ohnehin braucht.
+ * Im Winter mehr Kohle, Stoff und Brennholz, im Sommer mehr Bier, im Frühling Baustoffe, im Herbst Arznei.
+ */
+export const SEASON_NEEDS: Record<Season, Record<string, number>> = {
+  fruehling: { bretter: 1.2, werkzeug: 1.2, holz: 1.1 },
+  sommer: { bier: 1.5, fisch: 0.85, kohle: 0.7 },
+  herbst: { arznei: 1.3, kohle: 1.2, brot: 1.1 },
+  winter: { kohle: 1.6, stoff: 1.4, holz: 1.3, bier: 0.8 },
+};
+
 export interface TownState {
   population: number;
   satisfaction: number; // 0..1, wie gut die Bedürfnisse gedeckt sind
+  /** geschlossene Stadtbetriebe (Namen aus TownDef.industries) */
+  closed?: string[];
+  /** Tage in Folge in der Not */
+  distress?: number;
+  /** Tage in Folge gut versorgt, solange Betriebe geschlossen sind */
+  recovery?: number;
+}
+
+/** Offene Stadtbetriebe */
+export function openIndustries(def: TownDef, town: TownState) {
+  return town.closed?.length ? def.industries.filter((i) => !town.closed!.includes(i.name)) : def.industries;
 }
 
 export function levelOf(population: number): number {
@@ -44,8 +78,8 @@ export function levelOf(population: number): number {
   return l;
 }
 
-/** Tagesbedarf je Ware bei aktueller Größe und Stufe */
-export function needs(def: TownDef, town: TownState): Record<string, number> {
+/** Tagesbedarf je Ware bei aktueller Größe und Stufe; mit Spieltag auch nach Jahreszeit */
+export function needs(def: TownDef, town: TownState, day?: number): Record<string, number> {
   const scale = town.population / def.population;
   const out: Record<string, number> = {};
   for (const [g, n] of Object.entries(def.consumes)) out[g] = n;
@@ -53,7 +87,8 @@ export function needs(def: TownDef, town: TownState): Record<string, number> {
   for (let l = 1; l <= level; l++) {
     for (const [g, n] of Object.entries(LEVEL_NEEDS[l])) out[g] = (out[g] ?? 0) + n;
   }
-  for (const g of Object.keys(out)) out[g] *= scale;
+  const seasonal = day === undefined ? undefined : SEASON_NEEDS[season(day)];
+  for (const g of Object.keys(out)) out[g] *= scale * (seasonal?.[g] ?? 1);
   return out;
 }
 
@@ -79,7 +114,7 @@ export function tradedGoods(def: TownDef): string[] {
 export function netFlow(def: TownDef, good: string, town?: TownState): number {
   const need = town ? (needs(def, town)[good] ?? 0) : (def.consumes[good] ?? 0);
   let net = (def.produces[good] ?? 0) - need;
-  for (const ind of def.industries) net += (ind.outputs[good] ?? 0) - (ind.inputs[good] ?? 0);
+  for (const ind of town ? openIndustries(def, town) : def.industries) net += (ind.outputs[good] ?? 0) - (ind.inputs[good] ?? 0);
   return net;
 }
 
@@ -107,6 +142,21 @@ export interface TownTickResult {
   levelUp?: number; // neue Stufe
   levelDown?: number;
   newGoods: string[]; // neue Nachfrage
+  /** Stadtbetrieb, der heute schließt oder wieder öffnet */
+  closed?: string;
+  reopened?: string;
+}
+
+/** Was von außen auf eine Stadt wirkt (Jahreszeit, Stiftungen des Spielers) */
+export interface TownTickOptions {
+  /** Spieltag, für den Bedarf nach Jahreszeit */
+  day?: number;
+  /** dauerhafter Aufschlag auf die Versorgung, etwa durch Stiftungen */
+  bonus?: number;
+  /** Faktor auf das Wachstum (Schule) */
+  growth?: number;
+  /** Faktor auf das Schrumpfen (Armenhaus) */
+  shrink?: number;
 }
 
 /**
@@ -117,7 +167,7 @@ export interface TownTickResult {
  * 4. Das Umland gleicht etwas aus, so pendelt sich jeder Markt ohne Spieler auf einen mittleren Preis ein
  * 5. Zufriedene Städte wachsen, unterversorgte schrumpfen bis auf ihre Startgröße
  */
-export function tickTown(def: TownDef, market: TownMarket, town: TownState): TownTickResult {
+export function tickTown(def: TownDef, market: TownMarket, town: TownState, opts: TownTickOptions = {}): TownTickResult {
   const result: TownTickResult = { newGoods: [] };
   const target = marketTarget(def, town);
   for (const m of Object.values(market)) m.target = target;
@@ -129,7 +179,7 @@ export function tickTown(def: TownDef, market: TownMarket, town: TownState): Tow
     m.stock = Math.min(cap, m.stock + amount * workforce);
   }
 
-  for (const ind of def.industries) {
+  for (const ind of openIndustries(def, town)) {
     // Anteil eines vollen Arbeitstags, den die Eingangswaren erlauben
     let share = 1;
     for (const [good, need] of Object.entries(ind.inputs)) share = Math.min(share, market[good].stock / need);
@@ -142,7 +192,7 @@ export function tickTown(def: TownDef, market: TownMarket, town: TownState): Tow
     for (const [good, out] of Object.entries(ind.outputs)) market[good].stock += out * share;
   }
 
-  const want = needs(def, town);
+  const want = needs(def, town, opts.day);
   let satSum = 0;
   let satN = 0;
   for (const [good, amount] of Object.entries(want)) {
@@ -161,12 +211,19 @@ export function tickTown(def: TownDef, market: TownMarket, town: TownState): Tow
   }
 
   // Zufriedenheit träge mitteln, damit ein einzelner Tag nicht alles kippt
-  const sat = satN ? satSum / satN : 1;
+  const sat = Math.min(1, (satN ? satSum / satN : 1) + (opts.bonus ?? 0));
   town.satisfaction = town.satisfaction * 0.8 + sat * 0.2;
 
   const before = levelOf(town.population);
-  const growth = (town.satisfaction - GROWTH_THRESHOLD) * 0.03;
-  town.population = Math.min(MAX_POPULATION, Math.max(def.population, town.population * (1 + growth)));
+  const s = town.satisfaction;
+  let growth = (s - GROWTH_THRESHOLD) * 0.03;
+  // schlecht versorgte Städte verlieren spürbar Einwohner
+  if (s < SHRINK_THRESHOLD) growth += (s - SHRINK_THRESHOLD) * 0.03;
+  growth *= growth > 0 ? (opts.growth ?? 1) : (opts.shrink ?? 1);
+  // unter die Startgröße nur in der Not, und nicht beliebig weit
+  const crisis = s < CRISIS_THRESHOLD;
+  const floor = crisis ? def.population * MIN_POP_SHARE : Math.min(town.population, def.population);
+  town.population = Math.min(MAX_POPULATION, Math.max(floor, town.population * (1 + growth)));
   const after = levelOf(town.population);
   if (after > before) {
     result.levelUp = after;
@@ -178,5 +235,29 @@ export function tickTown(def: TownDef, market: TownMarket, town: TownState): Tow
     }
   }
   if (after < before) result.levelDown = after;
+  tickIndustries(def, town, result, crisis);
   return result;
+}
+
+/**
+ * Stadtbetriebe schließen in der Not (oder wenn die Stadt eine Stufe verliert) und öffnen wieder,
+ * wenn die Stadt eine Weile gut versorgt ist. Das trifft alle Händler, die von diesen Waren leben.
+ */
+function tickIndustries(def: TownDef, town: TownState, result: TownTickResult, crisis: boolean): void {
+  const open = openIndustries(def, town);
+  town.distress = crisis ? (town.distress ?? 0) + 1 : Math.max(0, (town.distress ?? 0) - 1);
+  if (open.length && (town.distress >= CLOSE_DAYS || result.levelDown !== undefined)) {
+    const ind = open[open.length - 1];
+    (town.closed ??= []).push(ind.name);
+    town.distress = 0;
+    town.recovery = 0;
+    result.closed = ind.name;
+    return;
+  }
+  if (!town.closed?.length) return;
+  town.recovery = town.satisfaction >= GROWTH_THRESHOLD ? (town.recovery ?? 0) + 1 : 0;
+  if (town.recovery >= REOPEN_DAYS) {
+    result.reopened = town.closed.pop();
+    town.recovery = 0;
+  }
 }
