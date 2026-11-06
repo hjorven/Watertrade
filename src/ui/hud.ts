@@ -1,4 +1,4 @@
-import { BUILDING_BY_ID, BUILDINGS, KONTOR_CAPACITY, KONTOR_PRICE, KONTOR_SLOTS, KONTOR_UPGRADE } from '../data/buildings.ts';
+import { BUILDING_BY_ID, BUILDINGS, betriebUpkeep, KONTOR_CAPACITY, KONTOR_PRICE, KONTOR_SLOTS, KONTOR_UPGRADE } from '../data/buildings.ts';
 import { TRAITS } from '../data/captains.ts';
 import { GOOD_BY_ID, GOODS } from '../data/goods.ts';
 import type { MapDef, TownDef } from '../data/maps/valley.ts';
@@ -31,9 +31,9 @@ import {
 } from '../sim/game.ts';
 import { PROJECTS } from '../data/projects.ts';
 import { daysLeft, projectState } from '../sim/works.ts';
-import { betriebeIn, buildingAllowed, KONTOR_UPKEEP, playerWorth } from '../sim/house.ts';
+import { betriebeIn, buildingAllowed, kontorUpkeepIn, playerWorth } from '../sim/house.ts';
 import { rivalWorth } from '../sim/rivals.ts';
-import { BLOCK_TEXT } from '../sim/river.ts';
+import { BLOCK_TEXT, segmentDepth } from '../sim/river.ts';
 import { GROWTH_THRESHOLD, LEVELS, levelOf, netFlow, nextLevelNeeds } from '../sim/towns.ts';
 
 export interface HudActions {
@@ -484,7 +484,7 @@ export class Hud {
           <li>Platz für eigene Betriebe, die mit dem Lager arbeiten</li>
           <li>Kapitäne auf Handelsrouten können hier ein- und auslagern</li>
         </ul>
-        <p class="note">Unterhalt ${KONTOR_UPKEEP[1]} Taler am Tag.</p>
+        <p class="note">Unterhalt ${kontorUpkeepIn(state, town.id, 1)} Taler am Tag. Jedes weitere Kontor macht alle etwas teurer.</p>
         <button class="btn primary wide" data-act="cmd" data-cmd="buildKontor" ${state.money >= KONTOR_PRICE ? '' : 'disabled'}>Kontor bauen<small>${KONTOR_PRICE} Taler</small></button>`;
     }
     const used = Math.floor(cargoLoad({ cargo: k.stock }));
@@ -516,7 +516,7 @@ export class Hud {
         const t = BUILDING_BY_ID.get(b.type)!;
         const pct = Math.round(b.lastShare * 100);
         return `<div class="yard-row">
-          <div><b>${t.name}</b> <small>${t.inputs && Object.keys(t.inputs).length ? `${flows(t.inputs)} → ` : ''}${flows(t.outputs)} am Tag · Lohn ${t.wage}</small>
+          <div><b>${t.name}</b> <small>${t.inputs && Object.keys(t.inputs).length ? `${flows(t.inputs)} → ` : ''}${flows(t.outputs)} am Tag · Lohn ${t.wage}, Unterhalt ${betriebUpkeep(t)}</small>
           <small class="desc">${b.active ? `Auslastung gestern ${pct} %${pct < 100 && Object.keys(t.inputs).length ? ', es fehlt Rohware im Lager' : ''}` : 'ruht'}</small></div>
           <div class="row-btns">
             <button class="btn" data-act="cmd" data-cmd="toggleBetrieb" data-id="${b.id}">${b.active ? 'Ruhen' : 'Starten'}</button>
@@ -529,7 +529,7 @@ export class Hud {
         ? BUILDINGS.filter((b) => buildingAllowed(this.map, town.id, b.id))
             .map(
               (b) => `<div class="yard-row">
-              <div><b>${b.name}</b> <small>${Object.keys(b.inputs).length ? `${flows(b.inputs)} → ` : ''}${flows(b.outputs)} am Tag · Lohn ${b.wage}</small>
+              <div><b>${b.name}</b> <small>${Object.keys(b.inputs).length ? `${flows(b.inputs)} → ` : ''}${flows(b.outputs)} am Tag · Lohn ${b.wage}, Unterhalt ${betriebUpkeep(b)}</small>
               <small class="desc">${b.description}</small></div>
               <button class="btn" data-act="cmd" data-cmd="buildBetrieb" data-type="${b.id}" ${state.money >= b.price ? '' : 'disabled'}>${fmt(b.price)} Taler</button></div>`,
             )
@@ -538,10 +538,10 @@ export class Hud {
     const upgrade =
       k.level < 3
         ? `<button class="btn wide" data-act="cmd" data-cmd="upgradeKontor" ${state.money >= KONTOR_UPGRADE[k.level + 1] ? '' : 'disabled'}>Kontor ausbauen auf Stufe ${k.level + 1}
-          <small>${fmt(KONTOR_UPGRADE[k.level + 1])} Taler: ${KONTOR_CAPACITY[k.level + 1]} t Lager, ${KONTOR_SLOTS[k.level + 1]} Bauplätze, Unterhalt ${KONTOR_UPKEEP[k.level + 1]} am Tag</small></button>`
+          <small>${fmt(KONTOR_UPGRADE[k.level + 1])} Taler: ${KONTOR_CAPACITY[k.level + 1]} t Lager, ${KONTOR_SLOTS[k.level + 1]} Bauplätze, Unterhalt ${kontorUpkeepIn(state, town.id, k.level + 1)} am Tag</small></button>`
         : '';
     return `${this.portHead(town, `Kontor Stufe ${k.level}`)}
-      <div class="town-info"><span>Lager <b>${used}</b> von ${KONTOR_CAPACITY[k.level]} t · Bauplätze ${mine.length}/${slots} · Unterhalt ${KONTOR_UPKEEP[k.level]} am Tag</span>
+      <div class="town-info"><span>Lager <b>${used}</b> von ${KONTOR_CAPACITY[k.level]} t · Bauplätze ${mine.length}/${slots} · Unterhalt ${kontorUpkeepIn(state, town.id)} am Tag</span>
       <div class="meter"><div style="width:${Math.round((used / KONTOR_CAPACITY[k.level]) * 100)}%"></div></div></div>
       <table class="market kontor">
         <thead><tr><th>Ware</th><th>Lager</th><th>Bord</th><th></th></tr></thead>
@@ -852,7 +852,7 @@ export class Hud {
             m.y = t.y + (dist > 0.1 ? dy * k : 0);
           }
         }
-        const depth = (seg.baseDepth + state.waterLevel).toFixed(1).replace('.', ',');
+        const depth = segmentDepth(seg, state.waterLevel).toFixed(1).replace('.', ',');
         const marks: string[] = [`${depth} m`];
         if (seg.bridgeHeight !== undefined) marks.push(`Br. ${String(seg.bridgeHeight).replace('.', ',')} m`);
         if (seg.freezes && state.ice) marks.push('Eis');

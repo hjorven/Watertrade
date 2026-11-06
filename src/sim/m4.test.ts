@@ -29,7 +29,7 @@ describe('Kontor und Betriebe', () => {
     kontorBuy(s, 'oberau', 'holz', 30);
     const money = s.money;
     advance(s, VALLEY, 24 * 3);
-    expect(s.kontore.oberau.stock.bretter.amount).toBeCloseTo(12, 5);
+    expect(s.kontore.oberau.stock.bretter.amount).toBeCloseTo(15, 5); // 3 Tage je 6 t Holz zu 5 t Brettern
     expect(s.money).toBeLessThan(money); // Löhne und Unterhalt
   });
 

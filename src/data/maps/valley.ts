@@ -223,7 +223,7 @@ export const VALLEY: MapDef = {
     { id: 'alten-weiden', river: 'strom', fromT: 0.55, toT: 0.74, from: 'altenfurt', to: 'weidenhof', length: 45, current: 1.3, baseDepth: 3 },
     { id: 'weiden-nieder', river: 'strom', fromT: 0.74, toT: 0.93, from: 'weidenhof', to: 'niedermuend', length: 40, current: 1.0, baseDepth: 3.5 },
     // Erzbach: oben sehr seicht, nur flache Boote
-    { id: 'grube-glas', river: 'erzbach', fromT: 0.1, toT: 0.55, from: 'erzgrube', to: 'glashuette', length: 25, current: 2.4, baseDepth: 0.8, freezes: true },
-    { id: 'glas-alten', river: 'erzbach', fromT: 0.55, toT: 1, from: 'glashuette', to: 'altenfurt', length: 30, current: 2.0, baseDepth: 1.3, freezes: true },
+    { id: 'grube-glas', river: 'erzbach', fromT: 0.1, toT: 0.55, from: 'erzgrube', to: 'glashuette', length: 25, current: 2.4, baseDepth: 0.8, freezes: true, lowWater: 0.5 },
+    { id: 'glas-alten', river: 'erzbach', fromT: 0.55, toT: 1, from: 'glashuette', to: 'altenfurt', length: 30, current: 2.0, baseDepth: 1.3, freezes: true, lowWater: 0.5 },
   ],
 };

@@ -7,6 +7,8 @@ export interface Segment {
   baseDepth: number; // Tiefe bei Normalwasser in m
   bridgeHeight?: number; // Durchfahrtshöhe bei Normalwasser in m
   freezes?: boolean; // friert im Winter zu
+  /** Anteil, mit dem Niedrigwasser hier wirkt (Bach aus dem Gebirge: Quellen halten ihn im Sommer höher) */
+  lowWater?: number;
 }
 
 /** Lage am Fluss: Wasserstand relativ zum Normalwasser in m und ob Eis auf den Nebenflüssen liegt */
@@ -19,10 +21,30 @@ export interface Conditions {
 
 const asCond = (c: number | Conditions): Conditions => (typeof c === 'number' ? { level: c } : c);
 
+/** Wasserstand auf einem Abschnitt: Niedrigwasser fällt auf manchen Abschnitten schwächer aus */
+export function segmentLevel(seg: Segment, level: number): number {
+  return level < 0 ? level * (seg.lowWater ?? 1) : level;
+}
+
 /** Hochwasser macht die Strömung schneller */
 export function effectiveCurrent(seg: Segment, c: number | Conditions): number {
   const { level } = asCond(c);
   return seg.current * (1 + Math.max(0, level) * 0.35);
+}
+
+/** Wassertiefe auf einem Abschnitt bei der aktuellen Lage */
+export function segmentDepth(seg: Segment, c: number | Conditions): number {
+  return seg.baseDepth + segmentLevel(seg, asCond(c).level);
+}
+
+/** Zeit zum Legen und Aufrichten des Mastes vor einer niedrigen Brücke */
+export const MAST_HOURS = 2;
+
+/** Muss der Mast vor der Brücke dieses Abschnitts gelegt werden? */
+export function needsMastDown(seg: Segment, ship: ShipType, c: number | Conditions): boolean {
+  if (seg.bridgeHeight === undefined || ship.mastHeight === undefined) return false;
+  const clearance = seg.bridgeHeight - asCond(c).level;
+  return clearance < ship.height && clearance >= ship.mastHeight;
 }
 
 export type Propulsion = 'drift' | 'tow' | 'sail' | 'steam' | 'motor';
@@ -36,6 +58,8 @@ export interface ShipType {
   height: number; // Höhe über Wasser in m
   capacity: number; // Ladung in Tonnen
   canGoUpstream: boolean; // Floß: false
+  /** Höhe mit gelegtem Mast (Segelkahn), sonst passt das Schiff nur mit voller Höhe unter Brücken */
+  mastHeight?: number;
 }
 
 /** Mindestgeschwindigkeit über Grund, darunter gilt ein Abschnitt als nicht befahrbar */
@@ -63,9 +87,10 @@ export function blockReason(
   if (c.closed?.includes(seg.id)) return 'gesperrt';
   if (c.ice && seg.freezes) return 'eis';
   if (!downstream && !ship.canGoUpstream) return 'nurTalwaerts';
-  if (seg.baseDepth + c.level < ship.draft) return 'tiefgang';
-  // Hochwasser verringert die Durchfahrtshöhe unter Brücken
-  if (seg.bridgeHeight !== undefined && seg.bridgeHeight - c.level < ship.height) return 'bruecke';
+  if (segmentDepth(seg, c) < ship.draft) return 'tiefgang';
+  // Hochwasser verringert die Durchfahrtshöhe unter Brücken, ein Segelkahn kann den Mast legen
+  const height = ship.mastHeight ?? ship.height;
+  if (seg.bridgeHeight !== undefined && seg.bridgeHeight - c.level < height) return 'bruecke';
   if (groundSpeed(seg, ship, downstream, c) <= MIN_GROUND_SPEED) return 'stroemung';
   return null;
 }
@@ -78,14 +103,17 @@ export function travelTime(
   conditions: number | Conditions, // Wasserstand als Abweichung vom Normalwasser in m, z. B. -0.8 im Sommer
 ): number | null {
   if (blockReason(seg, ship, downstream, conditions)) return null;
-  return seg.length / groundSpeed(seg, ship, downstream, conditions);
+  const mast = needsMastDown(seg, ship, conditions) ? MAST_HOURS : 0;
+  return seg.length / groundSpeed(seg, ship, downstream, conditions) + mast;
 }
+
+/** Auch bei Flaute fährt ein Segelkahn mit mindestens halber Fahrt (Staken, Treideln, Strömung ausnutzen) */
+export const MIN_SAIL_WIND = 0.5;
 
 /** Segelschiffe hängen vom Wind ab (0 = Flaute, 1 = guter Wind), alle anderen nicht */
 export function withWind<T extends ShipType>(ship: T, wind: number): T {
   if (ship.propulsion !== 'sail') return ship;
-  // auch bei Flaute bleibt etwas Fahrt durch Staken und Treiben
-  return { ...ship, speed: Math.max(1.5, ship.speed * wind) };
+  return { ...ship, speed: ship.speed * Math.max(MIN_SAIL_WIND, wind) };
 }
 
 /** Wind des Tages, deterministisch aus der Tagesnummer, zwischen 0.25 und 1.25 */
@@ -113,7 +141,7 @@ export function explainBlock(
   ship: ShipType,
   conditions: number | Conditions,
 ): { seg: Segment; reason: BlockReason }[] {
-  const anyShip: ShipType = { ...ship, propulsion: 'tow', speed: 1000, draft: 0, height: 0, canGoUpstream: true };
+  const anyShip: ShipType = { ...ship, propulsion: 'tow', speed: 1000, draft: 0, height: 0, mastHeight: undefined, canGoUpstream: true };
   const route = findRoute(
     segments.map((s) => ({ ...s, current: 0 })),
     start,

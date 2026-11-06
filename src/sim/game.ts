@@ -5,17 +5,17 @@ import { eventWaterOffset, tickEvents } from './events.ts';
 import { addShip, refreshTavern, runRoute } from './fleet.ts';
 import { tickHouse } from './house.ts';
 import { initialRivals, moveRivals, tickRivals } from './rivals.ts';
-import { EPOCHS, epochOfYear } from '../data/ships.ts';
+import { EPOCHS, epochOfYear, MIN_FRESH, PERISH } from '../data/ships.ts';
 import { YEAR_DAYS, year } from './calendar.ts';
 import { addNews, day, shipClass, type GameEvent, type GameState, type NewsItem } from './state.ts';
 import { tickWorks } from './works.ts';
 import { initialMarket, initialTown, tickTown } from './towns.ts';
-import { wearRate } from './voyage.ts';
+import { wearFactor, wearRate } from './voyage.ts';
 
 export * from './state.ts';
 export * from './trade.ts';
 export * from './voyage.ts';
-export { addShip, buyShip, dismantleRaft, RAFT_TIMBER, shipAllowed } from './fleet.ts';
+export { addShip, buyShip, dismantleRaft, RAFT_TIMBER, shipAllowed, timberPlan } from './fleet.ts';
 export { effectiveSegments } from './works.ts';
 
 export interface NewGameOptions {
@@ -124,6 +124,7 @@ export function upgradeState(state: GameState, map: MapDef): GameState {
     ship.upgrades ??= [];
     ship.captain ??= null;
     ship.route ??= null;
+    ship.bunker ??= 0;
   }
   if (!Object.keys(s.tavern).length) refreshTavern(s, map);
   if (s.rivalsActive && !s.rivals.length) s.rivals = initialRivals(s);
@@ -193,10 +194,20 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
     if (v) {
       const dt = Math.min(hours, v.hours - v.elapsed);
       v.elapsed = Math.min(v.hours, v.elapsed + hours);
-      ship.condition = Math.max(0, ship.condition - dt * wearRate(ship));
-      const fuel = (shipClass(ship).fuel ?? 0) * dt;
+      const cls = shipClass(ship);
+      ship.condition = Math.max(0, ship.condition - dt * wearRate(ship, wearFactor(state, map, ship)));
+      // Diesel wird unterwegs bezahlt, Kohle kommt aus dem Bunker (beim Ablegen gekauft)
+      const fuel = (cls.fuel ?? 0) * dt;
       state.money -= fuel;
       state.fuelToday += fuel;
+      if (cls.coal) ship.bunker = Math.max(0, (ship.bunker ?? 0) - cls.coal * dt);
+      // ohne Kühlraum verdirbt Fisch, Brot und Bier unterwegs
+      if (!cls.fresh) {
+        for (const [g, slot] of Object.entries(ship.cargo)) {
+          const rate = PERISH[g];
+          if (rate) slot.fresh = Math.max(MIN_FRESH, (slot.fresh ?? 1) - (rate * dt) / 24);
+        }
+      }
       if (v.elapsed >= v.hours) {
         ship.port = v.to;
         ship.voyage = null;

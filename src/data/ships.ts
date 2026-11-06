@@ -5,14 +5,26 @@ export interface ShipClass extends ShipType {
   description: string;
   /** ab welcher Epoche die Werften diesen Typ bauen */
   epoch: number;
-  /** Betriebskosten in Taler je Fahrstunde (Kohle, Diesel) */
+  /** Dieselkosten in Taler je Fahrstunde (Motorschiffe) */
   fuel?: number;
-  /** Aufpreis beim Verkauf frischer Ware (Kühlschiff) */
+  /** Kohleverbrauch in Tonnen je Fahrstunde (Dampfer). Die Kohle kommt aus dem Bunker. */
+  coal?: number;
+  /** Fassungsvermögen des Kohlebunkers in Tonnen, getrennt vom Laderaum */
+  bunker?: number;
+  /** Kühlraum: verderbliche Ware bleibt frisch und bringt diesen Aufpreis */
   fresh?: number;
+  /** Bauholz in Tonnen, das zum Bau nötig ist (Floß). Der Preis ist dann nur der Lohn. */
+  timber?: number;
 }
 
+/** Verderbliche Ware: Wertverlust je Fahrtag ohne Kühlung */
+export const PERISH: Record<string, number> = { fisch: 0.06, brot: 0.04, bier: 0.01 };
+
 /** Waren, die im Kühlraum frisch bleiben */
-export const FRESH_GOODS = ['fisch', 'brot', 'bier'];
+export const FRESH_GOODS = Object.keys(PERISH);
+
+/** Frische fällt nie unter diesen Wert, auch alter Fisch findet noch einen Käufer */
+export const MIN_FRESH = 0.4;
 
 export const EPOCHS = [
   { number: 1, name: 'Treidelzeit', from: 1 },
@@ -39,8 +51,9 @@ export const SHIPS: Record<string, ShipClass> = {
     height: 1,
     capacity: 30,
     canGoUpstream: false,
-    price: 60,
-    description: 'Billig, treibt nur talwärts. Am Ziel wird es zerlegt und als Holz verkauft.',
+    price: 20,
+    timber: 20,
+    description: 'Aus 20 t Holz gezimmert, dazu 20 Taler Lohn. Treibt nur talwärts und trägt sein Holz selbst zum Ziel, wo es zerlegt und verkauft wird.',
   },
   plaette: {
     id: 'plaette',
@@ -76,10 +89,11 @@ export const SHIPS: Record<string, ShipClass> = {
     speed: 8,
     draft: 1.4,
     height: 7,
+    mastHeight: 3,
     capacity: 60,
     canGoUpstream: true,
     price: 950,
-    description: 'Schnell und geräumig bei gutem Wind, bei Flaute langsam. Der Mast passt nicht unter jede Brücke.',
+    description: 'Schnell und geräumig bei gutem Wind, bei Flaute nur halb so schnell. Vor niedrigen Brücken wird der Mast gelegt, das kostet 2 Stunden.',
   },
   // Epoche 2: Dampf
   raddampfer: {
@@ -93,8 +107,9 @@ export const SHIPS: Record<string, ShipClass> = {
     capacity: 70,
     canGoUpstream: true,
     price: 2600,
-    fuel: 3,
-    description: 'Schaufelräder und Kohle: schnell gegen jede Strömung, ohne Pferde und Wind. Der Schornstein ist hoch.',
+    coal: 0.8,
+    bunker: 25,
+    description: 'Schaufelräder und Kohle: schnell gegen jede Strömung, ohne Pferde und Wind. Verbrennt 0,8 t Kohle je Stunde aus dem Bunker. Der Schornstein ist hoch.',
   },
   schleppverband: {
     id: 'schleppverband',
@@ -107,8 +122,9 @@ export const SHIPS: Record<string, ShipClass> = {
     capacity: 180,
     canGoUpstream: true,
     price: 4200,
-    fuel: 5,
-    description: 'Ein Schlepper zieht zwei Kähne. Riesige Ladung, aber tief und langsam: nur auf dem Hauptstrom sinnvoll.',
+    coal: 1.4,
+    bunker: 40,
+    description: 'Ein Schlepper zieht zwei Kähne. Riesige Ladung, aber tief und langsam: nur auf dem Hauptstrom sinnvoll. Verbrennt 1,4 t Kohle je Stunde.',
   },
   // Epoche 3: Motor
   motorschiff: {
@@ -122,7 +138,7 @@ export const SHIPS: Record<string, ShipClass> = {
     capacity: 110,
     canGoUpstream: true,
     price: 6500,
-    fuel: 4,
+    fuel: 10,
     description: 'Dieselmotor, Steuerhaus achtern, flacher Aufbau: schnell, groß und passt unter die meisten Brücken.',
   },
   kuehlschiff: {
@@ -136,9 +152,9 @@ export const SHIPS: Record<string, ShipClass> = {
     capacity: 80,
     canGoUpstream: true,
     price: 7200,
-    fuel: 5,
-    fresh: 0.2,
-    description: 'Kühlraum für Fisch, Brot und Bier: frische Ware bringt 20 % mehr.',
+    fuel: 11,
+    fresh: 0.1,
+    description: 'Kühlraum für Fisch, Brot und Bier: nichts verdirbt unterwegs, und ganz frische Ware bringt 10 % mehr.',
   },
 };
 

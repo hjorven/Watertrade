@@ -2,7 +2,7 @@ import { CAPTAIN_FIRST, CAPTAIN_LAST, TRAITS, type Trait } from '../data/captain
 import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { SHIPS, UPGRADE_BY_ID } from '../data/ships.ts';
-import { sellRevenue } from './economy.ts';
+import { buyCost, sellRevenue } from './economy.ts';
 import { BLOCK_TEXT } from './river.ts';
 import {
   capacityOf,
@@ -37,6 +37,8 @@ export function addShip(state: GameState, type: string, port: string): Ship {
     upgrades: [],
     captain: null,
     route: null,
+    // neue Dampfer kommen mit vollem Bunker von der Werft
+    bunker: SHIPS[type]?.bunker ?? 0,
   };
   state.ships.push(ship);
   return ship;
@@ -53,10 +55,42 @@ export function buyShip(state: GameState, map: MapDef, town: string, type: strin
   if (!def || !cls || !def.shipyard.includes(type)) return { ok: false, message: 'Hier wird dieser Schiffstyp nicht gebaut.' };
   if (cls.epoch > state.epoch) return { ok: false, message: `${cls.name} gibt es erst in einer späteren Epoche.` };
   if (!shipAllowed(state, type)) return { ok: false, message: `${cls.name} gibt es in diesem Kapitel noch nicht.` };
+  if (cls.timber) return buildFromTimber(state, town, type, def.name);
   if (state.money < cls.price) return { ok: false, message: `Ein ${cls.name} kostet ${cls.price} Taler.` };
   state.money -= cls.price;
   const ship = addShip(state, type, town);
   return { ok: true, message: `${cls.name} „${ship.name}" liegt in ${def.name} bereit.`, ship };
+}
+
+/** Holz für ein Floß: erst aus dem eigenen Kontor, der Rest vom Markt */
+export function timberPlan(state: GameState, town: string, type: string): { fromKontor: number; fromMarket: number; cost: number; problem: string | null } {
+  const cls = SHIPS[type];
+  const need = cls.timber ?? 0;
+  const fromKontor = Math.min(need, Math.floor(state.kontore[town]?.stock.holz?.amount ?? 0));
+  const fromMarket = need - fromKontor;
+  const m = state.markets[town]?.holz;
+  if (fromMarket > 0 && (!m || m.stock - 1 < fromMarket)) return { fromKontor, fromMarket, cost: 0, problem: `Für ein ${cls.name} fehlen ${fromMarket} t Holz.` };
+  const cost = cls.price + (fromMarket > 0 ? buyCost(GOOD_BY_ID.get('holz')!.base, m!, fromMarket) : 0);
+  if (cost > state.money) return { fromKontor, fromMarket, cost, problem: `Lohn und Holz kosten ${cost} Taler.` };
+  return { fromKontor, fromMarket, cost, problem: null };
+}
+
+function buildFromTimber(state: GameState, town: string, type: string, townName: string): { ok: boolean; message: string; ship?: Ship } {
+  const cls = SHIPS[type];
+  const p = timberPlan(state, town, type);
+  if (p.problem) return { ok: false, message: p.problem };
+  if (p.fromKontor > 0) {
+    const slot = state.kontore[town].stock.holz;
+    const share = (slot.cost * p.fromKontor) / slot.amount;
+    slot.amount -= p.fromKontor;
+    slot.cost -= share;
+    if (slot.amount < 0.001) delete state.kontore[town].stock.holz;
+  }
+  if (p.fromMarket > 0) state.markets[town].holz.stock -= p.fromMarket;
+  state.money -= p.cost;
+  const ship = addShip(state, type, town);
+  const src = p.fromKontor && p.fromMarket ? 'Kontor und Markt' : p.fromKontor ? 'dem Kontor' : 'vom Markt';
+  return { ok: true, message: `${cls.name} „${ship.name}" aus ${cls.timber} t Holz (${src}) gezimmert, ${p.cost} Taler. Es liegt in ${townName} bereit.`, ship };
 }
 
 /** Werft in einer Stadt: alles, wo überhaupt Schiffe gebaut werden */
@@ -97,8 +131,8 @@ export function upgrade(state: GameState, map: MapDef, shipId: number, id: strin
   return { ok: true, message: `${ship.name}: ${u.name} eingebaut.`, amount: 0, taler: cost };
 }
 
-/** Holzmenge, die ein zerlegtes Floß ergibt */
-export const RAFT_TIMBER = 20;
+/** Holzmenge, die ein zerlegtes Floß ergibt: das Bauholz kommt zurück */
+export const RAFT_TIMBER = SHIPS.floss.timber ?? 20;
 
 /** Floß am Ziel zerlegen und das Holz verkaufen. Ladung muss vorher von Bord. */
 export function dismantleRaft(state: GameState, shipId: number): TradeResult {

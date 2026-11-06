@@ -62,8 +62,9 @@ describe('findRoute', () => {
 describe('Wind und Sperrgründe', () => {
   it('Segler hängen vom Wind ab, andere nicht', () => {
     const segler: ShipType = { ...kahn, propulsion: 'sail', speed: 8 };
+    expect(withWind(segler, 1).speed).toBe(8);
     expect(withWind(segler, 0.5).speed).toBe(4);
-    expect(withWind(segler, 0).speed).toBe(1.5);
+    expect(withWind(segler, 0).speed).toBe(4); // Mindestwind: auch bei Flaute halbe Fahrt
     expect(withWind(kahn, 0.5).speed).toBe(5);
   });
 

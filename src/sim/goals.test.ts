@@ -34,11 +34,12 @@ describe('Kapitel 1', () => {
     const kahn = s.ships[0];
     const v2 = depart(s, VALLEY, kahn.id, 'muehlheim')!;
     advance(s, VALLEY, v2.hours);
-    buy(s, kahn.id, 'getreide', 30);
+    // das Floß hat Lohn und Holz gekostet, für 30 t reicht das Geld nicht mehr ganz
+    buy(s, kahn.id, 'getreide', 20);
     const v3 = depart(s, VALLEY, kahn.id, 'oberau')!;
     advance(s, VALLEY, v3.hours);
-    sell(s, kahn.id, 'getreide', 30);
-    expect(goalProgress(s, k1.goals[2]).value).toBe(30);
+    sell(s, kahn.id, 'getreide', 20);
+    expect(goalProgress(s, k1.goals[2]).value).toBe(20);
   });
 });
 

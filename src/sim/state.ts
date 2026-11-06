@@ -1,5 +1,5 @@
 import type { Trait } from '../data/captains.ts';
-import { SHIPS, type ShipClass } from '../data/ships.ts';
+import { PERISH, SHIPS, type ShipClass } from '../data/ships.ts';
 import { windOfDay, withWind, type Conditions, type ShipType } from './river.ts';
 import type { TownMarket, TownState } from './towns.ts';
 
@@ -8,6 +8,20 @@ import type { TownMarket, TownState } from './towns.ts';
 export interface CargoSlot {
   amount: number;
   cost: number; // gezahlte Taler für die aktuelle Menge, für die Gewinnanzeige
+  /** Frische verderblicher Ware, 1 = frisch. Fehlt bei Ware, die nicht verdirbt. */
+  fresh?: number;
+}
+
+/** Ware in einen Laderaum legen; bei verderblicher Ware mischt sich die Frische nach Menge */
+export function addToSlot(cargo: Record<string, CargoSlot>, good: string, amount: number, cost: number, fresh = 1): CargoSlot {
+  const slot = (cargo[good] ??= { amount: 0, cost: 0 });
+  if (PERISH[good] !== undefined && amount > 0) {
+    const before = slot.amount > 0 ? (slot.fresh ?? 1) : fresh;
+    slot.fresh = (before * slot.amount + fresh * amount) / (slot.amount + amount);
+  }
+  slot.amount += amount;
+  slot.cost += cost;
+  return slot;
 }
 
 export interface Leg {
@@ -71,6 +85,8 @@ export interface Ship {
   upgrades: string[];
   captain: Captain | null;
   route: TradeRoute | null;
+  /** Kohle im Bunker (Dampfer), in Tonnen */
+  bunker?: number;
 }
 
 export interface Kontor {

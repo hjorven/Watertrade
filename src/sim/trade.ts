@@ -2,7 +2,7 @@ import { KONTOR_CAPACITY, KONTOR_SELL_FACTOR } from '../data/buildings.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import { available, price, SELL_FACTOR, type MarketEntry } from './economy.ts';
 import { FRESH_GOODS } from '../data/ships.ts';
-import { capacityOf, cargoLoad, fail, getShip, shipClass, type CargoSlot, type GameState, type Ship, type TradeResult } from './state.ts';
+import { addToSlot, capacityOf, cargoLoad, fail, getShip, shipClass, type CargoSlot, type GameState, type Ship, type TradeResult } from './state.ts';
 
 /** Händlerblut am Ruder: etwas bessere Preise */
 const HAENDLER = 0.04;
@@ -57,9 +57,7 @@ function buyInto(
   }
   state.money -= cost;
   m.stock -= amount;
-  const slot = (cargo[goodId] ??= { amount: 0, cost: 0 });
-  slot.amount += amount;
-  slot.cost += cost;
+  addToSlot(cargo, goodId, amount, cost);
   return { ok: true, message: `${amount} t ${good.name} für ${cost} Taler gekauft.`, amount, taler: cost };
 }
 
@@ -79,7 +77,8 @@ function sellFrom(
   if (max <= 0) return fail(`Kein ${good.name} vorrätig.`);
   const m = state.markets[town][goodId];
   if (!m) return fail(`${good.name} wird hier nicht gehandelt.`);
-  const f = sellFactorAt(state, town) * (opts.haendler ? 1 + HAENDLER : 1) * (1 + (opts.bonus ?? 0));
+  // verdorbene Ware bringt weniger
+  const f = sellFactorAt(state, town) * (opts.haendler ? 1 + HAENDLER : 1) * (1 + (opts.bonus ?? 0)) * (slot.fresh ?? 1);
   let amount = 0;
   let revenue = 0;
   for (let i = 1; i <= max; i++) {
@@ -117,6 +116,7 @@ export function buy(state: GameState, shipId: number, goodId: string, wanted: nu
 export function sell(state: GameState, shipId: number, goodId: string, wanted: number, limit = 0): TradeResult {
   const ship = getShip(state, shipId);
   if (!ship.port) return fail('Unterwegs kann nicht gehandelt werden.');
+  // Kühlschiff: frische Ware bringt einen Aufpreis
   const fresh = FRESH_GOODS.includes(goodId) ? (shipClass(ship).fresh ?? 0) : 0;
   const r = sellFrom(state, ship.port, ship.cargo, goodId, wanted, { haendler: isHaendler(ship), limit, bonus: fresh });
   if (!r.ok && r.message.startsWith('Kein ')) return fail(r.message.replace('vorrätig', 'an Bord'));
@@ -140,12 +140,11 @@ export function kontorSell(state: GameState, town: string, goodId: string, wante
 function move(from: Record<string, CargoSlot>, to: Record<string, CargoSlot>, goodId: string, amount: number): void {
   const slot = from[goodId];
   const costShare = Math.round((slot.cost * amount) / slot.amount);
+  const fresh = slot.fresh ?? 1;
   slot.amount -= amount;
   slot.cost -= costShare;
   if (slot.amount < 0.001) delete from[goodId];
-  const dst = (to[goodId] ??= { amount: 0, cost: 0 });
-  dst.amount += amount;
-  dst.cost += costShare;
+  addToSlot(to, goodId, amount, costShare, fresh);
 }
 
 /** Ware vom Schiff ins Kontor */
