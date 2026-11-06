@@ -9,6 +9,7 @@ import { addNews, rand, wind, type GameState, type NewsItem, type RivalShip, typ
 import { planRoute } from './voyage.ts';
 import { houseAvoids, tickRivalry } from './rivalry.ts';
 import { sail } from './navigation.ts';
+import { chargeRival, rivalDocks, rivalFeeFor } from './wasserbau.ts';
 
 const RIVAL_SHIP_NAMES = ['Adler', 'Zuversicht', 'Merkur', 'Stolz', 'Treue', 'Sturmvogel', 'Hanse', 'Glück', 'Kranich', 'Neptun'];
 
@@ -83,13 +84,13 @@ function bestDeal(state: GameState, map: MapDef, r: RivalState, ship: RivalShip)
   const def = RIVAL_BY_ID.get(r.id)!;
   const here = ship.port!;
   const cls = SHIPS[ship.type];
-  const routes = new Map<string, number>();
+  const routes = new Map<string, { hours: number; fee: number }>();
   const empty = { ...rivalType(state, { ...ship, cargo: null }) };
   const full = { ...empty, draft: cls.draft };
   for (const t of map.towns) {
     if (t.id === here) continue;
     const p = planRoute(state, map, here, t.id, full);
-    if (p.ok) routes.set(t.id, p.voyage.hours);
+    if (p.ok) routes.set(t.id, { hours: p.voyage.hours, fee: rivalFeeFor(state, r, p.voyage.legs.map((l) => l.seg), cls.capacity) });
   }
   let best: Deal | null = null;
   for (const [goodId, m] of Object.entries(state.markets[here])) {
@@ -99,11 +100,12 @@ function bestDeal(state: GameState, map: MapDef, r: RivalState, ship: RivalShip)
     if (amount < 8) continue;
     const cost = buyCost(good.base, m, amount);
     if (cost > r.money * 0.8) continue;
-    for (const [dest, hours] of routes) {
+    for (const [dest, { hours, fee }] of routes) {
       const m2 = state.markets[dest][goodId];
       if (!m2) continue;
       const revenue = sellRevenue(good.base, m2, amount, r.kontore.includes(dest) ? 0.95 : 0.9);
-      const profit = revenue - cost;
+      // Gebühren für fremde Bauwerke schmälern den Gewinn
+      const profit = revenue - cost - fee;
       if (profit < amount * 2) continue;
       const score = (profit * (def.favorite[goodId] ?? 1)) / (hours + 8);
       if (!best || score > best.score) best = { good: goodId, amount, cost, dest, score };
@@ -135,7 +137,10 @@ function rivalBunker(state: GameState, r: RivalState, ship: RivalShip, hours: nu
 function sailTo(state: GameState, map: MapDef, ship: RivalShip, dest: string, r?: RivalState): boolean {
   const plan = planRoute(state, map, ship.port!, dest, rivalType(state, ship));
   if (!plan.ok) return false;
-  if (r) rivalBunker(state, r, ship, plan.voyage.hours);
+  if (r) {
+    rivalBunker(state, r, ship, plan.voyage.hours);
+    chargeRival(state, r, plan.voyage, SHIPS[ship.type].capacity);
+  }
   ship.voyage = plan.voyage;
   ship.port = null;
   return true;
@@ -183,7 +188,9 @@ export function moveRivals(state: GameState, map: MapDef, hours: number): void {
         if (v.elapsed >= v.hours - 1e-6) {
           ship.port = v.to;
           ship.voyage = null;
-          ship.idleUntil = state.hour + 3 + Math.floor(rand(state) * 4); // Liegezeit zum Laden
+          // Liegezeit zum Laden, im ausgebauten Hafen kürzer; dort wird Liegegeld fällig
+          const quick = rivalDocks(state, r, ship.port);
+          ship.idleUntil = state.hour + (3 + Math.floor(rand(state) * 4)) * quick;
         }
         continue;
       }

@@ -19,6 +19,7 @@ import { buildBridge, buildTown, placeTown, type TownView } from './render/towns
 import { dateText, dayInSeason, dayOfYear, season, SEASON_NAME, SEASONS, type Season } from './sim/calendar.ts';
 import { acceptContract, deliverContract } from './sim/contracts.ts';
 import { dismissCaptain, hireCaptain, repair, upgrade } from './sim/fleet.ts';
+import { setCaptainWage } from './sim/captains.ts';
 import {
   advance,
   buy,
@@ -47,7 +48,8 @@ import {
   type TradeResult,
   type Voyage,
 } from './sim/game.ts';
-import { startProject } from './sim/works.ts';
+import { buildHarbor, dredge, setFee, setUpkeep, startProjectWith } from './sim/wasserbau.ts';
+import type { FeeLevel } from './sim/state.ts';
 import { EPOCHS } from './data/ships.ts';
 import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
 import { goalDone, goalProgress } from './sim/goals.ts';
@@ -337,8 +339,25 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
     case 'dismiss':
       r = dismissCaptain(state, selected);
       break;
+    case 'wage':
+      r = setCaptainWage(state, selected, n('wage'));
+      break;
     case 'project':
-      r = startProject(state, String(d.id));
+      r = startProjectWith(state, VALLEY, String(d.id), d.partner === 'stadt' || d.partner === 'haus' ? d.partner : undefined);
+      ok = 'glocke';
+      break;
+    case 'workFee':
+      r = setFee(state, String(d.id), String(d.level) as FeeLevel);
+      break;
+    case 'workUpkeep':
+      r = setUpkeep(state, String(d.id), String(d.on) === '1');
+      break;
+    case 'dredge':
+      r = dredge(state, String(d.id));
+      ok = 'erfolg';
+      break;
+    case 'harbor':
+      r = buildHarbor(state, VALLEY, String(d.town), d.partner === 'stadt');
       ok = 'glocke';
       break;
     case 'accept':

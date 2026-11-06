@@ -1,4 +1,5 @@
-import { CAPTAIN_FIRST, CAPTAIN_LAST, TRAITS, type Trait } from '../data/captains.ts';
+import { CAPTAIN_FIRST, CAPTAIN_LAST, MAX_WAGE } from '../data/captains.ts';
+import { fairWage, LOYALTY_START, rollTrait } from './captains.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { SHIPS, UPGRADE_BY_ID } from '../data/ships.ts';
@@ -156,18 +157,25 @@ export function dismantleRaft(state: GameState, shipId: number): TradeResult {
 
 /* ---------- Kapitäne ---------- */
 
-const TRAIT_LIST = Object.keys(TRAITS) as Trait[];
+/** Anteil erfahrener Kapitäne mit zweiter Eigenschaft in der Hafenkneipe */
+const VETERAN_SHARE = 0.12;
 
 export function newCaptain(state: GameState): Captain {
-  const trait = pick(state, TRAIT_LIST);
-  const wage = randInt(state, 4, 8) + (trait === 'haendler' ? 2 : 0);
-  return {
+  const trait = rollTrait(state);
+  const veteran = rand(state) < VETERAN_SHARE;
+  const c: Captain = {
     id: state.nextId++,
     name: `${pick(state, CAPTAIN_FIRST)} ${pick(state, CAPTAIN_LAST)}`,
     trait,
-    wage,
-    hire: wage * 15 + randInt(state, 0, 4) * 10,
+    wage: 0,
+    hire: 0,
+    km: veteran ? randInt(state, 40, 120) * 10 : randInt(state, 0, 15) * 10,
   };
+  if (veteran) c.trait2 = rollTrait(state, trait);
+  // Wer anheuert, verhandelt: bis zu 4 Taler über dem, was er wert ist
+  c.wage = Math.min(MAX_WAGE, fairWage(c) + randInt(state, 0, 4));
+  c.hire = c.wage * 10 + randInt(state, 0, 4) * 10;
+  return c;
 }
 
 /** Hafenkneipen bekommen alle 20 Tage neue Leute */
@@ -188,16 +196,28 @@ export function hireCaptain(state: GameState, shipId: number, captainId: number)
   if (c.hire > state.money) return fail(`${c.name} will ${c.hire} Taler Handgeld.`);
   state.money -= c.hire;
   state.tavern[ship.port] = list.filter((x) => x.id !== captainId);
-  if (ship.captain) state.tavern[ship.port].push(ship.captain);
+  if (ship.captain) state.tavern[ship.port].push(releaseCaptain(ship.captain));
+  c.loyalty = LOYALTY_START;
   ship.captain = c;
   return { ok: true, message: `${c.name} führt jetzt die ${ship.name}.`, amount: 0, taler: c.hire };
+}
+
+/** Wer zurück in die Kneipe geht, vergisst Angebot und Kränkung und verlangt wieder, was er wert ist */
+function releaseCaptain(c: Captain): Captain {
+  c.offer = undefined;
+  c.promised = undefined;
+  c.warned = undefined;
+  c.loyalty = undefined;
+  c.wage = Math.max(c.wage, fairWage(c));
+  c.hire = c.wage * 10;
+  return c;
 }
 
 export function dismissCaptain(state: GameState, shipId: number): TradeResult {
   const ship = getShip(state, shipId);
   if (!ship.captain) return fail('Kein Kapitän an Bord.');
   const name = ship.captain.name;
-  if (ship.port) (state.tavern[ship.port] ??= []).push(ship.captain);
+  if (ship.port) (state.tavern[ship.port] ??= []).push(releaseCaptain(ship.captain));
   ship.captain = null;
   if (ship.route) ship.route.active = false;
   return { ok: true, message: `${name} geht von Bord.`, amount: 0, taler: 0 };

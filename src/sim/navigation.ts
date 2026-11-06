@@ -1,3 +1,4 @@
+import { hasTrait } from '../data/captains.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import { SHIPS } from '../data/ships.ts';
@@ -68,10 +69,43 @@ export function progressFactor(state: GameState, type: string, seg: string, hour
   return nightSpeed(type);
 }
 
+/** Ein Stück der Fahrt: Liegezeit im Hafen (seg null) oder ein Abschnitt, in Stunden voller Fahrt seit Fahrtbeginn */
+export interface Span {
+  seg: string | null;
+  /** Index des Abschnitts in `legs`, -1 für Liegezeit */
+  index: number;
+  start: number;
+  end: number;
+}
+
+/** Ablauf einer Fahrt: Laden, Abschnitte, Löschen */
+export function spans(v: Voyage): Span[] {
+  const out: Span[] = [];
+  let t = 0;
+  if (v.dock) {
+    out.push({ seg: null, index: -1, start: 0, end: v.dock });
+    t = v.dock;
+  }
+  v.legs.forEach((l, i) => {
+    out.push({ seg: l.seg, index: i, start: t, end: t + l.hours });
+    t += l.hours;
+  });
+  if (v.dockEnd) out.push({ seg: null, index: -1, start: t, end: t + v.dockEnd });
+  return out;
+}
+
+/** Stück, in dem der Fortschritt `t` liegt; am Ende eines Stücks zählt schon das nächste */
+function spanAt(list: Span[], t: number): number {
+  let i = 0;
+  while (i < list.length - 1 && t >= list[i].end - 1e-9) i++;
+  return i;
+}
+
 /**
  * Fahrt vorwärts rechnen: höchstens `budget` echte Stunden ab `hour`, höchstens bis zum Fortschritt `stopAt`.
  * Gerechnet wird in Stücken bis zur nächsten vollen Stunde oder zum Ende des Abschnitts,
  * weil sich Nacht und Leuchtfeuer nur dort ändern. So stimmen Fahrt und Ankunftsschätzung genau überein.
+ * Laden und Löschen im Hafen gehen auch nachts im vollen Tempo.
  */
 export function sail(
   state: GameState,
@@ -83,19 +117,20 @@ export function sail(
   lit = litSegments(state),
 ): { progress: number; real: number } {
   const end = Math.min(v.hours, stopAt);
+  const list = spans(v);
   let done = v.elapsed;
   let real = 0;
-  let li = 0;
-  let legEnd = v.legs[0]?.hours ?? 0;
-  while (li < v.legs.length - 1 && done >= legEnd - 1e-9) legEnd += v.legs[++li].hours;
+  let si = spanAt(list, done);
   for (let guard = 0; done < end - 1e-9 && real < budget - 1e-9 && guard < 100000; guard++) {
-    const f = progressFactor(state, type, v.legs[li].seg, hour, lit);
+    const span = list[si];
+    const f = span?.seg ? progressFactor(state, type, span.seg, hour, lit) : 1;
+    const spanEnd = span && si < list.length - 1 ? span.end : end;
     const nextHour = Math.floor(hour + 1e-9) + 1;
-    const piece = Math.min(nextHour - hour, budget - real, (Math.min(legEnd, end) - done) / f);
+    const piece = Math.min(nextHour - hour, budget - real, (Math.min(spanEnd, end) - done) / f);
     done += piece * f;
     real += piece;
     hour += piece;
-    while (li < v.legs.length - 1 && done >= legEnd - 1e-9) legEnd += v.legs[++li].hours;
+    si = spanAt(list, done);
   }
   return { progress: Math.max(0, done - v.elapsed), real };
 }
@@ -151,7 +186,7 @@ export function groundingRisks(state: GameState, map: MapDef, ship: Ship, v: Voy
     if (!seg) continue;
     const clearance = segmentDepth(seg, state.waterLevel) - draft;
     const dark = isNight(state.hour) && !lit.includes(leg.seg);
-    const chance = groundingChance(clearance, { careful: ship.captain?.trait === 'vorsichtig', dark });
+    const chance = groundingChance(clearance, { careful: hasTrait(ship.captain, 'vorsichtig'), dark });
     if (chance > 0) out.push({ seg: leg.seg, clearance, chance });
   }
   return out;
@@ -188,7 +223,7 @@ function rollLeg(state: GameState, map: MapDef, ship: Ship, v: Voyage, index: nu
   // ist der Pegel seit der Abfahrt unter den Tiefgang gefallen, wird es so knapp wie möglich
   const clearance = Math.max(0, segmentDepth(seg, state.waterLevel) - effectiveDraft(ship));
   const dark = isNight(hour) && !litSegments(state).includes(leg.seg);
-  const chance = groundingChance(clearance, { careful: ship.captain?.trait === 'vorsichtig', dark });
+  const chance = groundingChance(clearance, { careful: hasTrait(ship.captain, 'vorsichtig'), dark });
   if (chance <= 0) return;
   if (dice(ship.id, Math.floor(hour), index) >= chance) return;
   const where = 0.3 + 0.4 * dice(ship.id, index, Math.floor(hour) + 7);
@@ -218,10 +253,11 @@ function applyGrounding(state: GameState, map: MapDef, ship: Ship, at: Voyage, v
  * Eine Stunde (oder weniger) Fahrt: Fortschritt in Stunden voller Fahrt, der in dieser Zeit geschafft wird.
  * Kümmert sich um Nacht, Stillstand nach Grundberührung und das Würfeln bei Einfahrt in knappe Abschnitte.
  */
-export function voyageProgress(state: GameState, map: MapDef, ship: Ship, hours: number, events: GameEvent[]): number {
+export function voyageProgress(state: GameState, map: MapDef, ship: Ship, hours: number, events: GameEvent[]): { progress: number; real: number } {
   const v = ship.voyage;
-  if (!v) return 0;
+  if (!v) return { progress: 0, real: 0 };
   const lit = litSegments(state);
+  const list = spans(v);
   let hour = state.hour - hours;
   let left = hours;
   let progress = 0;
@@ -235,13 +271,9 @@ export function voyageProgress(state: GameState, map: MapDef, ship: Ship, hours:
     }
     const elapsed = v.elapsed + progress;
     if (elapsed >= v.hours - 1e-9) break;
-    // Abschnitt, in dem das Schiff gerade fährt; am Ende eines Abschnitts zählt schon der nächste
-    let index = 0;
-    let legStart = 0;
-    while (index < v.legs.length - 1 && elapsed >= legStart + v.legs[index].hours - 1e-9) legStart += v.legs[index++].hours;
-    const legEnd = legStart + v.legs[index].hours;
-    if (v.checked === undefined || v.checked < index) rollLeg(state, map, ship, v, index, legStart, elapsed, hour);
-    const stopAt = v.groundAt !== undefined ? Math.min(v.groundAt, legEnd) : legEnd;
+    const span = list[spanAt(list, elapsed)];
+    if (span.index >= 0 && (v.checked === undefined || v.checked < span.index)) rollLeg(state, map, ship, v, span.index, span.start, elapsed, hour);
+    const stopAt = v.groundAt !== undefined ? Math.min(v.groundAt, span.end) : span.end;
     const r = sail(state, ship.type, { ...v, elapsed }, hour, left, stopAt, lit);
     progress += r.progress;
     left -= r.real;
@@ -249,7 +281,7 @@ export function voyageProgress(state: GameState, map: MapDef, ship: Ship, hours:
     if (v.groundAt !== undefined && v.elapsed + progress >= v.groundAt - 1e-9) applyGrounding(state, map, ship, { ...v, elapsed: v.elapsed + progress }, v, events);
     else if (r.real <= 1e-12 && r.progress <= 1e-12) break;
   }
-  return progress;
+  return { progress, real: hours - left };
 }
 
 /* ---------- Leichtern ---------- */

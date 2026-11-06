@@ -988,6 +988,14 @@ ul.plain small {
   font-size: 12px;
 }
 
+.captain .wage-btns {
+  order: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
 .chip .auto {
   font-style: normal;
   font-size: 10px;
