@@ -354,6 +354,10 @@ export interface GameState {
     rafts: number; // zerlegte Flöße
     trips: number;
     contracts: number; // erfüllte Aufträge
+    /** Fahrstunden je Kohledampfer am laufenden Tag (Kapitel 4) */
+    steamToday?: Record<number, number>;
+    /** Dampfertage: je Tag und Kohledampfer mit genug Fahrstunden einer (Kapitel 4) */
+    steamDays?: number;
   };
   kontore: Record<string, Kontor>;
   betriebe: Betrieb[];

@@ -4,7 +4,7 @@ import type { SegmentDef, TownDef } from '../data/maps/valley.ts';
 import { houseModel, type HouseType } from './houses.ts';
 import { boxGeo, cylGeo, DECAL_MATERIAL, KIT_MATERIAL, Kit } from './kit.ts';
 import { barrel, C, crate, type Anim } from './landmarks.ts';
-import { inWorld, Landscape, mulberry32, RIVER_HALF_WIDTH } from './landscape.ts';
+import { Landscape, mulberry32, RIVER_HALF_WIDTH } from './landscape.ts';
 import { DEFAULT_STYLE, TOWN_STYLES, type StyleCtx, type TownStyle } from './townstyles.ts';
 
 export interface TownPlacement {
@@ -44,7 +44,18 @@ export function placeTown(land: Landscape, def: TownDef): TownPlacement {
   const n = land.normalAt(def.river, def.riverT).multiplyScalar(def.side);
   const hw = land.halfWidth(def.river);
   const radius = 5 + def.houses * 0.42;
-  const center = p.clone().addScaledVector(n, hw + 3 + radius);
+  let center = p.clone().addScaledVector(n, hw + 3 + radius);
+  // Läuft ein Kanal durch die Stadtmitte, rückt die Stadt am Ufer entlang zur Seite
+  if (land.nearCanal(center.x, center.z, radius * 0.8)) {
+    const tan = land.tangentAt(def.river, def.riverT);
+    for (const shift of [0.9, -0.9, 1.3, -1.3, 1.7, -1.7]) {
+      const c = center.clone().addScaledVector(tan, shift * radius);
+      if (!land.nearCanal(c.x, c.z, radius * 0.8) && land.inWorld(c.x, c.z, radius)) {
+        center = c;
+        break;
+      }
+    }
+  }
   const mooring = p.clone().addScaledVector(n, Math.max(0.6, hw - 1.3));
   const len = land.curve(def.river).getLength();
   // Plätze, die über das Flussende oder den Kartenrand hinausragen würden, entfallen; dafür rücken weiter entfernte nach
@@ -62,7 +73,7 @@ export function placeTown(land: Landscape, def: TownDef): TownPlacement {
       off += 1;
       pos = q.clone().addScaledVector(qn, off);
     }
-    if (!inWorld(pos.x, pos.z, 4.5)) continue;
+    if (!land.inWorld(pos.x, pos.z, 4.5) || land.nearCanal(pos.x, pos.z, 3)) continue;
     pos.y = land.heightAt(pos.x, pos.z);
     lots.push({ pos, facing: Math.atan2(qn.x, qn.z) + Math.PI });
   }
@@ -77,7 +88,7 @@ export function placeTown(land: Landscape, def: TownDef): TownPlacement {
       // um einen halben Schritt versetzt, damit kein Platz auf einer Hauptachse liegt
       const a = Math.atan2(-n.z, -n.x) + Math.PI / 2 + ((k + 0.5) * 2 * Math.PI) / CIVIC_ANGLES;
       const pos = new THREE.Vector3(center.x + Math.cos(a) * ring, 0, center.z + Math.sin(a) * ring);
-      if (!inWorld(pos.x, pos.z, 4.5)) continue;
+      if (!land.inWorld(pos.x, pos.z, 4.5) || land.nearCanal(pos.x, pos.z, 3)) continue;
       // nicht auf die Straßen: Weg zum Steg (v = 0), Querstraße (u = 0), Uferstraße hinter den Kontoren
       const du = (pos.x - center.x) * n.x + (pos.z - center.z) * n.z;
       const dv = (pos.x - center.x) * tangent.x + (pos.z - center.z) * tangent.z;
@@ -274,7 +285,8 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
       const a = road.pts[i];
       const b = road.pts[i + 1];
       if (!onLand(a.x, a.z, 1.6) || !onLand(b.x, b.z, 1.6)) continue;
-      if (!inWorld(a.x, a.z, 1) || !inWorld(b.x, b.z, 1)) continue;
+      if (!land.inWorld(a.x, a.z, 1) || !land.inWorld(b.x, b.z, 1)) continue;
+      if (land.nearCanal(a.x, a.z, 0.5) || land.nearCanal(b.x, b.z, 0.5)) continue;
       const ha = land.surfaceAt(a.x, a.z);
       const hb = land.surfaceAt(b.x, b.z);
       if (ha > 9 || hb > 9) continue;
@@ -336,7 +348,7 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
 
   // --- Wahrzeichen ---
   const freeAt = (x: number, z: number, r: number) => {
-    if (!inWorld(x, z, r + 1)) return false;
+    if (!land.inWorld(x, z, r + 1) || land.nearCanal(x, z, r + 0.5)) return false;
     if (!onLand(x, z, 2.4 + r * 0.6)) return false;
     if (allLots(place).some((l) => Math.hypot(l.pos.x - x, l.pos.z - z) < 3.6 + r)) return false;
     if (reserved.some((s) => Math.hypot(s.x - x, s.z - z) < s.r + r)) return false;
@@ -389,7 +401,8 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
   const gap = 2.9;
   const laneOk = (p: THREE.Vector3) =>
     onLand(p.x, p.z, 2) &&
-    inWorld(p.x, p.z, 1) &&
+    land.inWorld(p.x, p.z, 1) &&
+    !land.nearCanal(p.x, p.z, 0.4) &&
     land.heightAt(p.x, p.z) < 9 &&
     !allLots(place).some((l) => Math.hypot(l.pos.x - p.x, l.pos.z - p.z) < 3.2) &&
     !reserved.some((q) => Math.hypot(q.x - p.x, q.z - p.z) < q.r + 0.3);
@@ -456,7 +469,7 @@ export function buildTown(land: Landscape, place: TownPlacement, seed: number): 
     const model = houseModel(type);
     const s = style.scale * (0.88 + rand() * 0.24) * (r < R * 0.6 ? 1.08 : 1);
     const foot = model.radius * s;
-    if (!inWorld(x, z, foot + 1)) continue;
+    if (!land.inWorld(x, z, foot + 1) || land.nearCanal(x, z, foot + 0.3)) continue;
     if (!onLand(x, z, 2.2 + foot * 0.5)) continue;
     if (land.heightAt(x, z) > 9) continue; // nicht an den Steilhang
     if (spots.some((p) => Math.hypot(p.x - x, p.z - z) < (foot + houseModel(p.type).radius * p.s) * 0.55)) continue;

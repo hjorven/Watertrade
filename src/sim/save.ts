@@ -13,6 +13,8 @@ export interface SaveGame {
   /** Kapitel oder Herausforderung */
   chapter?: string;
   completedGoals: number[];
+  /** Texte der erfüllten Ziele, damit geänderte Kapitel alte Stände richtig zuordnen */
+  completedTexts?: string[];
   /** Spielstunde beim Start, für Zeitlimits */
   startHour?: number;
   /** Tagesmarkt: Kalendertag (UTC) */

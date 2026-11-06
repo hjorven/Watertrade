@@ -35,7 +35,6 @@ import {
   kontorSell,
   load,
   newGame,
-  planVoyage,
   sell,
   shipClass,
   store,
@@ -56,9 +55,10 @@ import type { RoutePlan } from './sim/state.ts';
 import { EPOCHS } from './data/ships.ts';
 import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
 import { buildTownhouse, found, joinCouncil, leaveCouncil } from './sim/standing.ts';
-import { goalDone, goalProgress } from './sim/goals.ts';
+import { goalDone, goalProgress, restoreCompleted } from './sim/goals.ts';
 import { deserialize, SAVE_VERSION, serialize, type GameMode, type SaveGame } from './sim/save.ts';
-import { LEVELS, levelOf, netFlow } from './sim/towns.ts';
+import { LEVELS, levelOf } from './sim/towns.ts';
+import { chapterOneHint } from './ui/tutorial.ts';
 import { ALL_FEATURES, Hud, type HudFeatures } from './ui/hud.ts';
 import { Menu, type SlotInfo } from './ui/menu.ts';
 import { loadJson, saveJson } from './ui/storage.ts';
@@ -685,51 +685,11 @@ function featuresFor(sess: Session): HudFeatures {
   return ALL_FEATURES;
 }
 
-/** Nächstgelegene erreichbare Stadt mit Bedarf an einer Ware */
-function buyerFor(ship: Ship, good: string): string | null {
-  let best: { town: string; hours: number } | null = null;
-  for (const def of VALLEY.towns) {
-    if (def.id === ship.port || !state.markets[def.id][good]) continue;
-    if (netFlow(def, good, state.towns[def.id]) >= 0) continue;
-    const plan = planVoyage(state, VALLEY, ship.id, def.id);
-    if (!plan?.ok) continue;
-    if (!best || plan.voyage.hours < best.hours) best = { town: def.id, hours: plan.voyage.hours };
-  }
-  return best?.town ?? null;
-}
-
-/** Erster Handel: Überschussware hier, mit einem nahen Abnehmer */
-function bestFirstTrade(ship: Ship): { good: string; town: string } | null {
-  const here = VALLEY.towns.find((t) => t.id === ship.port);
-  if (!here) return null;
-  for (const g of GOODS) {
-    if (!state.markets[here.id][g.id] || netFlow(here, g.id, state.towns[here.id]) <= 0) continue;
-    const town = buyerFor(ship, g.id);
-    if (town) return { good: g.id, town };
-  }
-  return null;
-}
-
 /** Nächster Schritt im ersten Kapitel, solange man noch lernt */
 function tutorialHint(): string | null {
   if (session.mode !== 'kampagne' || session.chapter?.id !== 'k1' || session.finished) return null;
   const ship = current();
-  if (!ship) return null;
-  const aboard = Object.entries(ship.cargo).find(([, c]) => c.amount > 0)?.[0];
-  if (!state.firstProfitDone) {
-    if (ship.voyage) return 'Unterwegs. Oben rechts lässt sich die Zeit mit <b>4×</b> beschleunigen.';
-    if (!aboard) {
-      const tip = bestFirstTrade(ship);
-      return tip
-        ? `Kauf eine Ware, die hier im <b>Überschuss</b> ist, denn dann ist sie billig. Zum Beispiel <b>${GOOD_BY_ID.get(tip.good)!.name}</b> mit <b>+10</b>, das wird in <b>${townName(tip.town)}</b> gebraucht.`
-        : 'Kauf eine Ware, die hier im <b>Überschuss</b> ist, denn dann ist sie billig, und bring sie in eine Stadt mit <b>Bedarf</b>.';
-    }
-    const dest = buyerFor(ship, aboard);
-    return `Liegt der Verkaufspreis über deinem Einkauf (ø), verkauf mit <b>Verkaufen</b>. Sonst leg ab${dest ? ` nach <b>${townName(dest)}</b>, dort wird ${GOOD_BY_ID.get(aboard)!.name} gebraucht` : ' zu einer Stadt mit <b>Bedarf</b> an der Ware'}.`;
-  }
-  if (state.stats.rafts < 1)
-    return 'Erster Gewinn! In der <b>Werft</b> kannst du aus 20 t Holz ein Floß zimmern. Es treibt nur talwärts, nimmt noch 30 t Ladung mit und wird am Ziel zerlegt und als Holz verkauft.';
-  return null;
+  return ship ? chapterOneHint(state, VALLEY, ship, townName) : null;
 }
 
 // --- Speichern ---
@@ -753,6 +713,7 @@ function makeSave(): SaveGame {
     mode: session.mode,
     chapter: session.chapter?.id,
     completedGoals: [...session.completed],
+    completedTexts: session.chapter ? [...session.completed].map((i) => session.chapter!.goals[i]?.text).filter((t): t is string => !!t) : undefined,
     startHour: session.startHour,
     dailyDay: session.dailyDay,
     dailyScored: session.dailyScored,
@@ -787,12 +748,16 @@ function startSave(save: SaveGame): boolean {
   if (!save?.state || !Array.isArray(save.state.ships)) return false;
   const chapter = [...CHAPTERS, ...CHALLENGES].find((c) => c.id === save.chapter);
   const daysPlayed = save.startHour !== undefined ? (save.state.hour - save.startHour) / 24 : 0;
-  startGame(upgradeState(save.state, VALLEY), {
+  const loaded = upgradeState(save.state, VALLEY);
+  // nur Kampagnenkapitel wurden umgebaut, Herausforderungen behalten ihre Nummern
+  const remap = !!chapter && (!!save.completedTexts || save.mode === 'kampagne');
+  const completed = remap ? restoreCompleted(loaded, chapter!.goals, save.completedGoals, save.completedTexts) : new Set(save.completedGoals);
+  startGame(loaded, {
     mode: save.mode,
     chapter,
-    completed: new Set(save.completedGoals),
+    completed,
     finished:
-      (!!chapter && save.completedGoals.length >= chapter.goals.length) ||
+      (!!chapter && completed.size >= chapter.goals.length) ||
       (save.mode === 'tagesmarkt' && daysPlayed >= DAILY_DAYS) ||
       (save.mode === 'herausforderung' && !!chapter?.deadlineDays && daysPlayed >= chapter.deadlineDays),
     startHour: save.startHour,
@@ -842,7 +807,8 @@ function checkGoals(silent = false): void {
       const p = goalProgress(state, g);
       const done = session.completed.has(i);
       const binary = ['profit', 'townLevel', 'rank', 'project'].includes(g.type);
-      const progressText = binary ? '' : `${fmtNum(Math.min(p.value, p.target))} / ${fmtNum(p.target)}`;
+      const unit = g.type === 'supply' ? ' %' : '';
+      const progressText = binary ? '' : `${fmtNum(Math.min(p.value, p.target))} / ${fmtNum(p.target)}${unit}`;
       return { text: g.text, done, progress: progressText };
     }),
   );

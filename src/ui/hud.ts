@@ -589,7 +589,7 @@ export class Hud {
         const dockText = (dockH >= 0.5 ? ` (davon ${fmtHours(dockH)} Laden und Löschen)` : '') + lighter;
         const coal = bunkerPlan(state, ship, sailingHours(v), v.toll ?? 0);
         if (coal.problem) return `<button class="btn dest" disabled title="${coal.problem}"><b>${t.name}</b><small>${coal.buy ? `${coal.buy} t Kohle fehlen` : 'Bunker zu klein'}</small></button>`;
-        const coalText = coal.need ? `, Kohle ${String(coal.need).replace('.', ',')} t${coal.buy ? `, bunkert ${coal.buy} t für ${coal.cost} Taler` : ''}` : '';
+        const coalText = coal.need ? `, Kohle ${String(coal.need).replace('.', ',')} t${coal.fromKontor ? `, ${coal.fromKontor} t aus dem Kontor` : ''}${coal.buy ? `, bunkert ${coal.buy} t für ${coal.cost} Taler` : ''}` : '';
         const tooDear = (v.toll ?? 0) + coal.cost > state.money;
         return `<button class="btn dest" data-act="depart" data-to="${t.id}" ${tooDear ? 'disabled' : ''}><b>${t.name}</b><small>${dir}, ${fmtHours(v.hours)}${dockText}${toll}${coalText}</small></button>`;
       })
@@ -608,8 +608,8 @@ export class Hud {
     const cls = shipClass(ship);
     const bunker = cls.coal ? ` · Bunker <b>${Math.floor(ship.bunker ?? 0)}/${cls.bunker} t</b> Kohle` : '';
     const bunkerBtn =
-      cls.coal && market.kohle && (ship.bunker ?? 0) < (cls.bunker ?? 0) - 1
-        ? `<button class="btn wide" data-act="cmd" data-cmd="bunker">Bunker füllen<small>Kohle vom Markt für Häfen ohne Kohlehandel</small></button>`
+      cls.coal && (market.kohle || (kontor?.stock.kohle?.amount ?? 0) >= 1) && (ship.bunker ?? 0) < (cls.bunker ?? 0) - 1
+        ? `<button class="btn wide" data-act="cmd" data-cmd="bunker">Bunker füllen<small>${(kontor?.stock.kohle?.amount ?? 0) >= 1 ? 'Erst eigene Kohle aus dem Kontor, dann vom Markt' : 'Kohle vom Markt für Häfen ohne Kohlehandel'}</small></button>`
         : '';
 
     const here = state.contracts.filter((c) => c.accepted && c.town === town.id);
