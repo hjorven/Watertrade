@@ -30,6 +30,10 @@ import {
   todayUtc,
   topDaily,
   type Result,
+  REALTIME_MAX_FAILURES,
+  onRealtimeGiveUp,
+  realtimeBackoff,
+  realtimeGaveUpAlready,
 } from './index.ts';
 
 function expectOffline<T>(r: Result<T>): void {
@@ -165,5 +169,38 @@ describe('Hilfsfunktionen', () => {
     const p = { userId: 'x', gold: 0, cargo: {}, townId: 'oberau', wealth: 0, arrivesAt: '2026-11-06T12:00:30Z' };
     expect(secondsUntilArrival(p, now)).toBe(30);
     expect(secondsUntilArrival({ ...p, arrivesAt: '2026-11-06T11:00:00Z' }, now)).toBe(0);
+  });
+});
+
+describe('Realtime-Backoff', () => {
+  afterEach(() => resetOnlineForTests());
+
+  it('wartet immer länger und gibt nach REALTIME_MAX_FAILURES Versuchen auf', async () => {
+    resetOnlineForTests();
+    initOnline({ url: 'https://beispiel.supabase.co', key: 'sb_publishable_test' });
+    let gaveUp = 0;
+    onRealtimeGiveUp(() => gaveUp++);
+    const delays = [1, 2, 3].map((t) => realtimeBackoff(t));
+    expect(delays[0]).toBeLessThan(delays[1]);
+    expect(delays[1]).toBeLessThan(delays[2]);
+    await Promise.resolve();
+    expect(gaveUp).toBe(0);
+    realtimeBackoff(REALTIME_MAX_FAILURES);
+    realtimeBackoff(REALTIME_MAX_FAILURES + 1);
+    await Promise.resolve();
+    expect(gaveUp).toBe(1);
+    expect(realtimeGaveUpAlready()).toBe(true);
+    expect(getStatus()).toBe('fehler');
+  });
+
+  it('ein neues Abo setzt den Abbruch zurück', async () => {
+    resetOnlineForTests();
+    initOnline({ url: 'https://beispiel.supabase.co', key: 'sb_publishable_test' });
+    realtimeBackoff(REALTIME_MAX_FAILURES);
+    await Promise.resolve();
+    expect(realtimeGaveUpAlready()).toBe(true);
+    const stop = subscribeLeagueMarket(() => {});
+    expect(realtimeGaveUpAlready()).toBe(false);
+    stop();
   });
 });
