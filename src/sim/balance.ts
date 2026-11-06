@@ -52,8 +52,8 @@ function bestTrade(state: GameState, map: MapDef, shipId: number, allow: (town: 
       // verschiedene Mengen probieren, große Mengen drücken den Preis am Ziel
       for (let amount = 5; amount <= max; amount += 5) {
         const cost = buyCost(base, m, amount);
-        if (cost > state.money) break;
-        if (cost + coal.cost > state.money) break;
+        // Kohle und Zoll beim Ablegen müssen nach dem Einkauf noch bezahlbar sein
+        if (cost + coal.cost + (plan.voyage.toll ?? 0) > state.money) break;
         // verderbliche Ware kommt ohne Kühlraum mit weniger Wert an
         const fresh = shipClass(ship).fresh ? 1 : Math.max(MIN_FRESH, 1 - ((PERISH[goodId] ?? 0) * plan.voyage.hours) / 24);
         const perHour = (sellRevenue(base, dest, amount, SELL_FACTOR * fresh) - cost - coalCost) / plan.voyage.hours;
