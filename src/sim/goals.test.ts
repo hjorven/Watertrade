@@ -6,6 +6,7 @@ import { goalDone, goalProgress } from './goals.ts';
 import { deserialize, SAVE_VERSION, serialize } from './save.ts';
 
 const k1 = CHAPTERS[0];
+const goal = (type: string, n?: number) => k1.goals.find((g) => g.type === type && (n === undefined || ('count' in g && g.count === n)))!;
 const start = () =>
   newGame(VALLEY, { startTown: k1.startTown, money: k1.money, startShip: k1.startShip, allowedShips: k1.allowedShips });
 
@@ -20,16 +21,17 @@ describe('Kapitel 1', () => {
     s.money = 5000;
     expect(buyShip(s, VALLEY, 'muehlheim', 'plaette').ok).toBe(false);
     expect(buyShip(s, VALLEY, 'muehlheim', 'treidelkahn').ok).toBe(true);
-    expect(goalDone(s, k1.goals[3])).toBe(true);
+    expect(goalDone(s, goal('ships', 2))).toBe(true);
   });
 
   it('Floß zerlegen und Getreide liefern zählen', () => {
     const s = start();
     const raft = buyShip(s, VALLEY, 'oberau', 'floss').ship!;
+    expect(goalDone(s, goal('ships', 1))).toBe(true);
     expect(depart(s, VALLEY, raft.id, 'kesselbrueck')).not.toBeNull();
     advance(s, VALLEY, hoursToArrival(s, raft));
     dismantleRaft(s, raft.id);
-    expect(goalDone(s, k1.goals[1])).toBe(true);
+    expect(goalDone(s, goal('rafts', 1))).toBe(true);
 
     const kahn = s.ships[0];
     expect(depart(s, VALLEY, kahn.id, 'muehlheim')).not.toBeNull();
@@ -39,7 +41,7 @@ describe('Kapitel 1', () => {
     expect(depart(s, VALLEY, kahn.id, 'oberau')).not.toBeNull();
     advance(s, VALLEY, hoursToArrival(s, kahn));
     sell(s, kahn.id, 'getreide', 20);
-    expect(goalProgress(s, k1.goals[2]).value).toBe(20);
+    expect(goalProgress(s, goal('deliver')).value).toBe(20);
   });
 });
 

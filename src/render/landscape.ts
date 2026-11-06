@@ -2,10 +2,54 @@ import * as THREE from 'three';
 import type { RiverDef } from '../data/maps/valley.ts';
 import type { Season } from '../sim/calendar.ts';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { CANAL_BANK, CANAL_BED, CANAL_TOWPATH, CANAL_TRENCH, CanalView } from './canalview.ts';
 
-/** Größe des Dioramas in Welteinheiten (1 Einheit ≈ 0,5 km, nur optisch) */
+/** Größe des Dioramas in Welteinheiten (1 Einheit ≈ 0,5 km, nur optisch); Vorgabe für das Tal */
 export const WORLD_W = 220;
 export const WORLD_D = 140;
+
+/** Ausdehnung einer Karte; fehlt sie in der Karte, gilt das Tal */
+export interface WorldBounds {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+export const VALLEY_BOUNDS: WorldBounds = { minX: -WORLD_W / 2, maxX: WORLD_W / 2, minZ: -WORLD_D / 2, maxZ: WORLD_D / 2 };
+
+/** Fluss oder Kanal (das Feld `canal` kommt mit der Kanalkarte) */
+type RiverLike = RiverDef & { canal?: boolean };
+
+/** Fortschritt des Kanalbaus, wie ihn canalProgress liefert (Stufen 0 bis 3, dann fertig) */
+export interface CanalBuild {
+  stage: number;
+  stageShare: number;
+  done: boolean;
+}
+
+/** Ein Stützpunkt entlang eines Kanals: Lage, Richtung und Wasserspiegel der Haltung */
+export interface CanalPoint {
+  x: number;
+  z: number;
+  /** Richtung (Einheitsvektor) in der Ebene */
+  dx: number;
+  dz: number;
+  /** 0 am Anfang, 1 am Ende */
+  s: number;
+  /** Höhe des Wasserspiegels dieser Haltung */
+  level: number;
+  /** Über die Nachbarn gemittelter Spiegel, damit die Böschungen an Schleusen keine Stufe bekommen */
+  soft: number;
+}
+
+export interface CanalLine {
+  river: string;
+  halfWidth: number;
+  points: CanalPoint[];
+  /** Indizes der Punkte, an denen eine Schleuse liegt (Haltungswechsel) */
+  locks: number[];
+}
+
 /** Halbe Breite des Hauptstroms; schmalere Flüsse werden auf dieses Maß umgerechnet */
 export const RIVER_HALF_WIDTH = 3.6;
 const BASE_Y = -7;
@@ -76,11 +120,6 @@ const ROCK: Record<Season, number[]> = {
 const PLINTH = 0x5a3d26;
 
 const WATER: Record<Season, number> = { fruehling: 0x4a8aa0, sommer: 0x3f86a3, herbst: 0x3d7a8e, winter: 0x5f8596 };
-
-/** Liegt der Punkt mit Abstand `margin` innerhalb der Kartenplatte? */
-export function inWorld(x: number, z: number, margin = 0): boolean {
-  return Math.abs(x) < WORLD_W / 2 - margin && Math.abs(z) < WORLD_D / 2 - margin;
-}
 
 /** Deterministischer Zufall, damit die Landschaft bei jedem Start gleich aussieht */
 export function mulberry32(seed: number): () => number {
@@ -160,7 +199,11 @@ interface RiverSample {
   n: THREE.Vector3;
   river: RiverDef;
   t: number;
+  /** Flusssystem (Hauptfluss samt Nebenflüssen), für die Wasserscheide zwischen getrennten Tälern */
+  system: number;
 }
+
+const SAMPLE_CELL = 12;
 
 interface Decor {
   mesh: THREE.InstancedMesh;
@@ -193,19 +236,176 @@ export class Landscape {
 
   private readonly townSpots: { pos: THREE.Vector3; radius: number; fields: boolean }[] = [];
 
-  constructor(rivers: RiverDef[]) {
-    this.rivers = rivers;
+  /** Ausdehnung der Kartenplatte */
+  readonly bounds: WorldBounds;
+  /** Breite (x) und Tiefe (z) der Platte, Mittelpunkt */
+  readonly width: number;
+  readonly depth: number;
+  readonly centerX: number;
+  readonly centerZ: number;
+  /** Gemauerte Kanäle mit ihren Haltungen */
+  readonly canals: CanalLine[] = [];
+  /** Flussproben in Zellen, damit riverInfo nicht alle Proben durchgehen muss */
+  private readonly cells = new Map<number, RiverSample[]>();
+  private maxHalfWidth = RIVER_HALF_WIDTH;
+  private readonly canalBox = new Map<string, WorldBounds>();
+  private canalView: CanalView | null = null;
+
+  constructor(rivers: RiverDef[], bounds: WorldBounds = VALLEY_BOUNDS) {
+    this.rivers = rivers.filter((r) => !(r as RiverLike).canal);
+    this.bounds = bounds;
+    this.width = bounds.maxX - bounds.minX;
+    this.depth = bounds.maxZ - bounds.minZ;
+    this.centerX = (bounds.minX + bounds.maxX) / 2;
+    this.centerZ = (bounds.minZ + bounds.maxZ) / 2;
+    const systems = new Map<string, number>();
     for (const r of rivers) {
       const pts = r.points.map(([x, z]) => new THREE.Vector3(x, 0, z));
       if (r.joins) pts.push(this.curves.get(r.joins.river)!.getPointAt(r.joins.t));
-      const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.5);
+      // Kanäle sind gerade gemauert, Flüsse schwingen weich
+      const curve = new THREE.CatmullRomCurve3(pts, false, (r as RiverLike).canal ? 'centripetal' : 'catmullrom', 0.5);
       this.curves.set(r.id, curve);
+      if ((r as RiverLike).canal) continue;
+      const system = r.joins ? (systems.get(r.joins.river) ?? systems.size) : systems.size;
+      systems.set(r.id, system);
+      this.maxHalfWidth = Math.max(this.maxHalfWidth, r.halfWidth);
       const n = Math.round(curve.getLength() * 1.6);
       curve.getSpacedPoints(n).forEach((p, i) => {
         const tan = curve.getTangentAt(i / n);
-        this.samples.push({ p, n: new THREE.Vector3(-tan.z, 0, tan.x).normalize(), river: r, t: i / n });
+        const sample = { p, n: new THREE.Vector3(-tan.z, 0, tan.x).normalize(), river: r, t: i / n, system };
+        this.samples.push(sample);
+        const key = this.cellKey(Math.floor(p.x / SAMPLE_CELL), Math.floor(p.z / SAMPLE_CELL));
+        const list = this.cells.get(key);
+        if (list) list.push(sample);
+        else this.cells.set(key, [sample]);
       });
     }
+    for (const r of rivers) {
+      if (!(r as RiverLike).canal) continue;
+      const line = this.layoutCanal(r);
+      this.canals.push(line);
+      const m = 14;
+      this.canalBox.set(r.id, {
+        minX: Math.min(...line.points.map((p) => p.x)) - m,
+        maxX: Math.max(...line.points.map((p) => p.x)) + m,
+        minZ: Math.min(...line.points.map((p) => p.z)) - m,
+        maxZ: Math.max(...line.points.map((p) => p.z)) + m,
+      });
+    }
+  }
+
+  /** Liegt der Punkt mit Abstand `margin` innerhalb der Kartenplatte? */
+  inWorld(x: number, z: number, margin = 0): boolean {
+    const b = this.bounds;
+    return x > b.minX + margin && x < b.maxX - margin && z > b.minZ + margin && z < b.maxZ - margin;
+  }
+
+  private cellKey(ix: number, iz: number): number {
+    return (ix + 512) * 1024 + (iz + 512);
+  }
+
+  /**
+   * Haltungen eines Kanals: Der Wasserspiegel folgt dem Gelände in Stufen von Schleuse zu Schleuse,
+   * steigt bis zum Scheitel und fällt danach wieder. Tiefer als das Gelände wird eingeschnitten,
+   * höher wird ein Damm aufgeschüttet.
+   */
+  private layoutCanal(r: RiverDef): CanalLine {
+    const curve = this.curves.get(r.id)!;
+    const n = Math.max(8, Math.round(curve.getLength()));
+    const raw: { x: number; z: number; dx: number; dz: number; s: number; ground: number }[] = [];
+    for (let i = 0; i <= n; i++) {
+      const s = i / n;
+      const p = curve.getPointAt(s);
+      const tan = curve.getTangentAt(s);
+      const info = this.riverInfo(p.x, p.z);
+      raw.push({ x: p.x, z: p.z, dx: tan.x, dz: tan.z, s, ground: this.heightFrom(p.x, p.z, info.d, info.t, info.ridge) });
+    }
+    // Gelände geglättet, dann vom Anfang her nur steigend und vom Ende her nur steigend: das ergibt den Scheitel
+    const smooth = raw.map((_, i) => {
+      let sum = 0;
+      let w = 0;
+      for (let k = -4; k <= 4; k++) {
+        const j = Math.min(n, Math.max(0, i + k));
+        sum += raw[j].ground;
+        w++;
+      }
+      return sum / w;
+    });
+    const LOW = 1.1;
+    const STEP = 1.4;
+    const LOCKS = 7; // je Seite, zusammen 14 wie in den Kartendaten
+    const want = smooth.map((g) => Math.min(LOW + STEP * LOCKS, Math.max(LOW, g - 1.2)));
+    const up: number[] = [];
+    const down: number[] = new Array(want.length);
+    want.forEach((w, i) => up.push(Math.max(w, i ? up[i - 1] : 0)));
+    for (let i = want.length - 1; i >= 0; i--) down[i] = Math.max(want[i], i < want.length - 1 ? down[i + 1] : 0);
+    const points: CanalPoint[] = raw.map((q, i) => {
+      const lift = Math.round((Math.min(up[i], down[i]) - LOW) / STEP);
+      return { x: q.x, z: q.z, dx: q.dx, dz: q.dz, s: q.s, level: LOW + Math.max(0, lift) * STEP, soft: 0 };
+    });
+    // Zu kurze Haltungen (unter 6 Punkten) mit der vorigen zusammenlegen, damit Schleusen nicht aufeinander kleben
+    let start = 0;
+    for (let i = 1; i <= points.length; i++) {
+      if (i < points.length && points[i].level === points[start].level) continue;
+      if (i - start < 6 && start > 0) for (let k = start; k < i; k++) points[k].level = points[start - 1].level;
+      start = i;
+    }
+    const locks: number[] = [];
+    for (let i = 1; i < points.length; i++) if (points[i].level !== points[i - 1].level) locks.push(i);
+    points.forEach((p, i) => {
+      let sum = 0;
+      let w = 0;
+      for (let k = -6; k <= 6; k++) {
+        const q = points[Math.min(points.length - 1, Math.max(0, i + k))];
+        sum += q.level;
+        w++;
+      }
+      p.soft = sum / w;
+    });
+    return { river: r.id, halfWidth: r.halfWidth, points, locks };
+  }
+
+  /** Nächster Kanalpunkt und Abstand zur Kanalmitte (Infinity ohne Kanal in der Nähe) */
+  canalAt(x: number, z: number): { d: number; point: CanalPoint; canal: CanalLine } | null {
+    let best: { d: number; point: CanalPoint; canal: CanalLine } | null = null;
+    let bestRaw = Infinity;
+    for (const c of this.canals) {
+      const box = this.canalBox.get(c.river)!;
+      if (x < box.minX || x > box.maxX || z < box.minZ || z > box.maxZ) continue;
+      for (let i = 0; i < c.points.length; i++) {
+        const p = c.points[i];
+        const d = Math.hypot(p.x - x, p.z - z);
+        if (d < bestRaw) {
+          bestRaw = d;
+          // quer zur Achse messen, sonst wird die Ufermauer zwischen den Stützpunkten wellig
+          const along = (x - p.x) * p.dx + (z - p.z) * p.dz;
+          const perp = Math.abs((x - p.x) * -p.dz + (z - p.z) * p.dx);
+          best = { d: Math.abs(along) < 0.75 ? perp : d, point: p, canal: c };
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Baufortschritt des Kanals zeigen (aus canalProgress). Ohne Aufruf bleibt der Kanal unsichtbar,
+   * nur die Trasse ist im Gelände ausgespart. Günstig: baut nur neu, wenn sich der Fortschritt merklich ändert.
+   */
+  setCanal(build: CanalBuild): void {
+    if (!this.canals.length) return;
+    if (!this.canalView) {
+      this.canalView = new CanalView(this);
+      this.group.add(this.canalView.group);
+    }
+    this.canalView.set(build);
+  }
+
+  /** Höhe des Wasserspiegels an einer Stelle des Flusses oder Kanals (für Schiffe) */
+  waterLevelAt(river: string, t: number): number {
+    const c = this.canals.find((k) => k.river === river);
+    if (!c) return 0;
+    const p = c.points[Math.min(c.points.length - 1, Math.max(0, Math.round(t * (c.points.length - 1))))];
+    return p.level - 0.15;
   }
 
   curve(river: string): THREE.CatmullRomCurve3 {
@@ -244,43 +444,93 @@ export class Landscape {
   }
 
   /** Wie riverDistance, dazu die Uferseite (1 rechts, -1 links in Fließrichtung) */
-  private riverInfo(x: number, z: number): { d: number; t: number; side: number; sample: RiverSample } {
+  private riverInfo(x: number, z: number): { d: number; t: number; side: number; sample: RiverSample; ridge: number } {
     let best = Infinity;
     let bestS = this.samples[0];
-    for (const s of this.samples) {
-      const dx = s.p.x - x;
-      const dz = s.p.z - z;
-      const edge = Math.sqrt(dx * dx + dz * dz) - s.river.halfWidth;
-      if (edge < best) {
-        best = edge;
-        bestS = s;
+    const cx = Math.floor(x / SAMPLE_CELL);
+    const cz = Math.floor(z / SAMPLE_CELL);
+    // Ringweise nach außen suchen, bis kein näherer Stützpunkt mehr möglich ist
+    for (let ring = 0; ring < 64; ring++) {
+      for (let ix = cx - ring; ix <= cx + ring; ix++) {
+        for (let iz = cz - ring; iz <= cz + ring; iz++) {
+          if (Math.max(Math.abs(ix - cx), Math.abs(iz - cz)) !== ring) continue;
+          const list = this.cells.get(this.cellKey(ix, iz));
+          if (!list) continue;
+          for (const s of list) {
+            const dx = s.p.x - x;
+            const dz = s.p.z - z;
+            const edge = Math.sqrt(dx * dx + dz * dz) - s.river.halfWidth;
+            if (edge < best) {
+              best = edge;
+              bestS = s;
+            }
+          }
+        }
       }
+      if (best < ring * SAMPLE_CELL - this.maxHalfWidth) break;
     }
     // Talposition weich gemittelt über alle nahen Stützpunkte: sonst springt sie dort, wo zwei Flussarme
     // gleich weit entfernt sind, und das Gelände bekommt eine Kante (Spalte)
     let wSum = 0;
     let tSum = 0;
-    for (const s of this.samples) {
-      const dx = s.p.x - x;
-      const dz = s.p.z - z;
-      const edge = Math.sqrt(dx * dx + dz * dz) - s.river.halfWidth;
-      const k = edge - best;
-      if (k > 30) continue;
-      const w = Math.exp(-k / 6);
-      wSum += w;
-      tSum += w * (s.river.joins ? 0.25 + s.t * 0.3 : s.t);
+    let other = Infinity;
+    const reach = Math.ceil((best + 30 + this.maxHalfWidth) / SAMPLE_CELL) + 1;
+    for (let ix = cx - reach; ix <= cx + reach; ix++) {
+      for (let iz = cz - reach; iz <= cz + reach; iz++) {
+        const list = this.cells.get(this.cellKey(ix, iz));
+        if (!list) continue;
+        for (const s of list) {
+          const dx = s.p.x - x;
+          const dz = s.p.z - z;
+          const edge = Math.sqrt(dx * dx + dz * dz) - s.river.halfWidth;
+          const k = edge - best;
+          if (k > 30) continue;
+          if (s.system !== bestS.system && edge < other) other = edge;
+          const w = Math.exp(-k / 6);
+          wSum += w;
+          tSum += w * (s.river.joins ? 0.25 + s.t * 0.3 : s.t);
+        }
+      }
     }
     const valley = tSum / wSum;
     const side = (x - bestS.p.x) * bestS.n.x + (z - bestS.p.z) * bestS.n.z >= 0 ? 1 : -1;
-    return { d: best + RIVER_HALF_WIDTH, t: valley, side, sample: bestS };
+    // Wasserscheide zwischen zwei getrennten Flusssystemen: dort ein bewaldeter Rücken statt Hochgebirge
+    const ridge = Math.min(1, (other - best) / 30);
+    return { d: best + RIVER_HALF_WIDTH, t: valley, side, sample: bestS, ridge };
   }
 
   heightAt(x: number, z: number): number {
-    const { d, t } = this.riverDistance(x, z);
-    return this.heightFrom(x, z, d, t);
+    const r = this.riverInfo(x, z);
+    return this.carve(x, z, this.heightFrom(x, z, r.d, r.t, r.ridge), r.d);
   }
 
-  private heightFrom(x: number, z: number, d: number, t: number): number {
+  /** Kanal ins Gelände legen: Sohle, Leinpfad auf beiden Seiten, Einschnitt oder Damm zum Gelände hin */
+  private carve(x: number, z: number, h: number, d: number): number {
+    if (!this.canals.length || d < RIVER_HALF_WIDTH + 1) return h;
+    const c = this.canalAt(x, z);
+    if (!c) return h;
+    const hw = c.canal.halfWidth;
+    const inner = hw + 0.35 + CANAL_TOWPATH;
+    const slope = 6;
+    if (c.d > inner + slope) return h;
+    const bank = c.point.level + CANAL_BANK;
+    // zum Fluss hin weich auslaufen, damit die Einfahrt nicht als Wand im Ufer steht
+    const fade = Math.min(1, (d - RIVER_HALF_WIDTH - 1) / 3);
+    let target: number;
+    // Graben breiter als das Wasser: so fällt im groben Geländenetz sicher ein Punkt auf die Sohle,
+    // den Rand bis zur Mauer deckt der Leinpfad des Kanals ab
+    if (c.d < hw + CANAL_TRENCH) target = c.point.level - CANAL_BED;
+    else if (c.d < inner) target = bank;
+    else {
+      // Böschung: von der Haltung zum gemittelten Spiegel, dann weich ins Gelände
+      const f = (c.d - inner) / slope;
+      const from = bank + (c.point.soft - c.point.level) * Math.min(1, f * 3);
+      target = from + (h - from) * f * f * (3 - 2 * f);
+    }
+    return h + (target - h) * fade;
+  }
+
+  private heightFrom(x: number, z: number, d: number, t: number, ridge = 1): number {
     const n = noise(x, z);
     if (d < RIVER_HALF_WIDTH) return -1.4 + (d / RIVER_HALF_WIDTH) * 1.1;
     const bank = Math.min(1, (d - RIVER_HALF_WIDTH) / 3);
@@ -294,12 +544,13 @@ export class Landscape {
     if (d > plain) {
       const wall = d - plain;
       const steep = 0.28 + (1 - t) * 0.35; // im Oberlauf steile Hänge
-      const peak = 12 + (1 - t) * 12; // Gipfelhöhe, damit der Sockel nicht zur Wand wird
+      // Gipfelhöhe, damit der Sockel nicht zur Wand wird; auf der Wasserscheide zweier Täler nur ein Rücken
+      const peak = (12 + (1 - t) * 12) * (0.5 + 0.5 * ridge);
       const base = peak * (1 - Math.exp((-wall * steep) / peak));
       // Grate und Kuppen geben den Bergen Form, feines Rauschen bricht die Hänge auf
-      const ridge = ridged(x * 0.03 + 3.1, z * 0.03 - 1.7);
+      const crest = ridged(x * 0.03 + 3.1, z * 0.03 - 1.7);
       const detail = fbm(x * 0.14, z * 0.14, 3) - 0.5;
-      h += base * (0.75 + ridge * 0.5) + n * (1.2 + wall * 0.04) + detail * (0.6 + wall * 0.05);
+      h += base * (0.75 + crest * 0.5) + n * (1.2 + wall * 0.04) + detail * (0.6 + wall * 0.05);
     }
     // Keine Pfützen in der Wiese: jenseits der Böschung bleibt das Land über dem Wasser
     if (d > RIVER_HALF_WIDTH + 2) h = Math.max(h, 0.18 + Math.min(1, (d - RIVER_HALF_WIDTH - 2) / 4) * 0.1);
@@ -313,10 +564,10 @@ export class Landscape {
   surfaceAt(x: number, z: number): number {
     const g = this.grid;
     if (!g) return this.heightAt(x, z);
-    const sw = WORLD_W / g.segX;
-    const sd = WORLD_D / g.segZ;
-    const gx = Math.min(g.segX - 1e-6, Math.max(0, (x + WORLD_W / 2) / sw));
-    const gz = Math.min(g.segZ - 1e-6, Math.max(0, (z + WORLD_D / 2) / sd));
+    const sw = this.width / g.segX;
+    const sd = this.depth / g.segZ;
+    const gx = Math.min(g.segX - 1e-6, Math.max(0, (x - this.bounds.minX) / sw));
+    const gz = Math.min(g.segZ - 1e-6, Math.max(0, (z - this.bounds.minZ) / sd));
     const ix = Math.floor(gx);
     const iz = Math.floor(gz);
     const fx = gx - ix;
@@ -338,7 +589,18 @@ export class Landscape {
   }
 
   halfWidth(river: string): number {
-    return this.rivers.find((r) => r.id === river)!.halfWidth;
+    return this.rivers.find((r) => r.id === river)?.halfWidth ?? this.canals.find((c) => c.river === river)!.halfWidth;
+  }
+
+  /** Liegt der Punkt im Kanal oder auf seinem Leinpfad (plus `margin`)? */
+  nearCanal(x: number, z: number, margin = 0): boolean {
+    const c = this.canalAt(x, z);
+    return !!c && c.d < c.canal.halfWidth + 0.35 + CANAL_TOWPATH + margin;
+  }
+
+  /** Flächenverhältnis zum Tal, damit größere Karten gleich dicht bewaldet sind */
+  private get areaScale(): number {
+    return (this.width * this.depth) / (WORLD_W * WORLD_D);
   }
 
   private fieldCategory(x: number, z: number, h: number): Cat | null {
@@ -369,6 +631,11 @@ export class Landscape {
 
   private categoryFor(x: number, z: number, h: number, d: number, side: number, slope: number): Cat {
     if (d < RIVER_HALF_WIDTH) return 'bed';
+    const canal = this.canals.length ? this.canalAt(x, z) : null;
+    if (canal && d > RIVER_HALF_WIDTH + 1) {
+      if (canal.d < canal.canal.halfWidth + CANAL_TRENCH) return 'bed';
+      if (canal.d < canal.canal.halfWidth + 0.35 + CANAL_TOWPATH) return 'path';
+    }
     if (d < RIVER_HALF_WIDTH + 1.4) return 'sand';
     // Treidelpfad am linken Ufer, dort gehen die Pferde
     if (side < 0 && d > RIVER_HALF_WIDTH + 1.9 && d < RIVER_HALF_WIDTH + 2.8 && h < 3) return 'path';
@@ -383,10 +650,12 @@ export class Landscape {
 
   private buildTerrain(): THREE.Group {
     const g = new THREE.Group();
-    const segX = 180;
-    const segZ = 115;
-    const geo = new THREE.PlaneGeometry(WORLD_W, WORLD_D, segX, segZ);
+    // gleiche Maschenweite wie im Tal, egal wie groß die Karte ist
+    const segX = Math.round((this.width / WORLD_W) * 180);
+    const segZ = Math.round((this.depth / WORLD_D) * 115);
+    const geo = new THREE.PlaneGeometry(this.width, this.depth, segX, segZ);
     geo.rotateX(-Math.PI / 2);
+    geo.translate(this.centerX, 0, this.centerZ);
     const pos = geo.attributes.position as THREE.BufferAttribute;
     const colors = new Float32Array(pos.count * 3);
     this.terrainCats = new Uint8Array(pos.count);
@@ -397,7 +666,7 @@ export class Landscape {
       const x = pos.getX(i);
       const z = pos.getZ(i);
       const r = this.riverInfo(x, z);
-      const h = this.heightFrom(x, z, r.d, r.t);
+      const h = this.carve(x, z, this.heightFrom(x, z, r.d, r.t, r.ridge), r.d);
       pos.setY(i, h);
       heights[i] = h;
       info.push({ d: r.d, side: r.side });
@@ -405,7 +674,7 @@ export class Landscape {
     this.grid = { heights, segX, segZ };
     // Steigung aus den Nachbarpunkten: steile Hänge werden zu Fels
     const cols = segX + 1;
-    const dx = WORLD_W / segX;
+    const dx = this.width / segX;
     for (let i = 0; i < pos.count; i++) {
       const cx = i % cols;
       const cz = Math.floor(i / cols);
@@ -437,8 +706,7 @@ export class Landscape {
     const g = new THREE.Group();
     const earth = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide });
     const water = new THREE.MeshStandardMaterial({ color: 0x2f6680, roughness: 0.4, side: THREE.DoubleSide });
-    const hw = WORLD_W / 2;
-    const hd = WORLD_D / 2;
+    const { minX, maxX, minZ, maxZ } = this.bounds;
     // Erdschichten von unten nach oben: Lehm, Kies, Erde, dunkler Mutterboden
     const layers = [
       { top: -4.6, color: new THREE.Color(0x8a6a48), wobble: 0.6 },
@@ -494,33 +762,37 @@ export class Landscape {
         g.add(m);
       }
     };
-    edge(-hw, -hd, hw, -hd, segX, 0, -1);
-    edge(hw, hd, -hw, hd, segX, 0, 1);
-    edge(-hw, hd, -hw, -hd, segZ, -1, 0);
-    edge(hw, -hd, hw, hd, segZ, 1, 0);
+    edge(minX, minZ, maxX, minZ, segX, 0, -1);
+    edge(maxX, maxZ, minX, maxZ, segX, 0, 1);
+    edge(minX, maxZ, minX, minZ, segZ, -1, 0);
+    edge(maxX, minZ, maxX, maxZ, segZ, 1, 0);
 
     // Rahmen aus dunklem Holz mit Profilleisten und einem Messingschild vorn
     const wood = new THREE.MeshStandardMaterial({ color: PLINTH, roughness: 0.7 });
     const trim = new THREE.MeshStandardMaterial({ color: 0x6e4b2e, roughness: 0.6 });
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(WORLD_W + 3, 2.4, WORLD_D + 3), wood);
+    const W = this.width;
+    const D = this.depth;
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(W + 3, 2.4, D + 3), wood);
     frame.position.y = BASE_Y - 1.2;
     frame.receiveShadow = true;
-    const lip = new THREE.Mesh(new THREE.BoxGeometry(WORLD_W + 3.6, 0.35, WORLD_D + 3.6), trim);
+    const lip = new THREE.Mesh(new THREE.BoxGeometry(W + 3.6, 0.35, D + 3.6), trim);
     lip.position.y = BASE_Y - 0.12;
-    const foot = new THREE.Mesh(new THREE.BoxGeometry(WORLD_W + 4.2, 0.6, WORLD_D + 4.2), wood);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(W + 4.2, 0.6, D + 4.2), wood);
     foot.position.y = BASE_Y - 2.55;
     const plate = new THREE.Mesh(
       new THREE.BoxGeometry(26, 1.3, 0.12),
       new THREE.MeshStandardMaterial({ color: 0xc09a4e, roughness: 0.35, metalness: 0.6 }),
     );
-    plate.position.set(0, BASE_Y - 1.2, WORLD_D / 2 + 1.56);
+    plate.position.set(this.centerX, BASE_Y - 1.2, maxZ + 1.56);
+    for (const m of [frame, lip, foot]) m.position.set(this.centerX, m.position.y, this.centerZ);
     g.add(frame, lip, foot, plate);
     return g;
   }
 
   private buildWater(): THREE.Mesh {
-    const geo = new THREE.PlaneGeometry(WORLD_W, WORLD_D, 1, 1);
+    const geo = new THREE.PlaneGeometry(this.width, this.depth, 1, 1);
     geo.rotateX(-Math.PI / 2);
+    geo.translate(this.centerX, 0, this.centerZ);
     const mat = new THREE.MeshStandardMaterial({
       color: 0x3f86a3,
       roughness: 0.22,
@@ -652,6 +924,7 @@ export class Landscape {
     this.terrainColors.needsUpdate = true;
     const waterMat = this.water.material as THREE.MeshStandardMaterial;
     waterMat.color.setHex(WATER[season]).lerp(b.setHex(WATER[next]), f);
+    this.canalView?.setWaterColor(waterMat.color);
 
     for (const d of this.decor) {
       const ta = d.table[season];
@@ -677,6 +950,8 @@ export class Landscape {
   buildIce(ranges: { river: string; from: number; to: number }[]): void {
     const rand = mulberry32(23);
     for (const r of ranges) {
+      // Kanäle frieren als Ganzes, Schollen treiben dort nicht
+      if (this.canals.some((c) => c.river === r.river)) continue;
       const len = this.curve(r.river).getLength() * (r.to - r.from);
       const hw = this.halfWidth(r.river);
       const n = Math.round(len * hw * 0.35);
@@ -741,15 +1016,16 @@ export class Landscape {
     const spots: { p: THREE.Vector3; t: number }[] = [];
     const bushes: THREE.Vector3[] = [];
     let tries = 0;
-    while (spots.length < 1100 && tries < 22000) {
+    const area = this.areaScale;
+    while (spots.length < 1100 * area && tries < 22000 * area) {
       tries++;
-      const x = (rand() - 0.5) * (WORLD_W - 4);
-      const z = (rand() - 0.5) * (WORLD_D - 4);
+      const x = this.centerX + (rand() - 0.5) * (this.width - 4);
+      const z = this.centerZ + (rand() - 0.5) * (this.depth - 4);
       const { d, t } = this.riverDistance(x, z);
       if (d < RIVER_HALF_WIDTH + 3.2) continue;
       const h = this.heightAt(x, z);
       if (h > 15.5 || h < 0.2) continue;
-      if (this.nearTown(x, z, 22, 4)) continue;
+      if (this.nearTown(x, z, 22, 4) || this.nearCanal(x, z, 2.5)) continue;
       // Wald in Gruppen: Rauschen entscheidet über Lichtungen
       const clump = fbm(x * 0.06 + 40, z * 0.06, 3);
       // Wahrscheinlichkeit: Oberlauf und Hänge dicht bewaldet
@@ -757,7 +1033,7 @@ export class Landscape {
       const r = rand();
       if (r > p) {
         // am Waldrand stehen Büsche
-        if (r < p + 0.12 && bushes.length < 520 && h < 8) bushes.push(new THREE.Vector3(x, h, z));
+        if (r < p + 0.12 && bushes.length < 520 * area && h < 8) bushes.push(new THREE.Vector3(x, h, z));
         continue;
       }
       spots.push({ p: new THREE.Vector3(x, h, z), t });
@@ -862,14 +1138,15 @@ export class Landscape {
     const rand = mulberry32(seed);
     const items: { x: number; y: number; z: number; s: number }[] = [];
     let tries = 0;
-    while (items.length < 340 && tries < 9000) {
+    const area = this.areaScale;
+    while (items.length < 340 * area && tries < 9000 * area) {
       tries++;
-      const x = (rand() - 0.5) * (WORLD_W - 4);
-      const z = (rand() - 0.5) * (WORLD_D - 4);
+      const x = this.centerX + (rand() - 0.5) * (this.width - 4);
+      const z = this.centerZ + (rand() - 0.5) * (this.depth - 4);
       const { d, t } = this.riverDistance(x, z);
       if (d < RIVER_HALF_WIDTH + 1.6) continue;
       const h = this.heightAt(x, z);
-      if (this.nearTown(x, z, 20, 3)) continue;
+      if (this.nearTown(x, z, 20, 3) || this.nearCanal(x, z, 1)) continue;
       // Geröll am Gebirge, einzelne Findlinge in der Aue, Blöcke am Ufer des wilden Oberlaufs
       const mountain = h > 7 ? 0.5 : 0;
       const riverside = d < RIVER_HALF_WIDTH + 3.5 && t < 0.35 ? 0.35 : 0;
@@ -931,7 +1208,7 @@ export class Landscape {
         const off = side * (r.halfWidth + SHORE + (rand() - 0.6) * 0.7);
         const x = p.x + nr.x * off;
         const z = p.z + nr.z * off;
-        if (!inWorld(x, z, 1) || this.nearTown(x, z, 4, 4)) continue;
+        if (!this.inWorld(x, z, 1) || this.nearTown(x, z, 4, 4)) continue;
         if (this.riverDistance(x, z).d < RIVER_HALF_WIDTH + 0.4) continue;
         items.push({ x, y: Math.max(this.heightAt(x, z), -0.2) - 0.05, z, r: rand() * 6, s: 0.8 + rand() * 0.6 });
       }

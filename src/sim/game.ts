@@ -14,6 +14,7 @@ import { YEAR_DAYS, year } from './calendar.ts';
 import { addNews, day, shipClass, withStream, type GameEvent, type GameState, type NewsItem } from './state.ts';
 import { tickWorks } from './works.ts';
 import { observe, tickMarketInfo, tripArrive, tripSail } from './market-info.ts';
+import { closeSteamDay, logSteam } from './steam.ts';
 import { initialMarket, initialTown, tickTown } from './towns.ts';
 import { movingHours, wearFactor, wearRate } from './voyage.ts';
 import { voyageProgress } from './navigation.ts';
@@ -227,6 +228,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
         events.push({ type: 'townLevel', town: def.id, level: (r.levelUp ?? r.levelDown)!, up, newGoods: r.newGoods });
       }
     }
+    closeSteamDay(state);
     tickHouse(state);
     // gleich nach der Lohnzahlung buchen, bevor Kapitäne gehen oder abgeworben werden
     bookRouteWages(state);
@@ -277,6 +279,7 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
         const burnt = Math.min(ship.bunker ?? 0, cls.coal * dt);
         ship.bunker = Math.max(0, (ship.bunker ?? 0) - cls.coal * dt);
         if (ship.route?.active) bookCoal(state, ship.route, burnt);
+        logSteam(state, ship.id, dt);
       }
       // ohne Kühlraum verdirbt Fisch, Brot und Bier unterwegs
       if (!cls.fresh) {

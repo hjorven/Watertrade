@@ -80,6 +80,32 @@ export class Stage {
     if (import.meta.env.DEV) (globalThis as { __stage?: Stage }).__stage = this;
   }
 
+  /**
+   * Licht, Schatten, Nebel und Zoomgrenze an die Kartengröße anpassen (für Karten, die größer als das Tal sind).
+   * Für das Tal ändert sich nichts.
+   */
+  fitWorld(b: { minX: number; maxX: number; minZ: number; maxZ: number }): void {
+    const w = b.maxX - b.minX;
+    const d = b.maxZ - b.minZ;
+    const cx = (b.minX + b.maxX) / 2;
+    const cz = (b.minZ + b.maxZ) / 2;
+    const k = Math.max(1, w / 220, d / 140);
+    const sc = this.sun.shadow.camera;
+    sc.left = -(w / 2 + 20);
+    sc.right = w / 2 + 20;
+    sc.top = d / 2 + 20;
+    sc.bottom = -(d / 2 + 20);
+    sc.far = 400 * k;
+    sc.updateProjectionMatrix();
+    this.sun.position.set(cx - 90, 140, cz + 60);
+    this.sun.target.position.set(cx, 0, cz);
+    if (!this.sun.target.parent) this.scene.add(this.sun.target);
+    const fog = this.scene.fog as THREE.Fog;
+    fog.near = 260 * k;
+    fog.far = 520 * k;
+    this.controls.maxDistance = 360 * k;
+  }
+
   addLabel(text: string, position: THREE.Vector3, className = 'town-label'): HTMLDivElement {
     const el = document.createElement('div');
     el.className = className;
