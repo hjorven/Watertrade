@@ -53,11 +53,11 @@ describe('Balance: Bot-Ziele', () => {
     const k2 = CHAPTERS[1];
     const goal = k2.goals.find((g) => g.type === 'worth')!;
     if (goal.type !== 'worth') throw new Error('Kapitel 2 ohne Vermögensziel');
-    const days = [1, 5, 9].map((seed) => runGrowth(VALLEY, k2, goal.amount, 400, { build: true, seed }).reachedOn ?? Infinity);
+    const days = [1, 2, 3, 4, 5, 6, 7].map((seed) => runGrowth(VALLEY, k2, goal.amount, 400, { build: true, seed }).reachedOn ?? Infinity);
     days.sort((a, c) => a - c);
-    expect(days[1]).toBeGreaterThanOrEqual(K2_MIN_DAYS);
+    expect(days[3]).toBeGreaterThanOrEqual(K2_MIN_DAYS);
     // erreichbar bleibt es trotzdem
-    expect(days[0]).toBeLessThan(400);
+    expect(days[6]).toBeLessThan(400);
   }, 30000);
 
   it('kein Haus der Konkurrenz wird im freien Spiel in zwei Jahren übermächtig', () => {

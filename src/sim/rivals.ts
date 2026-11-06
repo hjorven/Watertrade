@@ -7,13 +7,14 @@ import { available, buyCost, sellRevenue } from './economy.ts';
 import { withWind, type ShipType } from './river.ts';
 import { addNews, rand, wind, type GameState, type NewsItem, type RivalShip, type RivalState } from './state.ts';
 import { planRoute } from './voyage.ts';
+import { houseAvoids, tickRivalry } from './rivalry.ts';
 import { sail } from './navigation.ts';
 
 const RIVAL_SHIP_NAMES = ['Adler', 'Zuversicht', 'Merkur', 'Stolz', 'Treue', 'Sturmvogel', 'Hanse', 'Glück', 'Kranich', 'Neptun'];
 
 /** Tageskosten je Schiff der Konkurrenz */
 const RIVAL_UPKEEP = 6;
-const MAX_RIVAL_SHIPS = 3;
+export const MAX_RIVAL_SHIPS = 3;
 
 export function initialRivals(state: GameState): RivalState[] {
   // In späteren Kapiteln sind die Häuser schon gewachsen
@@ -93,7 +94,7 @@ function bestDeal(state: GameState, map: MapDef, r: RivalState, ship: RivalShip)
   let best: Deal | null = null;
   for (const [goodId, m] of Object.entries(state.markets[here])) {
     const good = GOODS.find((g) => g.id === goodId);
-    if (!good) continue;
+    if (!good || houseAvoids(state, r.id, goodId)) continue;
     const amount = Math.min(Math.floor(cls.capacity * def.greed), available(m) - 5);
     if (amount < 8) continue;
     const cost = buyCost(good.base, m, amount);
@@ -192,7 +193,7 @@ export function moveRivals(state: GameState, map: MapDef, hours: number): void {
 }
 
 /** Mit neuen Epochen kaufen die Häuser moderne Schiffe */
-function preferredShip(base: string, epoch: number): string {
+export function preferredShip(base: string, epoch: number): string {
   if (epoch >= 3) return base === 'plaette' ? 'raddampfer' : 'motorschiff';
   if (epoch >= 2) return base === 'treidelkahn' || base === 'segelkahn' ? 'raddampfer' : base;
   return base;
@@ -231,5 +232,7 @@ export function tickRivals(state: GameState, map: MapDef): NewsItem[] {
       }
     }
   }
+  // Reaktion auf den Spieler, Abkommen, Konkurs, Anteile (rivalry.ts)
+  news.push(...tickRivalry(state, map));
   return news;
 }

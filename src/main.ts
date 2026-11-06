@@ -10,6 +10,7 @@ import { Landscape } from './render/landscape.ts';
 import { Stage } from './render/scene.ts';
 import { ambient, getVolume, isMuted, mute, playSfx, setMusic, setVolume, unlockAudioOnGesture, type SfxName } from './audio/index.ts';
 import { RIVAL_BY_ID } from './data/rivals.ts';
+import { buyShares, endPact, offerPact, placeBid, sellShares } from './sim/rivalry.ts';
 import { SHIPS } from './data/ships.ts';
 import { Estates, PLAYER_COLOR, type EstateInfo } from './render/buildings.ts';
 import { ShipView } from './render/ships.ts';
@@ -298,6 +299,25 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
       r = kontorSell(state, town, String(d.good), n('n'));
       ok = 'verkauf';
       break;
+    case 'pactOffer':
+      r = offerPact(state, VALLEY, String(d.house), String(d.mine), String(d.theirs));
+      ok = 'erfolg';
+      break;
+    case 'pactEnd':
+      r = endPact(state, String(d.house));
+      break;
+    case 'buyShares':
+      r = buyShares(state, VALLEY, String(d.house));
+      ok = 'muenzen';
+      break;
+    case 'sellShares':
+      r = sellShares(state, String(d.house));
+      ok = 'muenzen';
+      break;
+    case 'bid':
+      r = placeBid(state, String(d.town));
+      ok = 'muenzen';
+      break;
     case 'bunker':
       r = fillBunker(state, selected);
       ok = 'kauf';
@@ -413,6 +433,7 @@ const menu = new Menu(
           extraShips: c.extraShips,
           kontore: c.kontore,
           works: c.works,
+          weakHouse: c.weakHouse,
         }),
         { mode: 'kampagne', chapter: c, completed: new Set(), finished: false },
       );
