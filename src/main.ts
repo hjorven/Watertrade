@@ -1,6 +1,10 @@
 import './style.css';
 import * as THREE from 'three';
 import { CHAPTERS, type Chapter } from './data/campaign.ts';
+import { CHALLENGES, DAILY_DAYS, dailySetup } from './data/challenges.ts';
+import { newAchievements, ACHIEVEMENTS } from './sim/achievements.ts';
+import { getClient } from './online/index.ts';
+import { OnlineScreens } from './ui/online-screens.ts';
 import { GOOD_BY_ID, GOODS } from './data/goods.ts';
 import { VALLEY } from './data/maps/valley.ts';
 import { Landscape } from './render/landscape.ts';
@@ -41,9 +45,9 @@ import {
 } from './sim/game.ts';
 import { startProject } from './sim/works.ts';
 import { EPOCHS } from './data/ships.ts';
-import { buildBetrieb, buildKontor, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
+import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
 import { goalDone, goalProgress } from './sim/goals.ts';
-import { deserialize, SAVE_VERSION, serialize, type SaveGame } from './sim/save.ts';
+import { deserialize, SAVE_VERSION, serialize, type GameMode, type SaveGame } from './sim/save.ts';
 import { LEVELS, levelOf } from './sim/towns.ts';
 import { Hud } from './ui/hud.ts';
 import { Menu, type SlotInfo } from './ui/menu.ts';
@@ -135,9 +139,18 @@ interface Settings {
 }
 interface Progress {
   unlocked: string[];
+  /** bestandene Herausforderungen: Id -> wenigste Tage */
+  challenges?: Record<string, number>;
+  /** bestes lokales Tagesmarkt-Ergebnis je Kalendertag */
+  daily?: Record<string, number>;
 }
 const settings = loadJson<Settings>('settings', { tiltShift: true });
 const progress = loadJson<Progress>('progress', { unlocked: ['k1'] });
+progress.challenges ??= {};
+progress.daily ??= {};
+const achieved = loadJson<Record<string, string>>('achievements', {});
+// Anmeldelink aus der Adresse übernehmen, falls jemand über die E-Mail zurückkommt
+getClient();
 stage.postfx.enabled = settings.tiltShift;
 unlockAudioOnGesture();
 mute(settings.sound === false);
@@ -146,10 +159,14 @@ const sfx = (name: SfxName) => playSfx(name);
 
 // --- Spielsitzung ---
 interface Session {
-  mode: 'kampagne' | 'frei';
+  mode: GameMode;
+  /** Kapitel oder Herausforderung */
   chapter?: Chapter;
   completed: Set<number>;
   finished: boolean;
+  /** Spielstunde beim Start, für Zeitlimits */
+  startHour?: number;
+  dailyDay?: string;
 }
 
 let state: GameState = newGame(VALLEY, 'oberau');
@@ -412,6 +429,28 @@ const menu = new Menu(
       mute(!on);
       saveJson('settings', settings);
     },
+    startChallenge(id) {
+      const c = CHALLENGES.find((x) => x.id === id)!;
+      startGame(
+        newGame(VALLEY, {
+          startTown: c.startTown,
+          money: c.money,
+          startShip: c.startShip,
+          allowedShips: c.allowedShips,
+          rivals: c.rivals ?? false,
+          seed: Date.now() % 100000,
+          epoch: c.epoch ?? 1,
+          startYear: c.startYear,
+          extraShips: c.extraShips,
+          kontore: c.kontore,
+          works: c.works,
+        }),
+        { mode: 'herausforderung', chapter: c, completed: new Set(), finished: false },
+      );
+    },
+    other(cmd, data) {
+      screens.handle(cmd, data);
+    },
   },
   () => ({
     slots: listSlots(),
@@ -419,8 +458,41 @@ const menu = new Menu(
     tiltShift: settings.tiltShift,
     sound: !isMuted(),
     inGame: inGame,
+    challenges: progress.challenges!,
+    online: true,
   }),
 );
+
+const screens = new OnlineScreens(menu, VALLEY, {
+  startDaily(day, seed) {
+    const setup = dailySetup(seed);
+    startGame(
+      newGame(VALLEY, { startTown: setup.startTown, money: setup.money, startYear: setup.startYear, seed, rivals: true }),
+      { mode: 'tagesmarkt', completed: new Set(), finished: false, dailyDay: day },
+    );
+  },
+  currentSave: () => (inGame ? makeSave() : null),
+  loadSave(save) {
+    return startSave(save);
+  },
+  unlock,
+  achievements: () => achieved,
+  challenges: () => progress.challenges!,
+  dailyBest: (day) => progress.daily![day] ?? null,
+  toast: (text, kind) => hud.toast(text, kind),
+  sfx: (name) => sfx(name),
+});
+
+/** Erfolg freischalten und melden */
+function unlock(id: string): void {
+  if (achieved[id]) return;
+  const a = ACHIEVEMENTS.find((x) => x.id === id);
+  if (!a) return;
+  achieved[id] = new Date().toISOString();
+  saveJson('achievements', achieved);
+  hud.toast(`Erfolg: ${a.title}. ${a.text}.`, 'gain');
+  sfx('stempel');
+}
 let inGame = false;
 
 function startGame(s: GameState, sess: Session): void {
@@ -429,7 +501,7 @@ function startGame(s: GameState, sess: Session): void {
   rivalViews.clear();
   setMusic(epochMusic(s.epoch));
   state = s;
-  session = sess;
+  session = { ...sess, startHour: sess.startHour ?? s.hour };
   selected = state.ships[0]?.id ?? -1;
   follow = true;
   inGame = true;
@@ -443,19 +515,32 @@ function startGame(s: GameState, sess: Session): void {
 // --- Speichern ---
 function summary(s: SaveGame): string {
   const day = Math.floor(s.state.hour / 24) + 1;
-  const what = s.mode === 'kampagne' ? `Kapitel ${CHAPTERS.find((c) => c.id === s.chapter)?.number ?? '?'}` : 'Freies Spiel';
+  const what =
+    s.mode === 'kampagne'
+      ? `Kapitel ${CHAPTERS.find((c) => c.id === s.chapter)?.number ?? '?'}`
+      : s.mode === 'herausforderung'
+        ? `Herausforderung ${CHALLENGES.find((c) => c.id === s.chapter)?.title ?? ''}`
+        : s.mode === 'tagesmarkt'
+          ? `Tagesmarkt ${s.dailyDay ?? ''}`
+          : 'Freies Spiel';
   return `${what}, ${dateText(day)}, ${s.state.money} Taler`;
 }
 
-function saveSlot(slot: string): void {
-  const save: SaveGame = {
+function makeSave(): SaveGame {
+  return {
     version: SAVE_VERSION,
     savedAt: new Date().toISOString(),
     mode: session.mode,
     chapter: session.chapter?.id,
     completedGoals: [...session.completed],
+    startHour: session.startHour,
+    dailyDay: session.dailyDay,
     state,
   };
+}
+
+function saveSlot(slot: string): void {
+  const save = makeSave();
   try {
     localStorage.setItem(`flussreich.save.${slot}`, serialize(save));
   } catch {
@@ -474,13 +559,23 @@ function readSlot(slot: string): SaveGame | null {
 
 function loadSlot(slot: string): boolean {
   const save = readSlot(slot);
-  if (!save) return false;
-  const chapter = CHAPTERS.find((c) => c.id === save.chapter);
+  return !!save && startSave(save);
+}
+
+function startSave(save: SaveGame): boolean {
+  if (!save?.state || !Array.isArray(save.state.ships)) return false;
+  const chapter = [...CHAPTERS, ...CHALLENGES].find((c) => c.id === save.chapter);
+  const daysPlayed = save.startHour !== undefined ? (save.state.hour - save.startHour) / 24 : 0;
   startGame(upgradeState(save.state, VALLEY), {
     mode: save.mode,
     chapter,
     completed: new Set(save.completedGoals),
-    finished: !!chapter && save.completedGoals.length >= chapter.goals.length,
+    finished:
+      (!!chapter && save.completedGoals.length >= chapter.goals.length) ||
+      (save.mode === 'tagesmarkt' && daysPlayed >= DAILY_DAYS) ||
+      (save.mode === 'herausforderung' && !!chapter?.deadlineDays && daysPlayed >= chapter.deadlineDays),
+    startHour: save.startHour,
+    dailyDay: save.dailyDay,
   });
   return true;
 }
@@ -496,7 +591,14 @@ function listSlots(): SlotInfo[] {
 
 // --- Ziele ---
 const fmtNum = (n: number) => Math.floor(n).toLocaleString('de-DE');
+const daysPlayed = () => Math.floor((state.hour - (session.startHour ?? state.hour)) / 24);
+
 function checkGoals(silent = false): void {
+  if (inGame) for (const a of newAchievements(state, achieved)) unlock(a.id);
+  if (session.mode === 'tagesmarkt' && !session.finished) {
+    checkDaily();
+    return;
+  }
   const c = session.chapter;
   if (!c || session.finished) {
     hud.renderGoals(null, []);
@@ -510,8 +612,10 @@ function checkGoals(silent = false): void {
       sfx('erfolg');
     }
   });
+  const challenge = session.mode === 'herausforderung';
+  const left = challenge && c.deadlineDays ? c.deadlineDays - daysPlayed() : null;
   hud.renderGoals(
-    `Kapitel ${c.number}: ${c.title}`,
+    challenge ? `${c.title} · noch ${Math.max(0, left ?? 0)} Tage` : `Kapitel ${c.number}: ${c.title}`,
     c.goals.map((g, i) => {
       const p = goalProgress(state, g);
       const done = session.completed.has(i);
@@ -520,8 +624,28 @@ function checkGoals(silent = false): void {
       return { text: g.text, done, progress: progressText };
     }),
   );
+  if (challenge) {
+    const won = session.completed.size === c.goals.length;
+    if (!won && (left === null || left > 0)) return;
+    session.finished = true;
+    running = false;
+    hud.renderGoals(null, []);
+    if (won) {
+      const days = daysPlayed();
+      const best = progress.challenges![c.id];
+      if (best === undefined || days < best) progress.challenges![c.id] = days;
+      saveJson('progress', progress);
+      unlock('herausforderer');
+      if (CHALLENGES.every((x) => progress.challenges![x.id] !== undefined)) unlock('meister');
+      sfx('stempel');
+    } else sfx('fehler');
+    saveSlot('auto');
+    menu.showChallengeEnd(c, won, daysPlayed());
+    return;
+  }
   if (session.completed.size === c.goals.length) {
     session.finished = true;
+    if (!CHAPTERS.some((x) => x.number === c.number + 1)) unlock('chronist');
     const next = CHAPTERS.find((x) => x.number === c.number + 1);
     if (next && !progress.unlocked.includes(next.id)) {
       progress.unlocked.push(next.id);
@@ -533,6 +657,28 @@ function checkGoals(silent = false): void {
     sfx('stempel');
     menu.showChapterDone(c, next);
   }
+}
+
+/** Tagesmarkt: Fortschritt zeigen und nach Ablauf abrechnen */
+function checkDaily(): void {
+  const played = daysPlayed();
+  const worth = Math.round(playerWorth(state));
+  if (played < DAILY_DAYS) {
+    hud.renderGoals(`Tagesmarkt · Tag ${played + 1} von ${DAILY_DAYS}`, [
+      { text: `Vermögen ${fmtNum(worth)} Taler`, done: false, progress: `Kasse, Schiffe, Kontore und Ladung` },
+      { text: `Noch ${DAILY_DAYS - played} Tage bis zur Abrechnung`, done: false, progress: '' },
+    ]);
+    return;
+  }
+  session.finished = true;
+  running = false;
+  hud.renderGoals(null, []);
+  const day = session.dailyDay ?? '';
+  if (!progress.daily![day] || worth > progress.daily![day]) progress.daily![day] = worth;
+  saveJson('progress', progress);
+  saveSlot('auto');
+  sfx('stempel');
+  void screens.finishDaily(day, worth);
 }
 
 // --- Ereignisse ---

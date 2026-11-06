@@ -4,6 +4,15 @@ Handels- und Aufbauspiel im Browser. Du führst ein Handelshaus an einem großen
 
 Live: https://hjorven.github.io/Watertrade/
 
+## Spielmodi
+
+- **Kampagne** "Hundert Jahre am Fluss": sechs Kapitel von der Treidelzeit bis zum Motorschiff.
+- **Freies Spiel**: ohne Ziele, die Epochen wechseln mit den Spieljahren.
+- **Herausforderungen**: fünf kurze Szenarien mit Zeitlimit, die beste Zeit wird gemerkt.
+- **Tagesmarkt**: jeden Tag (UTC) ein gleiches Tal für alle, nach 60 Spieltagen zählt das Vermögen, mit Online-Bestenliste.
+- **Handelsliga**: ein gemeinsamer Live-Markt für alle Spieler, serverseitig gerechnet.
+- **Erfolge** und **Konto**: Name für Bestenlisten, Anmeldung per E-Mail-Link, fünf Cloud-Speicherplätze.
+
 ## Entwicklung
 
 ```bash

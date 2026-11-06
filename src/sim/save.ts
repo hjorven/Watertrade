@@ -1,5 +1,7 @@
 import type { GameState } from './game.ts';
 
+export type GameMode = 'kampagne' | 'frei' | 'herausforderung' | 'tagesmarkt';
+
 export const SAVE_VERSION = 4;
 /** Ältere Stände, die sich mit upgradeState() weiterspielen lassen */
 const READABLE = [3, 4];
@@ -7,9 +9,14 @@ const READABLE = [3, 4];
 export interface SaveGame {
   version: number;
   savedAt: string; // ISO-Zeit
-  mode: 'kampagne' | 'frei';
+  mode: GameMode;
+  /** Kapitel oder Herausforderung */
   chapter?: string;
   completedGoals: number[];
+  /** Spielstunde beim Start, für Zeitlimits */
+  startHour?: number;
+  /** Tagesmarkt: Kalendertag (UTC) */
+  dailyDay?: string;
   state: GameState;
 }
 

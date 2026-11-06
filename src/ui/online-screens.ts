@@ -1,0 +1,506 @@
+import { CHALLENGES, DAILY_DAYS, dailySetup } from '../data/challenges.ts';
+import { GOOD_BY_ID } from '../data/goods.ts';
+import type { MapDef } from '../data/maps/valley.ts';
+import { ACHIEVEMENTS } from '../sim/achievements.ts';
+import { price, SELL_FACTOR } from '../sim/economy.ts';
+import type { SaveGame } from '../sim/save.ts';
+import {
+  currentPlayer,
+  dailySeed,
+  getLeagueMarket,
+  getUsername,
+  isConfigured,
+  joinLeague,
+  leagueRanking,
+  leagueTrade,
+  leagueTravel,
+  listSlots as listCloudSlots,
+  loadSlot as loadCloudSlot,
+  saveSlot as saveCloudSlot,
+  secondsUntilArrival,
+  setUsername,
+  signInWithMagicLink,
+  signOut,
+  submitDaily,
+  subscribeLeagueMarket,
+  todayUtc,
+  topDaily,
+  LEAGUE_TRAVEL_SECONDS,
+  SLOT_COUNT,
+  type DailyEntry,
+  type LeagueMarketRow,
+  type LeaguePlayer,
+  type LeagueRankEntry,
+  type SlotInfo as CloudSlot,
+} from '../online/index.ts';
+import type { Menu } from './menu.ts';
+
+const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+const fmt = (n: number) => Math.floor(n).toLocaleString('de-DE');
+const LEAGUE_CARGO = 40;
+
+export interface OnlineHooks {
+  startDaily(day: string, seed: number): void;
+  currentSave(): SaveGame | null;
+  loadSave(save: SaveGame): boolean;
+  unlock(id: string): void;
+  achievements(): Record<string, string>;
+  challenges(): Record<string, number>;
+  dailyBest(day: string): number | null;
+  toast(text: string, kind?: 'info' | 'warn' | 'gain'): void;
+  sfx(name: 'klick' | 'kauf' | 'verkauf' | 'muenzen' | 'fehler' | 'ablegen' | 'erfolg' | 'papier'): void;
+}
+
+/** Schöne Fehlermeldungen für Serverantworten */
+function niceError(e: string): string {
+  const map: Record<string, string> = {
+    'nicht genug taler': 'Nicht genug Taler.',
+    'nicht genug bestand': 'So viel hat der Markt nicht.',
+    'laderaum voll': `Der Laderaum fasst nur ${LEAGUE_CARGO} t.`,
+    'nicht genug ladung': 'So viel hast du nicht an Bord.',
+    'nicht in dieser stadt': 'Dein Kahn ist noch unterwegs.',
+    'nicht in der liga': 'Du bist noch nicht in der Liga.',
+  };
+  for (const [k, v] of Object.entries(map)) if (e.toLowerCase().includes(k)) return v;
+  if (/fetch|network/i.test(e)) return 'Keine Verbindung zum Server.';
+  return e;
+}
+
+/** Tagesmarkt, Handelsliga, Konto mit Cloud-Speicher und Erfolge als Menükarten */
+export class OnlineScreens {
+  private readonly menu: Menu;
+  private readonly map: MapDef;
+  private readonly hooks: OnlineHooks;
+
+  // Liga
+  private player: LeaguePlayer | null = null;
+  private market: LeagueMarketRow[] = [];
+  private ranking: LeagueRankEntry[] = [];
+  private leagueMsg = '';
+  private leagueBusy = false;
+  private unsubscribe: (() => void) | null = null;
+  private ticker = 0;
+  private lastWait = 0;
+
+  // Tagesmarkt
+  private daily: { entries: DailyEntry[] | null; status: string } = { entries: null, status: '' };
+
+  // Konto
+  private account: { name: string | null; email: string | null; anonymous: boolean; slots: CloudSlot[]; status: string } = {
+    name: null,
+    email: null,
+    anonymous: true,
+    slots: [],
+    status: '',
+  };
+
+  constructor(menu: Menu, map: MapDef, hooks: OnlineHooks) {
+    this.menu = menu;
+    this.map = map;
+    this.hooks = hooks;
+  }
+
+  private townName(id: string): string {
+    return this.map.towns.find((t) => t.id === id)?.name ?? id;
+  }
+
+  /** Klicks aus der Menükarte */
+  handle(cmd: string, d: DOMStringMap): void {
+    switch (cmd) {
+      case 'daily':
+        void this.openDaily();
+        break;
+      case 'dailyStart': {
+        const day = todayUtc();
+        this.menu.close();
+        this.stopLeague();
+        this.hooks.startDaily(day, dailySeed(day));
+        break;
+      }
+      case 'league':
+        void this.openLeague();
+        break;
+      case 'leagueTravel':
+        void this.leagueAction(() => leagueTravel(d.id!), (p) => {
+          this.player = p;
+          this.hooks.sfx('ablegen');
+          this.leagueMsg = `Unterwegs nach ${this.townName(p.townId)}.`;
+        });
+        break;
+      case 'leagueTrade': {
+        const amount = Number(d.amount);
+        void this.leagueAction(() => leagueTrade(this.player!.townId, d.good!, amount), (r) => {
+          if (!this.player) return;
+          this.player = { ...this.player, gold: r.gold, cargo: r.cargo ?? {}, wealth: r.wealth };
+          const row = this.market.find((m) => m.townId === this.player!.townId && m.goodId === d.good);
+          if (row) row.stock = r.stock;
+          const good = GOOD_BY_ID.get(d.good!)?.name ?? d.good;
+          this.leagueMsg = amount < 0 ? `${-amount} t ${good} für ${fmt(r.taler)} Taler gekauft.` : `${amount} t ${good} für ${fmt(r.taler)} Taler verkauft.`;
+          this.hooks.sfx(amount < 0 ? 'kauf' : 'muenzen');
+          this.hooks.unlock('liga');
+        });
+        break;
+      }
+      case 'leagueRefresh':
+        void this.openLeague();
+        break;
+      case 'account':
+        void this.openAccount();
+        break;
+      case 'setName':
+        void this.accountAction(async () => {
+          const r = await setUsername(this.menu.value('name'));
+          this.account.status = r.ok ? `Name gespeichert: ${r.data}` : r.error;
+          if (r.ok) this.account.name = r.data;
+        });
+        break;
+      case 'magicLink':
+        void this.accountAction(async () => {
+          const email = this.menu.value('email');
+          if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+            this.account.status = 'Bitte eine gültige E-Mail-Adresse eingeben.';
+            return;
+          }
+          const r = await signInWithMagicLink(email);
+          this.account.status = r.ok ? `Link verschickt an ${email}. Öffne ihn auf diesem oder einem anderen Gerät.` : niceError(r.error);
+        });
+        break;
+      case 'signOut':
+        void this.accountAction(async () => {
+          const r = await signOut();
+          this.account.status = r.ok ? 'Abgemeldet.' : r.error;
+          await this.loadAccount();
+        });
+        break;
+      case 'cloudSave':
+        void this.accountAction(async () => {
+          const save = this.hooks.currentSave();
+          if (!save) return;
+          const slot = Number(d.id);
+          const r = await saveCloudSlot(slot, cloudName(save), save);
+          this.account.status = r.ok ? `In der Cloud gespeichert, Platz ${slot}.` : niceError(r.error);
+          await this.loadSlots();
+          if (r.ok) this.hooks.sfx('papier');
+        });
+        break;
+      case 'cloudLoad':
+        void this.accountAction(async () => {
+          const r = await loadCloudSlot<SaveGame>(Number(d.id));
+          if (!r.ok || !r.data) {
+            this.account.status = r.ok ? 'Dieser Platz ist leer.' : niceError(r.error);
+            return;
+          }
+          this.menu.close();
+          if (!this.hooks.loadSave(r.data.data)) this.hooks.toast('Dieser Spielstand lässt sich nicht laden.', 'warn');
+        });
+        break;
+      case 'achievements':
+        this.showAchievements();
+        break;
+    }
+  }
+
+  // --- Tagesmarkt ---
+
+  private async openDaily(): Promise<void> {
+    this.daily = { entries: null, status: isConfigured() ? 'Bestenliste wird geladen ...' : 'Ohne Verbindung gibt es keine Bestenliste.' };
+    this.renderDaily();
+    if (!isConfigured()) return;
+    const r = await topDaily(todayUtc(), 10);
+    this.daily = r.ok ? { entries: r.data, status: r.data.length ? '' : 'Heute hat noch niemand gespielt. Sei der Erste.' } : { entries: null, status: niceError(r.error) };
+    if (this.menu.screen === 'daily') this.renderDaily();
+  }
+
+  private renderDaily(result?: { worth: number; improved: boolean | null }): void {
+    const day = todayUtc();
+    const setup = dailySetup(dailySeed(day));
+    const best = this.hooks.dailyBest(day);
+    const dateText = new Date(day + 'T12:00:00Z').toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
+    this.menu.show(`
+      ${result ? '<div class="stamp-big">Abgerechnet</div>' : ''}
+      <div class="card-head">Tagesmarkt · ${esc(dateText)}</div>
+      <h2>${result ? `${fmt(result.worth)} Taler` : 'Ein Tal für alle'}</h2>
+      ${
+        result
+          ? `<p>Dein Vermögen nach ${DAILY_DAYS} Tagen: Kasse, Schiffe, Kontore, Betriebe und Ladung zum Marktwert.${
+              result.improved === false ? ' Dein bestes Ergebnis von heute bleibt stehen.' : result.improved ? ' Neuer Eintrag in der Bestenliste.' : ''
+            }</p>`
+          : `<p>Heute starten alle in <b>${esc(this.townName(setup.startTown))}</b> mit einem Treidelkahn und <b>${fmt(setup.money)} Taler</b>, im Jahr ${setup.startYear}. Markt, Wetter, Ereignisse und Konkurrenz sind für alle gleich. Nach ${DAILY_DAYS} Spieltagen zählt das Vermögen.</p>`
+      }
+      ${best !== null ? `<p class="fine">Dein Bestes heute: ${fmt(best)} Taler. Du kannst so oft spielen, wie du willst.</p>` : ''}
+      <h3>Bestenliste heute</h3>
+      ${this.daily.entries?.length ? rankTable(this.daily.entries) : `<p class="fine">${esc(this.daily.status)}</p>`}
+      <div class="menu-buttons">
+        <button class="btn primary wide" data-menu="dailyStart">${result || best !== null ? 'Noch einmal spielen' : 'Tagesmarkt beginnen'}</button>
+        ${result ? '<button class="btn wide" data-menu="resume">Weiterspielen ohne Wertung</button>' : ''}
+      </div>
+      <p class="fine"><button class="link" data-menu="main">Hauptmenü</button>${this.account.name ? '' : ' · <button class="link" data-menu="account">Namen für die Bestenliste festlegen</button>'}</p>`);
+    this.menu.screen = 'daily';
+  }
+
+  /** Tagesmarkt abgelaufen: eintragen und Bestenliste zeigen */
+  async finishDaily(day: string, worth: number): Promise<void> {
+    this.hooks.unlock('tagesmarkt');
+    this.daily = { entries: null, status: isConfigured() ? 'Ergebnis wird eingetragen ...' : 'Ohne Verbindung wird nur lokal gezählt.' };
+    this.renderDaily({ worth, improved: null });
+    if (!isConfigured()) return;
+    const sent = await submitDaily(worth, day);
+    const top = await topDaily(day, 10);
+    this.daily = top.ok ? { entries: top.data, status: '' } : { entries: null, status: niceError(top.error) };
+    if (!sent.ok) this.daily.status = niceError(sent.error);
+    if (this.menu.screen === 'daily') this.renderDaily({ worth, improved: sent.ok ? sent.data.improved : null });
+  }
+
+  // --- Handelsliga ---
+
+  private async openLeague(): Promise<void> {
+    if (!isConfigured()) {
+      this.leagueMsg = 'Die Handelsliga braucht eine Verbindung zum Server.';
+      this.renderLeague();
+      return;
+    }
+    this.leagueBusy = true;
+    this.leagueMsg = 'Verbinde mit der Liga ...';
+    this.renderLeague();
+    const [p, m, r] = await Promise.all([joinLeague(), getLeagueMarket(), leagueRanking(10)]);
+    this.leagueBusy = false;
+    if (!p.ok) {
+      this.leagueMsg = niceError(p.error);
+      this.renderLeague();
+      return;
+    }
+    this.player = p.data;
+    if (m.ok) this.market = m.data;
+    if (r.ok) this.ranking = r.data;
+    this.leagueMsg = '';
+    if (!this.unsubscribe) {
+      this.unsubscribe = subscribeLeagueMarket((row) => {
+        const i = this.market.findIndex((x) => x.townId === row.townId && x.goodId === row.goodId);
+        if (i >= 0) this.market[i] = row;
+        else this.market.push(row);
+        if (this.menu.screen === 'league') this.renderLeague();
+      });
+    }
+    if (!this.ticker) {
+      this.ticker = window.setInterval(() => {
+        if (this.menu.screen !== 'league') {
+          this.stopLeague();
+          return;
+        }
+        // nur während der Fahrt neu zeichnen, sonst würden Klicks ins Leere gehen
+        const wait = this.player ? secondsUntilArrival(this.player) : 0;
+        if (wait > 0) this.updateTravel(wait);
+        else if (this.lastWait > 0) this.renderLeague();
+        this.lastWait = wait;
+      }, 1000);
+    }
+    this.renderLeague();
+  }
+
+  /** Nur Balken und Sekunden der laufenden Fahrt erneuern */
+  private updateTravel(wait: number): void {
+    const box = document.querySelector('.league-travel');
+    if (!box) return;
+    const bar = box.querySelector<HTMLElement>('.bar i');
+    if (bar) bar.style.width = `${Math.round((1 - wait / LEAGUE_TRAVEL_SECONDS) * 100)}%`;
+    const sec = box.querySelector('.sec');
+    if (sec) sec.textContent = String(wait);
+  }
+
+  private stopLeague(): void {
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    if (this.ticker) window.clearInterval(this.ticker);
+    this.ticker = 0;
+  }
+
+  private async leagueAction<T>(
+    run: () => Promise<{ ok: true; data: T } | { ok: false; error: string; offline: boolean }>,
+    done: (data: T) => void,
+  ): Promise<void> {
+    if (this.leagueBusy || !this.player) return;
+    this.leagueBusy = true;
+    this.renderLeague();
+    const r = await run();
+    this.leagueBusy = false;
+    if (r.ok) done(r.data);
+    else {
+      this.leagueMsg = niceError(r.error);
+      this.hooks.sfx('fehler');
+    }
+    const rank = await leagueRanking(10);
+    if (rank.ok) this.ranking = rank.data;
+    if (this.menu.screen === 'league') this.renderLeague();
+  }
+
+  private renderLeague(): void {
+    const p = this.player;
+    let body = '';
+    if (p) {
+      const wait = secondsUntilArrival(p);
+      const load = Object.values(p.cargo).reduce((s, n) => s + n, 0);
+      const towns = [...new Set(this.market.map((m) => m.townId))];
+      const here = this.market.filter((m) => m.townId === p.townId);
+      const cargoText = Object.entries(p.cargo)
+        .filter(([, n]) => n > 0)
+        .map(([g, n]) => `${n} t ${esc(GOOD_BY_ID.get(g)?.name ?? g)}`)
+        .join(', ');
+      const dis = this.leagueBusy ? 'disabled' : '';
+      const rows = here
+        .map((m) => {
+          const g = GOOD_BY_ID.get(m.goodId);
+          const buyP = price(m.basePrice, m.stock - 1, m.targetStock);
+          const sellP = Math.floor(price(m.basePrice, m.stock + 1, m.targetStock) * SELL_FACTOR);
+          const have = p.cargo[m.goodId] ?? 0;
+          const canBuy = !wait && m.stock > 0 && load < LEAGUE_CARGO && p.gold >= buyP;
+          const fill = Math.min(LEAGUE_CARGO - load, m.stock, Math.floor(p.gold / Math.max(1, buyP)));
+          return `<tr>
+            <td><span class="swatch" style="background:#${(g?.color ?? 0x888888).toString(16).padStart(6, '0')}"></span>${esc(g?.name ?? m.goodId)}</td>
+            <td class="num">${fmt(m.stock)} t</td><td class="num">${buyP}</td><td class="num">${sellP}</td><td class="num">${have || ''}</td>
+            <td class="acts">
+              <button class="btn small" data-menu="leagueTrade" data-good="${m.goodId}" data-amount="-1" ${canBuy && !dis ? '' : 'disabled'}>+1</button>
+              <button class="btn small" data-menu="leagueTrade" data-good="${m.goodId}" data-amount="${-Math.max(1, Math.min(10, fill))}" ${canBuy && fill >= 2 && !dis ? '' : 'disabled'}>+${Math.max(1, Math.min(10, fill))}</button>
+              <button class="btn small" data-menu="leagueTrade" data-good="${m.goodId}" data-amount="1" ${have && !wait && !dis ? '' : 'disabled'}>−1</button>
+              <button class="btn small" data-menu="leagueTrade" data-good="${m.goodId}" data-amount="${have}" ${have > 1 && !wait && !dis ? '' : 'disabled'}>alles</button>
+            </td></tr>`;
+        })
+        .join('');
+      body = `
+        <div class="league-head">
+          <span><small>Ort</small><b>${wait ? `unterwegs nach ${esc(this.townName(p.townId))}` : esc(this.townName(p.townId))}</b></span>
+          <span><small>Kasse</small><b>${fmt(p.gold)} Taler</b></span>
+          <span><small>Laderaum</small><b>${load} / ${LEAGUE_CARGO} t</b></span>
+          <span><small>Vermögen</small><b>${fmt(p.wealth)}</b></span>
+        </div>
+        ${cargoText ? `<p class="fine">An Bord: ${cargoText}</p>` : ''}
+        ${
+          wait
+            ? `<div class="league-travel"><div class="bar"><i style="width:${Math.round((1 - wait / LEAGUE_TRAVEL_SECONDS) * 100)}%"></i></div><p>Ankunft in <b class="sec">${wait}</b> Sekunden. Die Preise ändern sich derweil mit jedem Handel der anderen.</p></div>`
+            : `<table class="league-market"><thead><tr><th>Ware</th><th class="num">Bestand</th><th class="num">Kauf</th><th class="num">Verkauf</th><th class="num">Bord</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+        }
+        <h3>Fahren nach</h3>
+        <div class="slot-grid league-towns">${towns
+          .filter((t) => t !== p.townId)
+          .map((t) => `<button class="btn" data-menu="leagueTravel" data-id="${t}" ${wait || dis ? 'disabled' : ''}>${esc(this.townName(t))}<small>${LEAGUE_TRAVEL_SECONDS} s</small></button>`)
+          .join('')}</div>
+        <h3>Rangliste</h3>
+        ${this.ranking.length ? rankTable(this.ranking) : '<p class="fine">Noch keine Einträge.</p>'}`;
+    }
+    this.menu.show(
+      `<div class="card-head">Handelsliga · live</div>
+      <h2>Ein Markt für alle</h2>
+      <p class="fine">Alle Spieler handeln auf demselben Markt. Jeder Kauf macht die Ware teurer, jeder Verkauf billiger, für alle. Ein Kahn mit ${LEAGUE_CARGO} t, Start mit 300 Talern. Die Märkte erholen sich langsam von selbst.</p>
+      ${this.leagueMsg ? `<p class="league-msg">${esc(this.leagueMsg)}</p>` : ''}
+      ${body}
+      <p class="fine"><button class="link" data-menu="leagueRefresh">Neu laden</button> · <button class="link" data-menu="account">Konto und Name</button> · <button class="link" data-menu="${this.menuBack()}">Zurück</button></p>`,
+      true,
+    );
+    this.menu.screen = 'league';
+  }
+
+  private menuBack(): string {
+    return this.hooks.currentSave() ? 'resume' : 'main';
+  }
+
+  // --- Konto ---
+
+  private async loadAccount(): Promise<void> {
+    const me = await currentPlayer();
+    this.account.email = me?.email ?? null;
+    this.account.anonymous = !me || me.anonymous;
+    const n = await getUsername();
+    this.account.name = n.ok ? n.data : null;
+    await this.loadSlots();
+  }
+
+  private async loadSlots(): Promise<void> {
+    const me = await currentPlayer();
+    if (!me) {
+      this.account.slots = [];
+      return;
+    }
+    const s = await listCloudSlots();
+    this.account.slots = s.ok ? s.data : [];
+  }
+
+  private async openAccount(): Promise<void> {
+    this.account.status = isConfigured() ? 'Lade Konto ...' : 'Ohne Verbindung zum Server gibt es kein Konto.';
+    this.renderAccount();
+    if (!isConfigured()) return;
+    await this.loadAccount();
+    this.account.status = '';
+    if (this.menu.screen === 'account') this.renderAccount();
+  }
+
+  private async accountAction(run: () => Promise<void>): Promise<void> {
+    this.account.status = 'Einen Moment ...';
+    this.renderAccount();
+    await run();
+    if (this.menu.screen === 'account') this.renderAccount();
+  }
+
+  private renderAccount(): void {
+    const a = this.account;
+    const save = this.hooks.currentSave();
+    const slots = Array.from({ length: SLOT_COUNT }, (_, i) => i + 1)
+      .map((n) => {
+        const s = a.slots.find((x) => x.slot === n);
+        return `<div class="cloud-slot"><span>Platz ${n}<small>${s ? `${esc(s.name)} · ${new Date(s.updatedAt).toLocaleString('de-DE')}` : 'leer'}</small></span>
+          <button class="btn small" data-menu="cloudSave" data-id="${n}" ${save ? '' : 'disabled'}>Speichern</button>
+          <button class="btn small" data-menu="cloudLoad" data-id="${n}" ${s ? '' : 'disabled'}>Laden</button></div>`;
+      })
+      .join('');
+    this.menu.show(`
+      <div class="card-head">Konto</div>
+      <h2>${a.name ? esc(a.name) : 'Ohne Namen'}</h2>
+      <p class="fine">${
+        a.email ? `Angemeldet mit ${esc(a.email)}. Deine Spielstände und Ergebnisse gehören zu dieser Adresse.` : 'Du spielst ohne Anmeldung. Mit einer E-Mail-Adresse kannst du dein Konto auf andere Geräte mitnehmen, ein Passwort gibt es nicht.'
+      }</p>
+      ${a.status ? `<p class="league-msg">${esc(a.status)}</p>` : ''}
+      <form class="inline-form"><label>Name in den Bestenlisten<input name="name" maxlength="20" placeholder="3 bis 20 Zeichen" value="${esc(a.name ?? '')}"></label><button class="btn" data-menu="setName">Speichern</button></form>
+      ${
+        a.email
+          ? '<p class="fine"><button class="link" data-menu="signOut">Abmelden</button></p>'
+          : '<form class="inline-form"><label>E-Mail für den Anmeldelink<input name="email" type="email" placeholder="name@beispiel.de"></label><button class="btn" data-menu="magicLink">Link senden</button></form>'
+      }
+      <h3>Cloud-Speicher</h3>
+      <p class="fine">${save ? 'Speichert das laufende Spiel auf dem Server.' : 'Starte oder lade ein Spiel, um es in der Cloud zu speichern.'}</p>
+      <div class="cloud-slots">${slots}</div>
+      <p class="fine"><button class="link" data-menu="${this.menuBack()}">Zurück</button></p>`);
+    this.menu.screen = 'account';
+  }
+
+  // --- Erfolge ---
+
+  showAchievements(): void {
+    const have = this.hooks.achievements();
+    const done = this.hooks.challenges();
+    const count = ACHIEVEMENTS.filter((a) => have[a.id]).length;
+    const list = ACHIEVEMENTS.map((a) => {
+      const when = have[a.id];
+      return `<li class="${when ? 'done' : ''}"><b>${esc(a.title)}</b><small>${esc(a.text)}${when ? ` · ${new Date(when).toLocaleDateString('de-DE')}` : ''}</small></li>`;
+    }).join('');
+    const ch = CHALLENGES.map((c) => `<li class="${done[c.id] !== undefined ? 'done' : ''}"><b>${esc(c.title)}</b><small>${done[c.id] !== undefined ? `bestanden in ${done[c.id]} Tagen` : 'offen'}</small></li>`).join('');
+    this.menu.show(`
+      <div class="card-head">Erfolge · ${count} von ${ACHIEVEMENTS.length}</div>
+      <h2>Das Hausbuch</h2>
+      <ul class="achievements">${list}</ul>
+      <h3>Herausforderungen</h3>
+      <ul class="achievements">${ch}</ul>
+      <p class="fine"><button class="link" data-menu="${this.menuBack()}">Zurück</button></p>`, true);
+    this.menu.screen = 'achievements';
+  }
+}
+
+function rankTable(list: { rank: number; username: string; wealth: number; mine: boolean }[]): string {
+  return `<table class="rank-table"><tbody>${list
+    .map((e) => `<tr class="${e.mine ? 'mine' : ''}"><td class="num">${e.rank}.</td><td>${esc(e.username)}${e.mine ? ' (du)' : ''}</td><td class="num">${fmt(e.wealth)} Taler</td></tr>`)
+    .join('')}</tbody></table>`;
+}
+
+function cloudName(save: SaveGame): string {
+  const what =
+    save.mode === 'kampagne' ? 'Kampagne' : save.mode === 'herausforderung' ? 'Herausforderung' : save.mode === 'tagesmarkt' ? 'Tagesmarkt' : 'Freies Spiel';
+  const day = Math.floor(save.state.hour / 24) + 1;
+  return `${what}, Tag ${day}, ${fmt(save.state.money)} Taler`.slice(0, 60);
+}
