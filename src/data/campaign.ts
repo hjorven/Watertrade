@@ -80,7 +80,7 @@ export const CHAPTERS: Chapter[] = [
       { type: 'betriebe', count: 2, text: 'Lass zwei eigene Betriebe arbeiten' },
       { type: 'routes', count: 1, text: 'Lass ein Schiff mit Kapitän eine Handelsroute fahren' },
       { type: 'contracts', count: 3, text: 'Erfülle drei Aufträge' },
-      { type: 'worth', amount: 50000, text: 'Bring dein Haus auf 50.000 Taler Vermögen' },
+      { type: 'worth', amount: 55000, text: 'Bring dein Haus auf 55.000 Taler Vermögen' },
     ],
   },
   {
@@ -131,7 +131,7 @@ export const CHAPTERS: Chapter[] = [
       { type: 'ships', count: 2, shipType: 'raddampfer', text: 'Stell zwei Raddampfer in Dienst' },
       { type: 'project', id: 'schleuse-erzbach', text: 'Bau die Schleusentreppe am Erzbach' },
       { type: 'deliver', town: 'niedermuend', good: 'kohle', amount: 300, text: 'Bring 300 t Kohle nach Niedermünd' },
-      { type: 'worth', amount: 50000, text: 'Bring dein Haus auf 50.000 Taler Vermögen' },
+      { type: 'worth', amount: 55000, text: 'Bring dein Haus auf 55.000 Taler Vermögen' },
     ],
   },
   {
