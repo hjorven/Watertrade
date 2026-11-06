@@ -1,5 +1,5 @@
 /**
- * Audio für Flussreich: prozedurale Soundeffekte, Flussgeräusch und eigene Musik, nur WebAudio.
+ * Audio für Watertrade: prozedurale Soundeffekte, Flussgeräusch und eigene Musik, nur WebAudio.
  *
  * Einbindung:
  * ```ts

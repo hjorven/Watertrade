@@ -19,7 +19,7 @@ let status: OnlineStatus = 'offline';
 const listeners = new Set<(s: OnlineStatus) => void>();
 
 /**
- * Öffentliche Verbindungsdaten des Flussreich-Servers. Der Publishable Key ist für den Browser gedacht,
+ * Öffentliche Verbindungsdaten des Watertrade-Servers (Supabase-Projekt „Flussreich“). Der Publishable Key ist für den Browser gedacht,
  * die Daten schützt Row Level Security. Vite-Variablen haben Vorrang, im Testlauf bleibt alles offline.
  */
 export const DEFAULT_ONLINE: Required<OnlineConfig> = {

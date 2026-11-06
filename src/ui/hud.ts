@@ -266,7 +266,7 @@ export class Hud {
       'beforeend',
       `
       <header class="topbar">
-        <div class="brand">Flussreich</div>
+        <div class="brand">Watertrade</div>
         <div class="stats"></div>
         <nav class="views" aria-label="Bücher">
           <button class="btn" data-act="view" data-view="contracts">Aufträge<i class="badge" data-badge="contracts"></i></button>

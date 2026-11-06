@@ -237,7 +237,7 @@ export class Menu {
     const auto = info.slots.find((s) => s.slot === 'auto');
     this.show(`
       <div class="card-head">Handelshaus am Fluss · gegründet im Jahr 1</div>
-      <h1 class="title">Flussreich</h1>
+      <h1 class="title">Watertrade</h1>
       <p class="lead">Führe ein Handelshaus an einem großen Flusssystem. Versorge die Städte, bau eine Flotte auf und lerne den Fluss lesen.</p>
       <div class="menu-buttons">
         ${auto ? `<button class="btn primary wide" data-menu="continue">Weiterspielen<small>${esc(auto.summary ?? '')}</small></button>` : ''}

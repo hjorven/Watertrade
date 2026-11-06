@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeAmbient } from './ambient.ts';
-import { DEFAULT_SETTINGS, STORAGE_KEY, clampVolume, loadSettings, saveSettings, volumeToGain } from './settings.ts';
+import { DEFAULT_SETTINGS, LEGACY_STORAGE_KEY, STORAGE_KEY, clampVolume, loadSettings, saveSettings, volumeToGain } from './settings.ts';
 import { SFX_NAMES } from './sfx.ts';
 import * as audio from './index.ts';
 
@@ -25,6 +25,15 @@ describe('Einstellungen', () => {
     s.muted = true;
     saveSettings(s, store);
     expect(loadSettings(store)).toEqual({ volume: { ...DEFAULT_SETTINGS.volume, music: 0.2 }, muted: true });
+  });
+
+  it('liest Einstellungen aus der Zeit vor der Umbenennung, bis sie umgezogen sind', () => {
+    const store = memoryStore();
+    store.setItem(LEGACY_STORAGE_KEY, JSON.stringify({ muted: true, volume: { music: 0.1 } }));
+    expect(loadSettings(store).muted).toBe(true);
+    expect(loadSettings(store).volume.music).toBe(0.1);
+    store.setItem(STORAGE_KEY, JSON.stringify({ muted: false }));
+    expect(loadSettings(store).muted).toBe(false);
   });
 
   it('übersteht kaputte Einträge', () => {
