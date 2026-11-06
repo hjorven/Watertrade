@@ -70,12 +70,13 @@ export class OnlineScreens {
   private daily: { entries: DailyEntry[] | null; status: string } = { entries: null, status: '' };
 
   // Konto
-  private account: { name: string | null; email: string | null; anonymous: boolean; slots: CloudSlot[]; status: string } = {
+  private account: { name: string | null; email: string | null; anonymous: boolean; slots: CloudSlot[]; status: string; reachable: boolean } = {
     name: null,
     email: null,
     anonymous: true,
     slots: [],
     status: '',
+    reachable: true,
   };
 
   constructor(menu: Menu, map: MapDef, hooks: OnlineHooks) {
@@ -398,8 +399,20 @@ export class OnlineScreens {
   // --- Konto ---
 
   private async loadAccount(): Promise<void> {
-    const ping = await (await online()).getUsername();
-    if (!ping.ok) this.account.status = ping.offline ? 'Ohne Verbindung zum Server gibt es kein Konto.' : 'Der Server ist gerade nicht erreichbar. Versuch es später noch einmal.';
+    // echte Anfrage als Verbindungstest, getUsername fragt ohne Sitzung gar nicht beim Server nach
+    const api = await online();
+    // Der Client wiederholt fehlgeschlagene Anfragen eine Weile; nach 5 Sekunden gilt der Server als nicht erreichbar
+    const ping = await Promise.race([
+      api.getLeagueMarket(),
+      new Promise<{ ok: false; error: string; offline: false }>((resolve) =>
+        setTimeout(() => resolve({ ok: false, error: 'Zeitüberschreitung', offline: false }), 5000),
+      ),
+    ]);
+    this.account.reachable = ping.ok;
+    if (!ping.ok) {
+      this.account.status = ping.offline ? 'Ohne Verbindung zum Server gibt es kein Konto.' : 'Der Server ist gerade nicht erreichbar. Versuch es später noch einmal.';
+      return;
+    }
     const me = await (await online()).currentPlayer();
     this.account.email = me?.email ?? null;
     this.account.anonymous = !me || me.anonymous;
@@ -441,7 +454,7 @@ export class OnlineScreens {
       .map((n) => {
         const s = a.slots.find((x) => x.slot === n);
         return `<div class="cloud-slot"><span>Platz ${n}<small>${s ? `${esc(s.name)} · ${new Date(s.updatedAt).toLocaleString('de-DE')}` : 'leer'}</small></span>
-          <button class="btn small" data-menu="cloudSave" data-id="${n}" ${save ? '' : 'disabled'}>Speichern</button>
+          <button class="btn small" data-menu="cloudSave" data-id="${n}" ${save && a.reachable ? '' : 'disabled'}>Speichern</button>
           <button class="btn small" data-menu="cloudLoad" data-id="${n}" ${s ? '' : 'disabled'}>Laden</button></div>`;
       })
       .join('');
@@ -452,11 +465,11 @@ export class OnlineScreens {
         a.email ? `Angemeldet mit ${esc(a.email)}. Deine Spielstände und Ergebnisse gehören zu dieser Adresse.` : 'Du spielst ohne Anmeldung. Mit einer E-Mail-Adresse kannst du dein Konto auf andere Geräte mitnehmen, ein Passwort gibt es nicht.'
       }</p>
       ${a.status ? `<p class="league-msg">${esc(a.status)}</p>` : ''}
-      <form class="inline-form"><label>Name in den Bestenlisten<input name="name" maxlength="20" placeholder="3 bis 20 Zeichen" value="${esc(a.name ?? '')}"></label><button type="button" class="btn" data-menu="setName">Speichern</button></form>
+      <form class="inline-form"><label>Name in den Bestenlisten<input name="name" maxlength="20" placeholder="3 bis 20 Zeichen" value="${esc(a.name ?? '')}"></label><button type="button" class="btn" data-menu="setName" ${a.reachable ? '' : 'disabled'}>Speichern</button></form>
       ${
         a.email
           ? '<p class="fine"><button class="link" data-menu="signOut">Abmelden</button></p>'
-          : '<form class="inline-form"><label>E-Mail für den Anmeldelink<input name="email" type="email" placeholder="name@beispiel.de"></label><button type="button" class="btn" data-menu="magicLink">Link senden</button></form>'
+          : `<form class="inline-form"><label>E-Mail für den Anmeldelink<input name="email" type="email" placeholder="name@beispiel.de"></label><button type="button" class="btn" data-menu="magicLink" ${a.reachable ? '' : 'disabled'}>Link senden</button></form>`
       }
       <h3>Cloud-Speicher</h3>
       <p class="fine">${save ? 'Speichert das laufende Spiel auf dem Server.' : this.hooks.inGame() ? 'Herausforderungen und Tagesmarkt lassen sich nicht speichern.' : 'Starte oder lade ein Spiel, um es in der Cloud zu speichern.'}</p>
