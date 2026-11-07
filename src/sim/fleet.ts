@@ -21,7 +21,7 @@ import {
   type TradeResult,
   type TradeRoute,
 } from './state.ts';
-import { activeStops, bookRoute, bookValue, fmtLevel, LOAD_RETRY_HOURS, MAX_LOAD_WAIT_HOURS, stopSkipped, syncPlan } from './routes.ts';
+import { bookRoute, bookValue, fmtLevel, LOAD_RETRY_HOURS, MAX_LOAD_WAIT_HOURS, stopSkipped } from './routes.ts';
 import { buy, load, sell, store } from './trade.ts';
 import { depart, departProblem, planVoyage } from './voyage.ts';
 
@@ -256,12 +256,11 @@ function execOrder(state: GameState, ship: Ship, o: RouteOrder): TradeResult {
  * Ein Schiff mit Kapitän und aktiver Route arbeitet seinen Halt ab und legt zum nächsten ab.
  * Erst wird verkauft und eingelagert, dann gekauft, damit Platz im Laderaum ist.
  * Bedingungen je Halt: Mindestladung vor dem Ablegen, Halt überspringen bei zu niedrigem oder hohem Pegel.
- * Zur Jahreszeit passend gilt der Sommer- oder Winterplan. Was der Halt einbringt, kommt ins Routenbuch.
+ * Was der Halt einbringt, kommt ins Routenbuch.
  */
 export function runRoute(state: GameState, map: MapDef, ship: Ship): string | null {
   const r = ship.route;
   if (!r || !r.active || !ship.port || ship.voyage || !ship.captain) return null;
-  syncPlan(state, r, ship.port);
   if (r.retryAt !== undefined && state.hour < r.retryAt) return null;
   const before = bookValue(state, ship);
   const log = runStop(state, map, ship, r);
@@ -272,7 +271,7 @@ export function runRoute(state: GameState, map: MapDef, ship: Ship): string | nu
 const isLoading = (o: RouteOrder) => o.kind === 'kaufen' || o.kind === 'auslagern';
 
 function runStop(state: GameState, map: MapDef, ship: Ship, r: TradeRoute): string | null {
-  const stops = activeStops(state, r);
+  const stops = r.stops;
   if (stops.length < 2) return null;
   if (r.next >= stops.length) r.next = 0;
   const port = ship.port!;

@@ -416,6 +416,7 @@ export const BOT_STRATEGY: Record<string, BotOptions> = {
   'h-frisch': { maxShips: 2 },
   'h-aufschwung': { build: true, maxShips: 3 },
   'h-pfennig': { maxShips: 2 },
-  'h-kapitaene': { build: true, maxShips: 3 },
+  // ohne Schmuggler (Nov 2026) lohnen sich eigene Betriebe hier nicht mehr
+  'h-kapitaene': { maxShips: 3 },
   'h-erzbach': { maxShips: 2 },
 };

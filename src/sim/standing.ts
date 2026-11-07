@@ -243,36 +243,29 @@ export function found(state: GameState, town: string, id: string): TradeResult {
   return { ok: true, message: `${f.name} gestiftet. Die Stadt dankt es dir: +${f.standing} Ansehen.`, amount: 0, taler: f.price };
 }
 
-export function townhouseAllowed(state: GameState, town: string): string | null {
-  if (state.standing?.[town]?.townhouse) return 'Du hast hier schon ein Stadthaus.';
-  if (rankIndex(standing(state, town)) < TOWNHOUSE.minRank) return `Erst ab "${RANKS[TOWNHOUSE.minRank].name}" verkauft dir die Stadt einen Bauplatz.`;
-  if (state.money < TOWNHOUSE.price) return `Das Stadthaus kostet ${TOWNHOUSE.price} Taler.`;
-  return null;
+/** Preis des Ratssitzes: Stadthaus (falls noch keins steht) und Sitz im Rat */
+export function seatPrice(state: GameState, town: string): number {
+  return (state.standing?.[town]?.townhouse ? 0 : TOWNHOUSE.price) + COUNCIL.price;
 }
 
-/** Eigenes Stadthaus bauen: Prestige im Diorama und dauerhaftes Ansehen */
-export function buildTownhouse(state: GameState, town: string): TradeResult {
-  const why = townhouseAllowed(state, town);
-  if (why) return fail(why);
-  state.money -= TOWNHOUSE.price;
-  standingOf(state, town).townhouse = true;
-  return { ok: true, message: `Dein Stadthaus steht. +${TOWNHOUSE.standing} Ansehen.`, amount: 0, taler: TOWNHOUSE.price };
-}
-
-export function councilAllowed(state: GameState, town: string): string | null {
-  if (state.standing?.[town]?.council) return 'Du sitzt hier schon im Stadtrat.';
+export function seatAllowed(state: GameState, town: string): string | null {
+  if (state.standing?.[town]?.council) return 'Du sitzt hier schon im Rat.';
   if (rankIndex(standing(state, town)) < COUNCIL.minRank) return `Erst ab "${RANKS[COUNCIL.minRank].name}" wählt dich der Rat.`;
-  if (state.money < COUNCIL.price) return `Die Wahl kostet ${COUNCIL.price} Taler an Spenden und Bewirtung.`;
+  const price = seatPrice(state, town);
+  if (state.money < price) return `Stadthaus und Ratssitz kosten ${price} Taler.`;
   return null;
 }
 
-/** Sitz im Stadtrat erwerben */
-export function joinCouncil(state: GameState, town: string): TradeResult {
-  const why = councilAllowed(state, town);
+/** Ratssitz erwerben: Stadthaus am Markt und Sitz im Stadtrat in einem */
+export function takeSeat(state: GameState, town: string): TradeResult {
+  const why = seatAllowed(state, town);
   if (why) return fail(why);
-  state.money -= COUNCIL.price;
-  standingOf(state, town).council = true;
-  return { ok: true, message: 'Du sitzt jetzt im Stadtrat: halber Zoll vor der Stadt, mehr und bessere Aufträge.', amount: 0, taler: COUNCIL.price };
+  const price = seatPrice(state, town);
+  state.money -= price;
+  const s = standingOf(state, town);
+  s.townhouse = true;
+  s.council = true;
+  return { ok: true, message: 'Dein Stadthaus steht und du sitzt im Rat: halber Zoll vor der Stadt, mehr und bessere Aufträge.', amount: 0, taler: price };
 }
 
 /** Sitz im Rat aufgeben, spart den Aufwand */
@@ -280,6 +273,7 @@ export function leaveCouncil(state: GameState, town: string): TradeResult {
   const s = state.standing?.[town];
   if (!s?.council) return fail('Du sitzt hier nicht im Rat.');
   s.council = false;
+  // das Stadthaus bleibt stehen, nur der Aufwand für den Rat entfällt
   return { ok: true, message: 'Du hast deinen Sitz im Stadtrat aufgegeben.', amount: 0, taler: 0 };
 }
 

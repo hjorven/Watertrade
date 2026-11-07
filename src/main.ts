@@ -19,7 +19,7 @@ import { Stage } from './render/scene.ts';
 import { BASE_FOG, easeEpoch, moodAt } from './render/epochmood.ts';
 import { ambient, getVolume, isMuted, mute, playSfx, setMusic, setVolume, unlockAudioOnGesture, type SfxName } from './audio/index.ts';
 import { RIVAL_BY_ID } from './data/rivals.ts';
-import { buyShares, endPact, offerPact, placeBid, sellShares } from './sim/rivalry.ts';
+import { buyHouse, endPact, offerPact, placeBid } from './sim/rivalry.ts';
 import { SHIPS } from './data/ships.ts';
 import { Estates, PLAYER_COLOR, type EstateInfo } from './render/buildings.ts';
 import { ShipView } from './render/ships.ts';
@@ -58,14 +58,13 @@ import {
 } from './sim/game.ts';
 import { buildHarbor, dredge, setFee, setUpkeep, startProjectWith } from './sim/wasserbau.ts';
 import type { FeeLevel } from './sim/state.ts';
-import { activePlan, resetBook, stopsOf, winterSeasonsOf } from './sim/routes.ts';
-import type { RoutePlan } from './sim/state.ts';
+import { resetBook } from './sim/routes.ts';
 import { deliverToCanal, startCanalStage } from './sim/canal.ts';
 import { EPOCHS } from './data/ships.ts';
 import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
-import { buildTownhouse, found, joinCouncil, leaveCouncil } from './sim/standing.ts';
+import { found, leaveCouncil, takeSeat } from './sim/standing.ts';
 import { goalDone, goalProgress, restoreCompleted } from './sim/goals.ts';
-import { payOverdueNow, repayLoan, setInsured, takeLoan } from './sim/finance.ts';
+import { payOverdueNow, repayLoan, takeLoan } from './sim/finance.ts';
 import { deserialize, SAVE_VERSION, serialize, type GameMode, type SaveGame } from './sim/save.ts';
 import { LEVELS, levelOf } from './sim/towns.ts';
 import { chapterOneHint } from './ui/tutorial.ts';
@@ -361,13 +360,9 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
     case 'pactEnd':
       r = endPact(state, String(d.house));
       break;
-    case 'buyShares':
-      r = buyShares(state, MAP, String(d.house));
-      ok = 'muenzen';
-      break;
-    case 'sellShares':
-      r = sellShares(state, String(d.house));
-      ok = 'muenzen';
+    case 'buyHouse':
+      r = buyHouse(state, MAP, String(d.house));
+      ok = 'erfolg';
       break;
     case 'bid':
       r = placeBid(state, String(d.town));
@@ -417,13 +412,9 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
       r = found(state, town, String(d.id));
       ok = 'glocke';
       break;
-    case 'townhouse':
-      r = buildTownhouse(state, town);
+    case 'seat':
+      r = takeSeat(state, town);
       ok = 'erfolg';
-      break;
-    case 'council':
-      r = joinCouncil(state, town);
-      ok = 'stempel';
       break;
     case 'leaveCouncil':
       r = leaveCouncil(state, town);
@@ -456,10 +447,6 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
       r = payOverdueNow(state, n('id'));
       ok = 'muenzen';
       break;
-    case 'insure':
-      r = setInsured(state, selected, n('on') === 1);
-      ok = 'stempel';
-      break;
     case 'routeAddStop':
     case 'routeDelStop':
     case 'routeAddOrder':
@@ -467,8 +454,6 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
     case 'routeToggle':
     case 'routeClear':
     case 'routeStopCond':
-    case 'routeWinterSeason':
-    case 'routeCopyPlan':
     case 'routeResetBook':
       if (ship) r = editRoute(ship, cmd, d);
       break;
@@ -481,11 +466,9 @@ function editRoute(ship: Ship, cmd: string, d: Record<string, string | number>):
   const okMsg = (message: string): TradeResult => ({ ok: true, message, amount: 0, taler: 0 });
   const failMsg = (message: string): TradeResult => ({ ok: false, message, amount: 0, taler: 0 });
   const r = (ship.route ??= { stops: [], next: 0, active: false });
-  // Sommerplan ist die Haupt-Liste, der Winterplan die zweite
-  const plan: RoutePlan = d.plan === 'winter' ? 'winter' : 'sommer';
-  const stops = plan === 'winter' ? (r.winterStops ??= []) : r.stops;
-  // Änderungen am Plan, nach dem gerade gefahren wird: beim ersten Halt neu anfangen
-  const touchesActive = () => r.active && plan === (r.plan ?? 'sommer');
+  const stops = r.stops;
+  // Änderungen an einer laufenden Route: beim ersten Halt neu anfangen
+  const touchesActive = () => r.active;
   const restart = () => {
     r.next = 0;
     r.retryAt = undefined;
@@ -536,19 +519,6 @@ function editRoute(ship: Ship, cmd: string, d: Record<string, string | number>):
       if (stop.levelMax === undefined) delete stop.levelMax;
       return okMsg(`Bedingungen für ${MAP.towns.find((t) => t.id === stop.town)?.name ?? stop.town} gespeichert.`);
     }
-    case 'routeWinterSeason': {
-      const s = String(d.season) as Season;
-      if (!SEASONS.includes(s)) return null;
-      const list = winterSeasonsOf(r);
-      r.winterSeasons = list.includes(s) ? list.filter((x) => x !== s) : SEASONS.filter((x) => x === s || list.includes(x));
-      return null;
-    }
-    case 'routeCopyPlan': {
-      // Sommerplan als Vorlage für den Winterplan übernehmen
-      r.winterStops = structuredClone(r.stops);
-      if (r.active && (r.plan ?? 'sommer') === 'winter') restart();
-      return okMsg('Sommerplan in den Winterplan übernommen.');
-    }
     case 'routeResetBook':
       resetBook(r);
       return okMsg('Routenbuch geleert.');
@@ -561,8 +531,7 @@ function editRoute(ship: Ship, cmd: string, d: Record<string, string | number>):
       r.note = undefined;
       // beginnt am Halt, an dem das Schiff gerade liegt, sonst beim ersten
       if (r.active) {
-        r.plan = activePlan(state, r);
-        const here = stopsOf(r, r.plan).findIndex((s) => s.town === ship.port);
+        const here = r.stops.findIndex((s) => s.town === ship.port);
         r.next = here >= 0 ? here : 0;
       }
       return okMsg(r.active ? `${ship.captain!.name} übernimmt die Route.` : 'Route angehalten.');

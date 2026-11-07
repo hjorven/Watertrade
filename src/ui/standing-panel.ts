@@ -1,14 +1,15 @@
 /**
- * Rathaus-Reiter: Ansehen in der Stadt, was es freischaltet, Stiftungen, Stadthaus und Stadtrat.
- * Liefert nur HTML; die Knöpfe schicken Befehle über data-cmd an main.ts (found, townhouse, council, leaveCouncil).
+ * Rathaus-Reiter: Ansehen in der Stadt, was es freischaltet, Stiftungen und Ratssitz (Stadthaus und Stadtrat).
+ * Liefert nur HTML; die Knöpfe schicken Befehle über data-cmd an main.ts (found, seat, leaveCouncil).
  */
 import { COUNCIL, FOUNDATIONS, RANKS, TOWNHOUSE } from '../data/foundations.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import type { TownDef } from '../data/maps/valley.ts';
 import { season, SEASON_NAME } from '../sim/calendar.ts';
 import { day, type GameState } from '../sim/state.ts';
-import { councilAllowed, foundationAllowed, rankIndex, standing, townhouseAllowed } from '../sim/standing.ts';
+import { foundationAllowed, rankIndex, seatAllowed, seatPrice, standing } from '../sim/standing.ts';
 import { SEASON_NEEDS, needs } from '../sim/towns.ts';
+import { explain } from './explain.ts';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('de-DE');
 const goodName = (id: string) => GOOD_BY_ID.get(id)?.name ?? id;
@@ -77,34 +78,24 @@ export function renderRathaus(state: GameState, town: TownDef): string {
       <button class="btn" data-act="cmd" data-cmd="found" data-id="${f.id}" ${why ? `disabled title="${esc(why)}"` : ''}>${fmt(f.price)} Taler</button></div>`;
   }).join('');
 
-  const townhouse = s?.townhouse
-    ? `<p class="note">Dein Stadthaus steht am Marktplatz. +${TOWNHOUSE.standing} Ansehen, Unterhalt ${TOWNHOUSE.upkeep} am Tag.</p>`
+  const seat = s?.council
+    ? `<p class="note">Du sitzt im Rat von ${town.name}${s.townhouse ? ' und hast ein Stadthaus am Markt' : ''}: halber Zoll auf den Abschnitten an der Stadt, mehr und besser bezahlte Aufträge. Aufwand ${COUNCIL.upkeep + (s.townhouse ? TOWNHOUSE.upkeep : 0)} Taler am Tag.</p>
+       <button class="btn wide" data-act="cmd" data-cmd="leaveCouncil">Ratssitz aufgeben<small>spart ${COUNCIL.upkeep} Taler am Tag, kostet ${COUNCIL.standing} Ansehen, das Stadthaus bleibt</small></button>`
     : button(
-        'townhouse',
-        'Eigenes Stadthaus bauen',
-        `${fmt(TOWNHOUSE.price)} Taler, +${TOWNHOUSE.standing} Ansehen, Unterhalt ${TOWNHOUSE.upkeep} am Tag. Zählt zur Hälfte zum Vermögen.`,
-        townhouseAllowed(state, town.id),
-      );
-
-  const council = s?.council
-    ? `<p class="note">Du sitzt im Stadtrat: halber Zoll auf den Abschnitten an ${town.name}, Aufträge der Stadt zahlen mehr und kommen öfter. Aufwand ${COUNCIL.upkeep} Taler am Tag.</p>
-       <button class="btn wide" data-act="cmd" data-cmd="leaveCouncil">Sitz aufgeben<small>spart den Aufwand, kostet ${COUNCIL.standing} Ansehen</small></button>`
-    : button(
-        'council',
-        'Sitz im Stadtrat',
-        `${fmt(COUNCIL.price)} Taler, +${COUNCIL.standing} Ansehen. Halber Zoll an der Stadt, mehr und besser bezahlte Aufträge. Aufwand ${COUNCIL.upkeep} am Tag.`,
-        councilAllowed(state, town.id),
+        'seat',
+        'Stadthaus und Ratssitz',
+        `${fmt(seatPrice(state, town.id))} Taler, +${COUNCIL.standing + (s?.townhouse ? 0 : TOWNHOUSE.standing)} Ansehen. Halber Zoll an der Stadt, mehr und besser bezahlte Aufträge. Aufwand ${COUNCIL.upkeep + TOWNHOUSE.upkeep} am Tag.`,
+        seatAllowed(state, town.id),
       );
 
   return `<div class="town-info">
       <span>Ansehen <b>${RANKS[r].name}</b> · ${pct} von 100</span>
       <div class="meter" title="Ansehen ${pct}"><div style="width:${pct}%"></div>${next ? `<i style="left:${next.from}%"></i>` : ''}</div>
-      <small>${next ? `Noch ${Math.ceil(next.from - pts)} bis "${next.name}".` : 'Höchster Rang erreicht.'} Ansehen bringen Lieferungen in knappe Märkte, erfüllte Aufträge und Bier und Brot beim Stadtfest. Verdientes Ansehen verblasst langsam, gestiftetes bleibt.</small>
+      <small>${next ? `Noch ${Math.ceil(next.from - pts)} bis "${next.name}": ${next.unlocks}.` : 'Höchster Rang erreicht.'}</small>
     </div>
-    <ul class="plain ranks">${ranks}</ul>
+    ${explain('ansehen', `<p>Ansehen bringen Lieferungen in knappe Märkte, erfüllte Aufträge und Bier und Brot beim Stadtfest. Verdientes Ansehen verblasst langsam, gestiftetes bleibt.</p><ul class="plain ranks">${ranks}</ul>`, 'Was bringt Ansehen?')}
     <h3>Stiftungen</h3>
     ${foundations}
-    <h3>Stadthaus und Stadtrat</h3>
-    ${townhouse}
-    ${council}`;
+    <h3>Ratssitz</h3>
+    ${seat}`;
 }

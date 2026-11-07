@@ -65,12 +65,7 @@ export function planVoyage(state: GameState, map: MapDef, shipId: number, to: st
   const v = plan.voyage;
   // Ratssitz: halber Zoll auf den Abschnitten an der eigenen Ratsstadt
   if (v.toll) v.toll = playerToll(state, map, v.legs, (seg) => tollOn(state, seg));
-  // Der Schmuggler fährt am Zoll vorbei; was er spart, merkt sich die Fahrt für eine mögliche Kontrolle
-  if (hasTrait(ship.captain, 'schmuggler') && (v.toll ?? 0) > 0) {
-    v.evaded = v.toll;
-    v.toll = 0;
-  }
-  // Gebühren für fremde Bauwerke zahlt auch der Schmuggler, das ist kein Zoll
+  // Gebühren für fremde Bauwerke (kein Zoll)
   const fees: FeeItem[] = worksFees(
     state,
     v.legs.map((l) => l.seg),
@@ -91,7 +86,7 @@ export function planVoyage(state: GameState, map: MapDef, shipId: number, to: st
   if (load.hours > 0) v.dock = load.hours;
   if (unload.hours > 0) v.dockEnd = unload.hours;
   v.hours += load.hours + unload.hours;
-  // Treidelgeld (ab der Motorzeit, freies Spiel) zahlt auch der Schmuggler, es ist kein Zoll
+  // Treidelgeld (ab der Motorzeit, freies Spiel), kein Zoll
   if (v.towFee) v.toll = (v.toll ?? 0) + v.towFee;
   return plan;
 }

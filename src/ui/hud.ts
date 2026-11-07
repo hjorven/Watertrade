@@ -9,7 +9,8 @@ import { RIVAL_BY_ID } from '../data/rivals.ts';
 import { EPOCHS, fuelOf, SHIPS, UPGRADES } from '../data/ships.ts';
 import { goodIcon } from './goodicons.ts';
 import { brandMark, icon } from './icons.ts';
-import { dayInSeason, season, SEASON_NAME, SEASONS, year } from '../sim/calendar.ts';
+import { explain } from './explain.ts';
+import { dayInSeason, season, SEASON_NAME, year } from '../sim/calendar.ts';
 import { MAX_ACCEPTED, PENALTY } from '../sim/contracts.ts';
 import { buyPrice, sellPrice } from '../sim/economy.ts';
 import { describeEvent, describeForecast, EVENT_TITLE, visibleForecasts } from '../sim/events.ts';
@@ -81,30 +82,24 @@ import { BLOCK_TEXT, segmentDepth } from '../sim/river.ts';
 import { goodPicker, priceBookPanel, shipBook } from './market-info.ts';
 import { GROWTH_THRESHOLD, LEVELS, levelOf, netFlow, nextLevelNeeds, CRISIS_THRESHOLD, MIN_POP_SHARE } from '../sim/towns.ts';
 import {
-  activePlan,
   conditionText,
-  DEFAULT_WINTER_SEASONS,
   fmtLevel,
-  hasWinterPlan,
   LOAD_RETRY_HOURS,
   MAX_LOAD_WAIT_HOURS,
-  PLAN_NAME,
   ROUTE_BOOK_DAYS,
   routeProfit,
   stopSkipped,
-  stopsOf,
-  winterSeasonsOf,
 } from '../sim/routes.ts';
-import type { RoutePlan, TradeRoute } from '../sim/state.ts';
+import type { TradeRoute } from '../sim/state.ts';
 
-/** Bank und Versicherung im Handelsregister, leer ohne Kredite und Verträge */
+/** Bank im Handelsregister, leer ohne Kredite */
 function financeLine(state: GameState): string {
   const f = state.finance;
   if (!f) return '';
   const debt = totalDebt(state);
   const parts = [debt ? `Schulden bei der Stadtbank ${fmt(debt)} Taler` : ''];
   const g = f.ledger;
-  if (g.repaid || g.premiums || g.payouts) parts.push(`gestern ${fmt(g.repaid)} an die Bank, ${fmt(g.premiums)} Versicherung, ${fmt(g.payouts)} Schäden ersetzt`);
+  if (g.repaid) parts.push(`gestern ${fmt(g.repaid)} an die Bank gezahlt`);
   const text = parts.filter(Boolean).join('; ');
   return text ? `<li>${text}</li>` : '';
 }
@@ -130,7 +125,29 @@ export interface HudActions {
 }
 
 export type View = 'ship' | 'register' | 'news' | 'contracts' | 'works' | 'map';
-export type Tab = 'markt' | 'kontor' | 'werft' | 'kneipe' | 'route' | 'buch' | 'bank' | 'rathaus';
+export type Tab = 'markt' | 'ablegen' | 'kontor' | 'werft' | 'kneipe' | 'route' | 'buch' | 'bank' | 'rathaus';
+
+/** Reiter sind in wenige Gruppen gebündelt; eine Gruppe mit mehreren Reitern zeigt darunter eine kleine Unterleiste */
+interface TabGroup {
+  id: string;
+  label: string;
+  tabs: [Tab, string][];
+}
+const PORT_GROUPS: TabGroup[] = [
+  { id: 'markt', label: 'Markt', tabs: [['markt', 'Handeln'], ['buch', 'Preisbuch']] },
+  { id: 'ablegen', label: 'Ablegen', tabs: [['ablegen', 'Ablegen']] },
+  { id: 'hafen', label: 'Hafen', tabs: [['kontor', 'Kontor'], ['werft', 'Werft'], ['kneipe', 'Kneipe']] },
+  { id: 'stadt', label: 'Stadt', tabs: [['rathaus', 'Rathaus'], ['bank', 'Bank']] },
+  { id: 'route', label: 'Route', tabs: [['route', 'Route']] },
+];
+const SEA_GROUPS: TabGroup[] = [
+  { id: 'markt', label: 'Fahrt', tabs: [['markt', 'Fahrt']] },
+  { id: 'buch', label: 'Preisbuch', tabs: [['buch', 'Preisbuch']] },
+  { id: 'route', label: 'Route', tabs: [['route', 'Route']] },
+];
+/** Diese Reiter gibt es immer, die übrigen schaltet die Kampagne frei */
+const ALWAYS: Tab[] = ['markt', 'ablegen', 'buch'];
+
 
 /** Was gerade sichtbar ist; die Kampagne schaltet Reiter und Bücher nach und nach frei */
 export interface HudFeatures {
@@ -212,12 +229,16 @@ function keepForms(root: HTMLElement, redraw: () => void): void {
     el.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[name][data-dirty]').forEach((f) => values.set(f.name, f.value));
     kept.set(el.dataset.keep!, { open: !!el.querySelector('details[open]'), values });
   });
+  const openKeys = new Set<string>();
+  root.querySelectorAll<HTMLDetailsElement>('details[data-open-key][open]').forEach((el) => openKeys.add(el.dataset.openKey!));
   const focused = document.activeElement instanceof HTMLElement && root.contains(document.activeElement) ? document.activeElement : null;
   const focusKey = focused?.closest<HTMLElement>('[data-keep]')?.dataset.keep;
   const focusName = focused?.getAttribute('name');
   const before = root.firstElementChild;
   redraw();
-  if (!kept.size || root.firstElementChild === before) return;
+  if (root.firstElementChild === before) return;
+  openKeys.forEach((k) => root.querySelector(`details[data-open-key="${k}"]`)?.setAttribute('open', ''));
+  if (!kept.size) return;
   root.querySelectorAll<HTMLElement>('[data-keep]').forEach((el) => {
     const k = kept.get(el.dataset.keep!);
     if (!k) return;
@@ -263,8 +284,6 @@ export class Hud {
   private speedFactor = 1;
   private view: View = 'ship';
   private tab: Tab = 'markt';
-  /** Welcher Plan im Routen-Reiter bearbeitet wird */
-  private routePlan: RoutePlan = 'sommer';
   private newsSeen = '';
   private newsKey = '';
 
@@ -416,18 +435,17 @@ export class Hud {
           this.bookTown = d.town!;
           this.actions.command('refresh', {});
           break;
-        case 'tab':
+        case 'tab': {
+          const changed = this.tab !== d.tab;
           this.tab = d.tab as Tab;
           this.bookTown = null;
           this.actions.command('refresh', {});
+          if (changed) this.root.querySelector('.ledger-scroll')!.scrollTop = 0;
           break;
-        case 'routePlan':
-          this.routePlan = d.plan === 'winter' ? 'winter' : 'sommer';
-          this.actions.command('refresh', {});
-          break;
+        }
         case 'cmd': {
           // nach dem Löschen verschieben sich die Halte: gemerkte Eingaben verwerfen
-          if (d.cmd === 'routeDelStop' || d.cmd === 'routeClear' || d.cmd === 'routeCopyPlan')
+          if (d.cmd === 'routeDelStop' || d.cmd === 'routeClear')
             root.querySelectorAll<HTMLElement>('[data-dirty]').forEach((f) => delete f.dataset.dirty);
           const data: Record<string, string | number> = {};
           for (const [k, v] of Object.entries(d)) if (k !== 'act' && k !== 'cmd' && v !== undefined) data[k] = v;
@@ -442,6 +460,8 @@ export class Hud {
   }
 
   private goalsOpen = false;
+  /** Zuletzt gewählter Unterreiter je Gruppe (Hafen: Kontor, Werft oder Kneipe) */
+  private lastTab: Record<string, Tab> = {};
   private folded = false;
   /** Preisbuch: gewählte Ware und Stadt; im Markt-Reiter die aufgeklappte Ware */
   private bookGood: string | null = null;
@@ -519,11 +539,11 @@ export class Hud {
     this.root.querySelector('.ledger')!.classList.toggle('wide', this.view === 'map');
     const ship = state.ships.find((s) => s.id === selected) ?? state.ships[0];
     setHtml(this.fleet, ship ? this.renderFleet(state, ship) : '');
-    if (this.view === 'register') return setHtml(this.body, this.renderRegister(state));
-    if (this.view === 'news') return setHtml(this.body, this.renderNews(state));
-    if (this.view === 'contracts') return setHtml(this.body, this.renderContracts(state, ship));
-    if (this.view === 'works') return setHtml(this.body, this.renderWorks(state));
-    if (this.view === 'map') return setHtml(this.body, this.mapHtml(state));
+    if (this.view === 'register') return keepForms(this.body, () => setHtml(this.body, this.renderRegister(state)));
+    if (this.view === 'news') return keepForms(this.body, () => setHtml(this.body, this.renderNews(state)));
+    if (this.view === 'contracts') return keepForms(this.body, () => setHtml(this.body, this.renderContracts(state, ship)));
+    if (this.view === 'works') return keepForms(this.body, () => setHtml(this.body, this.renderWorks(state)));
+    if (this.view === 'map') return keepForms(this.body, () => setHtml(this.body, this.mapHtml(state)));
     if (!ship) {
       setHtml(this.body, `<div class="ledger-head"><h2>Keine Schiffe</h2><p>Deine Flotte ist leer.</p></div>`);
       return;
@@ -566,32 +586,28 @@ export class Hud {
   /* ---------- Schiff: Reiter ---------- */
 
   private renderShip(state: GameState, ship: Ship): string {
-    const tabs: [Tab, string][] = ship.port
-      ? [
-          ['markt', 'Markt'],
-          ['kontor', 'Kontor'],
-          ['werft', 'Werft'],
-          ['kneipe', 'Kneipe'],
-          ['route', 'Route'],
-          ['buch', 'Bücher'],
-          ['bank', 'Bank'],
-          ['rathaus', 'Rathaus'],
-        ]
-      : [
-          ['markt', 'Fahrt'],
-          ['route', 'Route'],
-          ['buch', 'Bücher'],
-        ];
-    const visible = tabs.filter(([t]) => t === 'markt' || t === 'buch' || this.features.tabs.includes(t));
-    tabs.length = 0;
-    tabs.push(...visible);
-    if (!tabs.some(([t]) => t === this.tab)) this.tab = 'markt';
-    const nav = `<nav class="tabs">${tabs
-      .map(([t, label]) => `<button class="tab ${t === this.tab ? 'on' : ''}" data-act="tab" data-tab="${t}">${label}</button>`)
+    const groups = (ship.port ? PORT_GROUPS : SEA_GROUPS)
+      .map((g) => ({ ...g, tabs: g.tabs.filter(([t]) => ALWAYS.includes(t) || this.features.tabs.includes(t)) }))
+      .filter((g) => g.tabs.length);
+    if (!groups.some((g) => g.tabs.some(([t]) => t === this.tab))) this.tab = 'markt';
+    const active = groups.find((g) => g.tabs.some(([t]) => t === this.tab))!;
+    this.lastTab[active.id] = this.tab;
+    const nav = `<nav class="tabs">${groups
+      .map((g) => {
+        const target = g.tabs.some(([t]) => t === this.lastTab[g.id]) ? this.lastTab[g.id] : g.tabs[0][0];
+        return `<button class="tab ${g === active ? 'on' : ''}" data-act="tab" data-tab="${target}">${g.label}</button>`;
+      })
       .join('')}</nav>`;
+    const sub =
+      active.tabs.length > 1
+        ? `<nav class="subtabs" aria-label="${active.label}">${active.tabs
+            .map(([t, label]) => `<button class="subtab ${t === this.tab ? 'on' : ''}" data-act="tab" data-tab="${t}" aria-pressed="${t === this.tab}">${label}</button>`)
+            .join('')}</nav>`
+        : '';
     let body = '';
     if (this.tab === 'buch') body = this.renderBooks(state, ship);
     else if (!ship.port) body = this.tab === 'route' ? this.renderRoute(state, ship) : this.renderVoyage(state, ship);
+    else if (this.tab === 'ablegen') body = this.renderDepartures(state, ship);
     else if (this.tab === 'kontor') body = this.renderKontor(state, ship);
     else if (this.tab === 'werft') body = this.renderYard(state, ship);
     else if (this.tab === 'kneipe') body = this.renderTavern(state, ship);
@@ -599,20 +615,20 @@ export class Hud {
     else if (this.tab === 'bank') body = renderBank(state, this.map, ship);
     else if (this.tab === 'rathaus') body = this.renderTownHall(state, ship);
     else body = this.renderPort(state, ship);
-    return nav + body;
+    return this.placeHead(state, ship) + nav + sub + body;
+  }
+
+  /** Ein Kopf über allen Reitern: wo das Schiff liegt oder wohin es fährt */
+  private placeHead(state: GameState, ship: Ship): string {
+    if (!ship.port) return '';
+    const town = this.map.towns.find((t) => t.id === ship.port)!;
+    const kontor = state.kontore[town.id];
+    return `<div class="place-head"><h2>${town.name}</h2><span class="stamp-small">${kontor ? `Eigenes Kontor` : 'Hafen'}</span></div>`;
   }
 
   private renderTownHall(state: GameState, ship: Ship): string {
     const town = this.map.towns.find((t) => t.id === ship.port)!;
-    return `${this.portHead(town, 'Rathaus')}${renderRathaus(state, town)}`;
-  }
-
-  private portHead(town: TownDef, stamp: string): string {
-    return `<div class="ledger-head">
-        <div class="stamp-small">${stamp}</div>
-        <h2>${town.name}</h2>
-        <p>${town.description}</p>
-      </div>`;
+    return renderRathaus(state, town);
   }
 
   private renderPort(state: GameState, ship: Ship): string {
@@ -647,14 +663,57 @@ export class Hud {
           <td class="num ${margin}">${sp}${avg !== null ? `<small>ø ${avg}</small>` : ''}</td>
           <td class="num">${aboard}${freshText(slot) ? `<small>${freshText(slot)}</small>` : ''}</td>
           <td class="acts trade">
-            <span class="pair"><button class="btn" data-act="buy" data-good="${g.id}" data-n="1" ${canBuy ? '' : 'disabled'} title="1 t kaufen">+1</button>
-            <button class="btn" data-act="buy" data-good="${g.id}" data-n="10" ${canBuy ? '' : 'disabled'} title="10 t kaufen">+10</button></span>
-            ${aboard ? `<button class="btn sellall" data-act="sell" data-good="${g.id}" data-n="all" title="alles verkaufen">Verkaufen</button>` : ''}
+            <span class="pair"><button class="btn" data-act="buy" data-good="${g.id}" data-n="1" ${canBuy ? '' : 'disabled'} title="1 t ${g.name} kaufen">+1 t</button>
+            <button class="btn" data-act="buy" data-good="${g.id}" data-n="10" ${canBuy ? '' : 'disabled'} title="10 t ${g.name} kaufen">+10 t</button></span>
+            <button class="btn sellall" data-act="sell" data-good="${g.id}" data-n="all" ${aboard ? '' : 'disabled'} title="alles ${g.name} an Bord verkaufen">Verkaufen</button>
           </td>
         </tr>`;
       })
       .join('');
 
+
+    const industries = town.industries.length
+      ? `<p class="note">Betriebe der Stadt: ${town.industries.map((i) => `${i.name} (${flows(i.inputs)} → ${flows(i.outputs)})${state.towns[town.id].closed?.includes(i.name) ? ' geschlossen' : ''}`).join(', ')} pro Tag</p>`
+      : '';
+
+    const raft =
+      ship.type === 'floss'
+        ? `<button class="btn primary wide" data-act="dismantle" ${load > 0 ? 'disabled' : ''}>Floß zerlegen und als Holz verkaufen
+            <small>${load > 0 ? 'Erst die Ladung verkaufen' : `${RAFT_TIMBER} t Holz${market.holz ? '' : ', hier kauft aber niemand Holz'}`}</small></button>`
+        : '';
+
+
+    const here = state.contracts.filter((c) => c.accepted && c.town === town.id);
+    const contracts = here.length
+      ? `<div class="contract-box"><h3>Aufträge für ${town.name}</h3>${here
+          .map((c) => {
+            const aboard = ship.cargo[c.good]?.amount ?? 0;
+            return `<div class="contract-row">${swatch(c.good)}<span>${c.amount - c.delivered} t ${goodName(c.good)} für ${fmt(c.reward)} Taler<small>bis Tag ${c.deadline}</small></span>
+              <button class="btn primary" data-act="cmd" data-cmd="deliver" data-id="${c.id}" ${aboard ? '' : 'disabled'}>Liefern</button></div>`;
+          })
+          .join('')}</div>`
+      : '';
+
+    return `
+      ${this.renderTownInfo(state, town, industries)}
+      ${contracts}
+      <p class="note">Laderaum <b>${load}/${cap} t</b> · Tiefgang ${effectiveDraft(ship).toFixed(1).replace('.', ',')} m${kontor ? ' · Kontor: 5 % mehr beim Verkauf' : ''}</p>
+      ${quayWarning(state, ship, town.id)}
+      <table class="market">
+        <thead><tr><th>Ware</th><th title="Preis je Tonne, den du zahlst">Kauf</th><th title="Preis je Tonne, den du bekommst">Verkauf</th><th title="Tonnen an Bord">Bord</th><th class="acts-head">Handeln</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      ${this.marketGood && market[this.marketGood] ? priceBookPanel(state, this.map, this.marketGood, this.bookTown ?? town.id) : '<p class="note">Tipp: Auf eine Ware tippen zeigt Preisbuch und Preisverlauf.</p>'}
+      ${raft}
+      <button class="btn primary wide" data-act="tab" data-tab="ablegen">Weiter zum Ablegen<small>Ziel wählen, Fahrzeit und Kosten sehen</small></button>`;
+  }
+
+  /** Reiter "Ablegen": Brennstoff, Ziele mit Dauer und Kosten, warten */
+  private renderDepartures(state: GameState, ship: Ship): string {
+    const town = this.map.towns.find((t) => t.id === ship.port)!;
+    const market = state.markets[town.id];
+    const load = cargoLoad(ship);
+    const kontor = state.kontore[town.id];
     const departures = this.map.towns
       .filter((t) => t.id !== town.id)
       .map((t) => {
@@ -678,10 +737,9 @@ export class Hud {
         const fees = feeSum(v.fees);
         const tow = v.towFee ?? 0;
         const zoll = (v.toll ?? 0) - fees - tow;
-        const toll = `${zoll ? `, Zoll ${zoll}` : v.evaded ? `, ${v.evaded} Zoll umgangen, Kontrolle möglich` : ''}${fees ? `, Gebühren ${fees}` : ''}${tow ? `, Treidelgeld ${tow}` : ''}`;
+        const toll = `${zoll ? `, Zoll ${zoll}` : ''}${fees ? `, Gebühren ${fees}` : ''}${tow ? `, Treidelgeld ${tow}` : ''}`;
         const dockH = (v.dock ?? 0) + (v.dockEnd ?? 0);
         const lighter = v.fees?.some((f) => f.work === 'leichtern') ? ', muss leichtern' : '';
-        const dockText = (dockH >= 0.5 ? ` (davon ${fmtHours(dockH)} Laden und Löschen)` : '') + lighter;
         const coal = bunkerPlan(state, ship, sailingHours(v), v.toll ?? 0);
         if (coal.problem) return `<button class="btn dest" disabled title="${coal.problem}"><b>${t.name}</b><small>${coal.buy ? `${coal.buy} t ${coal.fuelName} fehlen` : coal.good === 'diesel' ? 'Tank zu klein' : 'Bunker zu klein'}</small></button>`;
         const dealerText = coal.dealer ? `, davon ${coal.dealer} t beim Händler` : '';
@@ -689,27 +747,18 @@ export class Hud {
         const tooDear = (v.toll ?? 0) + coal.cost > state.money;
         // echte Dauer mit Nachtfahrt ab jetzt
         const eta = realHours(state, ship.type, v);
-        const time = eta > v.hours + 0.25 ? `${fmtHours(eta)} mit Nacht` : fmtHours(v.hours);
+        const time = fmtHours(Math.max(eta, v.hours));
+        const timeTitle = `${eta > v.hours + 0.25 ? 'mit Nachtfahrt gerechnet' : 'bei Tag'}${dockH >= 0.5 ? `, davon ${fmtHours(dockH)} Laden und Löschen` : ''}`;
         const risks = groundingRisks(state, this.map, ship, v);
         const tight = risks.length ? Math.min(...risks.map((r) => r.clearance)) : 0;
         const risk = risks.length ? `, knapp ${clearanceText(tight)} unter dem Kiel` : '';
         const riskTitle = risks.length
           ? ` title="Knappe Tiefe: Gefahr einer Grundberührung ${Math.round(totalChance(risks) * 100)} % (Verschleiß und ein halber Tag Verzug). Weniger Ladung oder höheres Wasser hilft."`
           : '';
-        return `<button class="btn dest${risks.length ? ' risky' : ''}" data-act="depart" data-to="${t.id}" ${tooDear ? 'disabled' : ''}${riskTitle}><b>${t.name}</b><small>${dir}, ${time}${dockText}${toll}${coalText}${risk}</small></button>`;
+        const title = riskTitle || ` title="${timeTitle}"`;
+        return `<button class="btn dest${risks.length ? ' risky' : ''}" data-act="depart" data-to="${t.id}" ${tooDear ? 'disabled' : ''}${title}><b>${t.name}</b><small>${dir} · ${time}${lighter}${toll}${coalText}${risk}</small></button>`;
       })
       .join('');
-
-    const industries = town.industries.length
-      ? `<p class="note">Betriebe der Stadt: ${town.industries.map((i) => `${i.name} (${flows(i.inputs)} → ${flows(i.outputs)})${state.towns[town.id].closed?.includes(i.name) ? ' geschlossen' : ''}`).join(', ')} pro Tag</p>`
-      : '';
-
-    const raft =
-      ship.type === 'floss'
-        ? `<button class="btn primary wide" data-act="dismantle" ${load > 0 ? 'disabled' : ''}>Floß zerlegen und als Holz verkaufen
-            <small>${load > 0 ? 'Erst die Ladung verkaufen' : `${RAFT_TIMBER} t Holz${market.holz ? '' : ', hier kauft aber niemand Holz'}`}</small></button>`
-        : '';
-
     const cls = shipClass(ship);
     const fuel = fuelOf(cls);
     const tankName = fuel?.good === 'diesel' ? 'Tank' : 'Bunker';
@@ -718,41 +767,21 @@ export class Hud {
       fuel && (market[fuel.good] || (kontor?.stock[fuel.good]?.amount ?? 0) >= 1) && (ship.bunker ?? 0) < (cls.bunker ?? 0) - 1
         ? `<button class="btn wide" data-act="cmd" data-cmd="bunker">${tankName} füllen<small>${(kontor?.stock[fuel.good]?.amount ?? 0) >= 1 ? `Erst ${fuel.good === 'diesel' ? 'eigener' : 'eigene'} ${fuel.name} aus dem Kontor, dann vom Markt` : `${fuel.name} vom Markt für Häfen ohne ${fuel.name}handel`}</small></button>`
         : '';
-
-    const here = state.contracts.filter((c) => c.accepted && c.town === town.id);
-    const contracts = here.length
-      ? `<div class="contract-box"><h3>Aufträge für ${town.name}</h3>${here
-          .map((c) => {
-            const aboard = ship.cargo[c.good]?.amount ?? 0;
-            return `<div class="contract-row">${swatch(c.good)}<span>${c.amount - c.delivered} t ${goodName(c.good)} für ${fmt(c.reward)} Taler<small>bis Tag ${c.deadline}</small></span>
-              <button class="btn primary" data-act="cmd" data-cmd="deliver" data-id="${c.id}" ${aboard ? '' : 'disabled'}>Liefern</button></div>`;
-          })
-          .join('')}</div>`
-      : '';
-
     return `
-      ${this.portHead(town, kontor ? 'Eigenes Kontor' : 'Hafen')}
-      ${this.renderTownInfo(state, town, industries)}
-      ${contracts}
-      <p class="note">Laderaum <b>${load}/${cap} t</b> · Tiefgang ${effectiveDraft(ship).toFixed(1).replace('.', ',')} m${kontor ? ' · Kontorbonus' : ''}${bunker}</p>
-      ${quayWarning(state, ship, town.id)}
+      ${bunker ? `<p class="note">${bunker.replace(/^ · /, '')}</p>` : ''}
       ${bunkerBtn}
-      <table class="market">
-        <thead><tr><th>Ware</th><th title="Preis je Tonne beim Kauf">Kauf</th><th title="Preis je Tonne beim Verkauf">Verkauf</th><th>Bord</th><th></th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-      ${this.marketGood && market[this.marketGood] ? priceBookPanel(state, this.map, this.marketGood, this.bookTown ?? town.id) : '<p class="note">Tipp: Auf eine Ware tippen zeigt Preisbuch und Preisverlauf.</p>'}
-      ${raft}
-      <h3>Ablegen nach</h3>
       <div class="dests">${departures}</div>
-      <button class="btn wide" data-act="wait">Einen Tag warten<small>Städte produzieren und verbrauchen</small></button>`;
+      <button class="btn wide" data-act="wait">Einen Tag hier warten<small>Städte produzieren und verbrauchen, Preise erholen sich</small></button>
+      ${explain('ablegen', `<p>Jeder Knopf zeigt Richtung und Fahrzeit (nachts fahren die meisten Schiffe langsamer), dazu was beim Ablegen fällig wird: Zoll, Gebühren für fremde Bauwerke, Treidelgeld und Brennstoff.</p>
+        <p>Rot umrandet heißt: Das Wasser ist knapp unter dem Kiel, eine Grundberührung kostet Verschleiß und einen halben Tag. Weniger Ladung oder höheres Wasser hilft.</p>
+        <p>Ist ein Schiff zu tief für den Kai, wird über Schuten umgeschlagen: halb so schnell und mit Leichtergeld.</p>`)}`;
   }
 
   private renderKontor(state: GameState, ship: Ship): string {
     const town = this.map.towns.find((t) => t.id === ship.port)!;
     const k = state.kontore[town.id];
     if (!k) {
-      return `${this.portHead(town, 'Kontor')}
+      return `
         <p>Ein eigenes Kontor ist Lager, Schreibstube und Bauplatz zugleich:</p>
         <ul class="plain">
           <li>${KONTOR_CAPACITY[1]} t Lager, Ware wartet hier auf bessere Preise</li>
@@ -816,7 +845,7 @@ export class Hud {
         ? `<button class="btn wide" data-act="cmd" data-cmd="upgradeKontor" ${state.money >= KONTOR_UPGRADE[k.level + 1] ? '' : 'disabled'}>Kontor ausbauen auf Stufe ${k.level + 1}
           <small>${fmt(KONTOR_UPGRADE[k.level + 1])} Taler: ${KONTOR_CAPACITY[k.level + 1]} t Lager, ${KONTOR_SLOTS[k.level + 1] + extraSlots(state, town.id)} Bauplätze, Unterhalt ${kontorUpkeepIn(state, town.id, k.level + 1)} am Tag</small></button>`
         : '';
-    return `${this.portHead(town, `Kontor Stufe ${k.level}`)}
+    return `<h3>Kontor Stufe ${k.level}</h3>
       <div class="town-info"><span>Lager <b>${used}</b> von ${KONTOR_CAPACITY[k.level]} t · Bauplätze ${mine.length}/${slots} · Unterhalt ${kontorUpkeepIn(state, town.id)} am Tag</span>
       <div class="meter"><div style="width:${Math.round((used / KONTOR_CAPACITY[k.level]) * 100)}%"></div></div></div>
       <table class="market kontor">
@@ -863,7 +892,7 @@ export class Hud {
       <small>Ein abgenutztes Schiff ist bis zu 30 % langsamer.${ship.upgrades.length ? ` Eingebaut: ${ship.upgrades.map((u) => UPGRADES.find((x) => x.id === u)?.name).join(', ')}.` : ''}</small></div>`;
     if (!yard) {
       const yards = this.map.towns.filter((t) => t.shipyard.length).map((t) => t.name);
-      return `${this.portHead(town, 'Werft')}${state_}<p>${town.name} hat keine Werft. Reparieren und Ausbauen geht in ${yards.join(', ')}.</p>`;
+      return `${state_}<p>${town.name} hat keine Werft. Reparieren und Ausbauen geht in ${yards.join(', ')}.</p>`;
     }
     const cost = repairCost(ship);
     const ups =
@@ -895,7 +924,7 @@ export class Hud {
           .map((id) => `<div class="yard-row muted"><div><b>${SHIPS[id].name}</b> <small>kommt in der Epoche „${EPOCHS[SHIPS[id].epoch - 1].name}“</small></div></div>`)
           .join('')}</div>`
       : '';
-    return `${this.portHead(town, 'Werft')}${state_}
+    return `${state_}
       ${ship.type === 'floss' ? '' : `<button class="btn wide ${cost > 0 ? 'primary' : ''}" data-act="cmd" data-cmd="repair" ${cost > 0 && state.money >= cost ? '' : 'disabled'}>Überholen<small>${cost > 0 ? `${fmt(cost)} Taler` : 'nicht nötig'}</small></button>`}
       ${ups}${newShips}${epochNote(state)}`;
   }
@@ -940,7 +969,7 @@ export class Hud {
           )
           .join('')
       : '<p class="note">Heute sucht niemand Arbeit. Alle 20 Tage kommen neue Leute.</p>';
-    return `${this.portHead(town, 'Hafenkneipe')}
+    return `
       <h3>An Bord</h3>${mine}
       <h3>Am Tresen</h3><div class="yard">${guests}</div>`;
   }
@@ -952,10 +981,7 @@ export class Hud {
     const head = `<div class="ledger-head"><div class="stamp-small">Handelsroute</div><h2>${ship.name}</h2>
       <p>${cap ? `${cap.name} fährt die Route allein ab: an jedem Halt werden die Befehle ausgeführt, erst Verkauf und Einlagern, dann Kauf.` : 'Für eine Handelsroute braucht das Schiff einen Kapitän. Heuere in einer Hafenkneipe einen an.'}</p></div>`;
     if (ship.type === 'floss') return head.replace(/<p>.*<\/p>/s, '<p>Ein Floß fährt keine Routen.</p>');
-    const plan = this.routePlan;
-    // gefahren wird nach r.plan; umgeschaltet wird erst beim nächsten Anlegen
-    const running: RoutePlan = r ? (r.active ? (r.plan ?? 'sommer') : activePlan(state, r)) : 'sommer';
-    const planStops = r ? stopsOf(r, plan) : [];
+    const planStops = r?.stops ?? [];
     const goodsOptions = GOODS.map((g) => `<option value="${g.id}">${g.name}</option>`).join('');
     const kindOptions = (Object.keys(ORDER_TEXT) as OrderKind[]).map((k) => `<option value="${k}">${ORDER_TEXT[k]}</option>`).join('');
     const num = (v: number | undefined, f = 1) => (v === undefined ? '' : String(Math.round(v * f * 10) / 10).replace('.', ','));
@@ -965,15 +991,15 @@ export class Hud {
           .map(
             (o, j) =>
               `<li>${ORDER_TEXT[o.kind]} ${swatch(o.good)}${goodName(o.good)} <small>${o.amount ? `${o.amount} t` : o.kind === 'kaufen' || o.kind === 'auslagern' ? 'voll' : 'alles'}${o.limit ? `, ${o.kind === 'kaufen' ? 'höchstens' : 'mindestens'} ${o.limit} Taler` : ''}</small>
-              <button class="link" data-act="cmd" data-cmd="routeDelOrder" data-plan="${plan}" data-stop="${i}" data-order="${j}" aria-label="Befehl löschen">entfernen</button></li>`,
+              <button class="link" data-act="cmd" data-cmd="routeDelOrder" data-stop="${i}" data-order="${j}" aria-label="Befehl löschen">entfernen</button></li>`,
           )
           .join('');
-        const isNext = r?.active && plan === running && i === r.next;
+        const isNext = r?.active && i === r.next;
         const cond = conditionText(s);
         const skipNow = stopSkipped(state, s);
-        return `<div class="stop ${isNext ? 'next' : ''}" data-form data-keep="${plan}-${i}">
+        return `<div class="stop ${isNext ? 'next' : ''}" data-form data-keep="stop-${i}">
           <div class="stop-head"><b>${i + 1}. ${this.townName(s.town)}</b>${isNext ? '<small>nächster Halt</small>' : ''}${skipNow ? '<small>wird beim jetzigen Pegel übersprungen</small>' : ''}
-            <button class="link" data-act="cmd" data-cmd="routeDelStop" data-plan="${plan}" data-stop="${i}">Halt entfernen</button></div>
+            <button class="link" data-act="cmd" data-cmd="routeDelStop" data-stop="${i}">Halt entfernen</button></div>
           <ul class="orders">${orders || '<li class="muted">keine Befehle, nur durchfahren</li>'}</ul>
           ${cond ? `<p class="route-cond">${cond}</p>` : ''}
           <div class="order-form">
@@ -981,14 +1007,14 @@ export class Hud {
             <select name="good" aria-label="Ware">${goodsOptions}</select>
             <input name="amount" type="number" min="0" step="5" value="0" aria-label="Menge, 0 = voll oder alles" title="Menge in t, 0 = voll oder alles">
             <input name="limit" type="number" min="0" step="1" value="0" aria-label="Preisgrenze, 0 = egal" title="Preisgrenze je t, 0 = egal">
-            <button class="btn" data-act="cmd" data-cmd="routeAddOrder" data-plan="${plan}" data-stop="${i}">+</button>
+            <button class="btn" data-act="cmd" data-cmd="routeAddOrder" data-stop="${i}">+</button>
           </div>
           <details class="route-cond-form"><summary>Bedingungen</summary>
             <div class="order-form">
               <label>Ablegen ab <input name="minLoad" type="text" inputmode="numeric" value="${num(s.minLoad, 100)}" placeholder="–"> % Ladung</label>
               <label>Überspringen bei Pegel unter <input name="levelMin" type="text" value="${num(s.levelMin)}" placeholder="–"> m</label>
               <label>oder über <input name="levelMax" type="text" value="${num(s.levelMax)}" placeholder="–"> m</label>
-              <button class="btn" data-act="cmd" data-cmd="routeStopCond" data-plan="${plan}" data-stop="${i}">Speichern</button>
+              <button class="btn" data-act="cmd" data-cmd="routeStopCond" data-stop="${i}">Speichern</button>
             </div>
           </details></div>`;
       })
@@ -998,35 +1024,21 @@ export class Hud {
       .join('');
     const canRun = !!cap && (r?.stops.length ?? 0) >= 2;
     const status = r
-      ? `<p class="note">${r.active ? `Route läuft nach dem ${PLAN_NAME[running]}${r.note ? `: ${r.note}` : ''}.` : 'Route angehalten.'}</p>
+      ? `<p class="note">${r.active ? `Route läuft${r.note ? `: ${r.note}` : ''}.` : 'Route angehalten.'}</p>
         <div class="row-btns">
           <button class="btn ${r.active ? '' : 'primary'}" data-act="cmd" data-cmd="routeToggle" ${canRun || r.active ? '' : 'disabled'}>${r.active ? 'Anhalten' : 'Route starten'}</button>
           <button class="btn" data-act="cmd" data-cmd="routeClear">Route löschen</button>
         </div>${this.renderRouteBook(state, r)}`
       : '';
-    const planNav = `<div class="row-btns route-plans">${(['sommer', 'winter'] as RoutePlan[])
-      .map(
-        (p) =>
-          `<button class="btn ${p === plan ? 'on' : ''}" data-act="routePlan" data-plan="${p}">${PLAN_NAME[p]}${r?.active && p === running ? ' (gilt jetzt)' : ''}</button>`,
-      )
-      .join('')}</div>`;
-    const winterInfo =
-      plan === 'winter'
-        ? `<p class="fine">Der Winterplan gilt in diesen Jahreszeiten, sobald er mindestens zwei Halte hat. Sonst fährt der Kapitän das ganze Jahr den Sommerplan. Umgeschaltet wird beim nächsten Anlegen.</p>
-          <div class="row-btns">${SEASONS.map((x) => {
-            const on = r ? winterSeasonsOf(r).includes(x) : DEFAULT_WINTER_SEASONS.includes(x);
-            return `<button class="btn ${on ? 'on' : ''}" data-act="cmd" data-cmd="routeWinterSeason" data-season="${x}" aria-pressed="${on}">${SEASON_NAME[x]}</button>`;
-          }).join('')}
-          ${r?.stops.length ? '<button class="btn" data-act="cmd" data-cmd="routeCopyPlan" data-plan="winter">Sommerplan übernehmen</button>' : ''}</div>`
-        : '';
-    return `${head}${status}${planNav}${winterInfo}
-      <div class="stops">${stops || `<p class="note">${plan === 'winter' ? 'Noch kein Winterplan. Ohne ihn gilt das ganze Jahr der Sommerplan.' : 'Noch keine Halte. Eine Route braucht mindestens zwei.'}</p>`}</div>
-      <div class="order-form add-stop" data-form data-keep="add-${plan}">
+    return `${head}${status}
+      <div class="stops">${stops || `<p class="note">Noch keine Halte. Eine Route braucht mindestens zwei.</p>`}</div>
+      <div class="order-form add-stop" data-form data-keep="add-stop">
         <select name="town" aria-label="Stadt">${townOptions}</select>
-        <button class="btn" data-act="cmd" data-cmd="routeAddStop" data-plan="${plan}">Halt hinzufügen</button>
+        <button class="btn" data-act="cmd" data-cmd="routeAddStop">Halt hinzufügen</button>
       </div>
-      <p class="fine">Menge 0 heißt: bis der Laderaum voll ist, oder alles verkaufen. Mit einer Preisgrenze kauft der Kapitän nicht zu teuer und verkauft nicht zu billig.
-        Bedingungen: Mit Mindestladung wartet der Kapitän und kauft alle ${LOAD_RETRY_HOURS} Stunden nach, höchstens ${MAX_LOAD_WAIT_HOURS / 24} Tage lang. Mit einer Pegelgrenze fährt er an dem Halt vorbei, solange der Pegel (jetzt ${fmtLevel(state.waterLevel)}) außerhalb liegt.</p>`;
+      ${explain('route', `<p>Lege mindestens zwei Halte an und gib jedem Halt Befehle. Am Halt wird erst verkauft und eingelagert, dann gekauft.</p>
+        <p>Menge 0 heißt: bis der Laderaum voll ist, oder alles verkaufen. Mit einer Preisgrenze kauft der Kapitän nicht zu teuer und verkauft nicht zu billig.</p>
+        <p>Bedingungen: Mit Mindestladung wartet der Kapitän und kauft alle ${LOAD_RETRY_HOURS} Stunden nach, höchstens ${MAX_LOAD_WAIT_HOURS / 24} Tage lang. Mit einer Pegelgrenze fährt er an dem Halt vorbei, solange der Pegel (jetzt ${fmtLevel(state.waterLevel)}) außerhalb liegt.</p>`)}`;
   }
 
   /** Routenauswertung: Gewinn pro Tag über die letzten 30 Tage, mit kleinem Balkenbild */
@@ -1068,7 +1080,8 @@ export class Hud {
       <div class="meter" title="Versorgung ${sat} %"><div style="width:${sat}%"></div><i style="left:${GROWTH_THRESHOLD * 100}%"></i></div>
       ${ev.join('')}
       ${closedLine(state, town)}
-      <details class="more"><summary>Mehr über ${town.name}</summary>
+      <details class="more" data-open-key="town-${town.id}"><summary>Mehr über ${town.name}</summary>
+        <p class="town-desc">${town.description}</p>
         <small>Versorgung ${sat} %${next ? `, ab ${next.from} Einwohnern ${next.name}${wants.length ? ` (will dann auch ${wants.join(', ')})` : ''}` : ''}</small>
         ${seasonLine(state, town)}
         ${more}
@@ -1122,7 +1135,7 @@ export class Hud {
         <p>${how} ${speed.toFixed(1).replace('.', ',')} km/h über Grund, Strömung ${String(seg.current).replace('.', ',')} km/h.</p>
       </div>
       <div class="progress"><div style="width:${pct}%"></div></div>
-      <p class="note">Ankunft in etwa ${fmtHours(left)}${v.toll ? ` · ${paidLabel(v)} bezahlt: ${v.toll} Taler` : ''}${v.evaded ? ` · ${v.evaded} Taler Zoll umgangen, Kontrolle möglich` : ''}</p>
+      <p class="note">Ankunft in etwa ${fmtHours(left)}${v.toll ? ` · ${paidLabel(v)} bezahlt: ${v.toll} Taler` : ''}</p>
       ${dockNote(v)}
       ${status}
       <ol class="route">${route}</ol>
@@ -1189,8 +1202,8 @@ export class Hud {
       .map(({ ship, p }) => {
         const r = ship.route!;
         const towns = r.stops.map((x) => this.townName(x.town)).join(' – ');
-        const winter = hasWinterPlan(r) ? ' <small>(mit Winterplan)</small>' : '';
-        return `<tr><th scope="row"><button class="link" data-act="select" data-ship="${ship.id}">${ship.name}</button>${r.active ? '' : ' <small>angehalten</small>'}<small>${towns}${winter}</small></th>
+
+        return `<tr><th scope="row"><button class="link" data-act="select" data-ship="${ship.id}">${ship.name}</button>${r.active ? '' : ' <small>angehalten</small>'}<small>${towns}</small></th>
           <td class="num ${p.perDay >= 0 ? 'gain' : 'loss'}">${fmt(p.perDay)}</td><td class="num">${p.days}</td></tr>`;
       })
       .join('');
@@ -1261,10 +1274,11 @@ export class Hud {
           const half = Math.round(p.cost / 2);
           const town = partnerOffer(state, this.map, p.id, 'stadt');
           const house = partnerOffer(state, this.map, p.id, 'haus');
+          // geteilt wird bevorzugt mit der Stadt (die fährt nicht selbst), sonst mit einem Haus
+          const partner = town ? { kind: 'stadt', name: town.name, why: 'zahlt die Hälfte und bekommt die Hälfte der Gebühren' } : house ? { kind: 'haus', name: house.name, why: 'zahlt die Hälfte, bekommt die Hälfte der Gebühren und fährt selbst gebührenfrei' } : null;
           btn = `<div class="row-btns">
-            <button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" ${state.money >= p.cost ? '' : 'disabled'} title="allein bauen, alle Gebühren gehören dir">${fmt(p.cost)} Taler</button>
-            ${town ? `<button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" data-partner="stadt" ${state.money >= half ? '' : 'disabled'} title="${town.name} zahlt die Hälfte und bekommt die Hälfte der Gebühren">mit ${town.name}: ${fmt(half)}</button>` : ''}
-            ${house ? `<button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" data-partner="haus" ${state.money >= half ? '' : 'disabled'} title="${house.name} zahlt die Hälfte, bekommt die Hälfte der Gebühren und fährt selbst gebührenfrei">mit ${house.name}: ${fmt(half)}</button>` : ''}
+            <button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" ${state.money >= p.cost ? '' : 'disabled'} title="allein bauen, alle Gebühren gehören dir">Bauen<small>${fmt(p.cost)} Taler</small></button>
+            ${partner ? `<button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" data-partner="${partner.kind}" ${state.money >= half ? '' : 'disabled'} title="${partner.name} ${partner.why}">Mit ${partner.name} teilen<small>${fmt(half)} Taler, halbe Gebühren</small></button>` : ''}
           </div>`;
         }
       } else {
@@ -1328,12 +1342,14 @@ export class Hud {
     const l = state.ledger.works;
     const ledger = l && (l.income || l.cost) ? `<p class="note">Gestern: Gebühren +${fmt(l.income)} Taler, Unterhalt und fremde Gebühren −${fmt(l.cost)} Taler.</p>` : '';
     return `<div class="ledger-head"><div class="stamp-small">Wasserbauamt</div><h2>Den Fluss verbessern</h2>
-      <p>Brücken, Schleusen, Kanäle und Fahrrinnen verändern den Fluss für immer. Wer baut, darf von fremden Schiffen eine Durchfahrtsgebühr nehmen. Eine Stadt oder ein Handelshaus trägt auf Wunsch die Hälfte und bekommt dafür die Hälfte der Gebühren. Ausgebaggerte Rinnen verlanden, wenn niemand sie pflegt.</p></div>
+      <p>Brücken, Schleusen, Kanäle und Fahrrinnen verändern den Fluss für immer.</p>
+      ${explain('wasserbau', '<p>Wer baut, darf von fremden Schiffen eine Durchfahrtsgebühr nehmen. Eine Stadt oder ein Handelshaus trägt auf Wunsch die Hälfte und bekommt dafür die Hälfte der Gebühren. Ausgebaggerte Rinnen verlanden, wenn niemand sie pflegt.</p>')}</div>
       ${ledger}
       <div class="yard">${list}</div>
       ${renderCanal(state, this.map, (id) => this.townName(id))}
       <div class="ledger-head"><div class="stamp-small">Häfen</div><h2>Häfen ausbauen</h2>
-      <p>Ein besserer Hafen schlägt schneller um, hat mehr Liegeplätze und tieferes Wasser am Kai. Zu tiefe Schiffe müssen sonst über Schuten geleichtert werden, das dauert doppelt so lange und kostet einen halben Taler je Tonne.</p></div>
+      <p>Schneller umschlagen, mehr Liegeplätze, tieferes Wasser am Kai.</p>
+      ${explain('haefen', '<p>Zu tiefe Schiffe müssen sonst über Schuten geleichtert werden, das dauert doppelt so lange und kostet einen halben Taler je Tonne.</p>')}</div>
       <div class="yard">${harbors}</div>`;
   }
 
@@ -1430,7 +1446,7 @@ export class Hud {
       .join('');
     return `<div class="ledger-head"><div class="stamp-small">Flusskarte</div><h2>${!this.map.id || this.map.id === 'tal' ? 'Das Tal' : this.map.name}</h2><p>Rote Punkte sind deine Schiffe, Quadrate deine Kontore. Zahlen am Fluss: Wassertiefe.</p></div>
       <p class="note swipe-hint">Karte zum Verschieben seitlich wischen.</p><div class="map-scroll"><svg class="paper-map" viewBox="${d.viewBox}" role="img" aria-label="Karte des Flusstals">${rivers}${notes}${towns}${rivals}${ships}</svg></div>
-      <details class="more"><summary>Alle Abschnitte mit Tiefe und Brücken</summary><ul class="plain map-legend">${legend.join('')}</ul></details>`;
+      <details class="more" data-open-key="map-legend"><summary>Alle Abschnitte mit Tiefe und Brücken</summary><ul class="plain map-legend">${legend.join('')}</ul></details>`;
   }
 
   /* ---------- Rückmeldungen ---------- */

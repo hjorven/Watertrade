@@ -4,7 +4,6 @@ import { windOfDay, withWind, type Conditions, type ShipType } from './river.ts'
 import type { PriceBookPage, PricePoint, TripRecord } from './market-info.ts';
 import type { TownMarket, TownState } from './towns.ts';
 import type { MapDef } from '../data/maps/valley.ts';
-import type { Season } from './calendar.ts';
 import type { CanalState } from './canal.ts';
 import type { Finance } from './finance.ts';
 
@@ -52,8 +51,6 @@ export interface Voyage {
   checked?: number;
   /** davon Treidelgeld (ab der Motorzeit bergauf für Treidelschiffe) */
   towFee?: number;
-  /** Zoll, den ein Schmuggler auf dieser Fahrt umgeht; bei der Ankunft droht eine Kontrolle */
-  evaded?: number;
   /** Liegezeit zum Laden vor dem Ablegen (Stunden, am Anfang der Fahrt) */
   dock?: number;
   /** Liegezeit zum Löschen am Ziel (Stunden, am Ende der Fahrt) */
@@ -124,12 +121,6 @@ export interface TradeRoute {
   /** Spielstunde, ab der der Kapitän es erneut versucht */
   retryAt?: number;
   note?: string; // letzter Hinweis, z. B. warum gewartet wird
-  /** Zweite Halte-Liste (Winterplan); `stops` ist dann der Sommerplan */
-  winterStops?: RouteStop[];
-  /** Jahreszeiten, in denen der Winterplan gilt */
-  winterSeasons?: Season[];
-  /** Plan, nach dem gerade gefahren wird */
-  plan?: RoutePlan;
   /** Spielstunde, seit der der Kapitän auf Ladung wartet (Bedingung Mindestladung) */
   loadingSince?: number;
   /** Gewinn der letzten Tage, höchstens ROUTE_BOOK_DAYS Einträge */
@@ -137,8 +128,6 @@ export interface TradeRoute {
   /** Erster Tag, an dem die Route gebucht hat (für den Tagesschnitt) */
   bookSince?: number;
 }
-
-export type RoutePlan = 'sommer' | 'winter';
 
 export interface Ship {
   id: number;
@@ -157,8 +146,6 @@ export interface Ship {
   trip?: TripRecord;
   /** Schiffsbuch: abgeschlossene Fahrten, neueste zuerst */
   tripLog?: TripRecord[];
-  /** Flussversicherung abgeschlossen (finance.ts) */
-  insured?: boolean;
 }
 
 export interface Kontor {
@@ -438,7 +425,7 @@ export interface GameState {
    * oder an der Balance genau seine Karte behält.
    */
   map?: { id: string; seed?: number; def?: MapDef };
-  /** Stadtbank und Versicherung (finance.ts), fehlt bis zum ersten Kredit oder Vertrag */
+  /** Stadtbank (finance.ts), fehlt bis zum ersten Kredit */
   finance?: Finance;
   /** Höchstzahl eigener Schiffe (Herausforderung "Ein Schiff"), fehlt = unbegrenzt */
   shipLimit?: number;

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { VALLEY } from '../data/maps/valley.ts';
 import { addShip, hireCaptain, setRoute } from './fleet.ts';
 import { advance, newGame, type GameState, type RouteStop, type Ship, type TradeRoute } from './game.ts';
-import { activePlan, bookRoute, bookValue, coalPrice, MAX_LOAD_WAIT_HOURS, routeProfit, ROUTE_BOOK_DAYS, stopSkipped } from './routes.ts';
+import { bookRoute, bookValue, coalPrice, MAX_LOAD_WAIT_HOURS, routeProfit, ROUTE_BOOK_DAYS, stopSkipped } from './routes.ts';
 
 const fresh = (money = 5000): GameState => newGame(VALLEY, { startTown: 'oberau', money, rivals: false });
 
@@ -139,35 +139,5 @@ describe('Bedingungen je Halt', () => {
     expect(ship.port).toBe('oberau');
     expect(s.stats.trips).toBe(0);
     expect(ship.route!.note).toMatch(/jeder Halt übersprungen/);
-  });
-});
-
-describe('Sommer- und Winterplan', () => {
-  it('Mit dem Herbst schaltet die Route auf den Winterplan um', () => {
-    // Tag 50: Sommer; Herbst beginnt an Tag 61
-    const { s, ship } = withCaptain(50);
-    setRoute(s, 1, {
-      active: true,
-      next: 0,
-      stops: [buyWood(), sellWood('muehlheim')],
-      winterStops: [buyWood(), sellWood('niedermuend')],
-    });
-    expect(activePlan(s, ship.route!)).toBe('sommer');
-    advance(s, VALLEY, 24 * 10);
-    expect(s.stats.delivered.niedermuend?.holz ?? 0).toBe(0);
-    advance(s, VALLEY, 24 * 25);
-    expect(ship.route!.plan).toBe('winter');
-    expect(s.stats.delivered.niedermuend?.holz ?? 0).toBeGreaterThan(0);
-  });
-
-  it('Ein Winterplan mit weniger als zwei Halten gilt nicht', () => {
-    const { s, ship } = withCaptain(70);
-    ship.route = { active: true, next: 0, stops: [buyWood(), sellWood('muehlheim')], winterStops: [buyWood()] };
-    expect(activePlan(s, ship.route)).toBe('sommer');
-    ship.route.winterSeasons = ['fruehling'];
-    ship.route.winterStops!.push(sellWood('niedermuend'));
-    expect(activePlan(s, ship.route)).toBe('sommer');
-    ship.route.winterSeasons = ['herbst'];
-    expect(activePlan(s, ship.route)).toBe('winter');
   });
 });

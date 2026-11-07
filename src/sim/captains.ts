@@ -1,4 +1,4 @@
-import { CAPTAIN_RANKS, captainRank, isMaster, MAX_WAGE, TRAITS, type Trait } from '../data/captains.ts';
+import { CAPTAIN_RANKS, captainRank, MAX_WAGE, TRAITS, type Trait } from '../data/captains.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { RIVAL_BY_ID } from '../data/rivals.ts';
 import { addNews, day, fail, getShip, rand, type Captain, type GameState, type NewsItem, type Ship, type TradeResult, type Voyage } from './state.ts';
@@ -15,13 +15,6 @@ export const LOYALTY_POACH = 30;
 
 /** So viele Tage gilt die Lohnzusage, mit der ein Kapitän gehalten wurde */
 export const PROMISE_DAYS = 30;
-
-/** Chance, an einer Zollstelle vorbei erwischt zu werden; Altmeister halb so oft */
-export const SMUGGLE_CATCH = 0.1;
-/** Strafe in Vielfachen des umgangenen Zolls */
-export const SMUGGLE_FINE = 3;
-/** Anteil der Ladung, den der Zoll beschlagnahmt */
-export const SMUGGLE_SEIZE = 0.5;
 
 /** Lohn, den ein Kapitän mit seinen Eigenschaften und seiner Erfahrung erwarten kann */
 export function fairWage(c: Pick<Captain, 'trait' | 'trait2' | 'km'>): number {
@@ -170,8 +163,7 @@ export function voyageKm(state: GameState, map: MapDef, v: Voyage): number {
 }
 
 /**
- * Ein Schiff ist angekommen: Der Kapitän sammelt Erfahrung, ein Schmuggler kann kontrolliert werden,
- * und wer abgeworben ist, geht hier von Bord.
+ * Ein Schiff ist angekommen: Der Kapitän sammelt Erfahrung, und wer abgeworben ist, geht hier von Bord.
  */
 export function captainArrived(state: GameState, map: MapDef, ship: Ship, v: Voyage): NewsItem[] {
   const news: NewsItem[] = [];
@@ -179,42 +171,16 @@ export function captainArrived(state: GameState, map: MapDef, ship: Ship, v: Voy
   if (!c) return news;
   const town = map.towns.find((t) => t.id === v.to)?.name ?? v.to;
 
-  // Schmuggel: Kontrolle an der Zollstelle, an der er vorbeiwollte
-  if (v.evaded && v.evaded > 0) {
-    const chance = isMaster(c) ? SMUGGLE_CATCH / 2 : SMUGGLE_CATCH;
-    if (rand(state) < chance) {
-      const fine = Math.round(v.evaded * SMUGGLE_FINE);
-      state.money -= fine;
-      let seized = 0;
-      for (const [g, slot] of Object.entries(ship.cargo)) {
-        const take = Math.round(slot.amount * SMUGGLE_SEIZE * 10) / 10;
-        if (take <= 0) continue;
-        slot.cost -= (slot.cost * take) / slot.amount;
-        slot.amount -= take;
-        seized += take;
-        if (slot.amount < 0.001) delete ship.cargo[g];
-      }
-      news.push(
-        addNews(
-          state,
-          'haus',
-          `Zollkontrolle auf dem Weg nach ${town}: ${c.name} wird beim Schmuggeln erwischt. Strafe ${fine} Taler${seized ? `, ${fmtT(seized)} t Ladung beschlagnahmt` : ''}.`,
-        ),
-      );
-    }
-  }
-
   // Erfahrung
   const rankBefore = captainRank(c.km);
   c.km = Math.round((c.km ?? 0) + voyageKm(state, map, v));
   const rank = captainRank(c.km);
   if (rank > rankBefore) {
-    // Schmuggeln lernt man nicht nebenbei: sonst müsste der Spieler gegen seinen Willen schmuggeln
-    if (rank >= 1 && !c.trait2) c.trait2 = rollTrait(state, c.trait, 'schmuggler');
+    if (rank >= 1 && !c.trait2) c.trait2 = rollTrait(state, c.trait);
     const fair = fairWage(c);
     const parts: string[] = [];
     if (rankBefore < 1 && c.trait2) parts.push(`hat dazugelernt: ${TRAITS[c.trait2].name} (${TRAITS[c.trait2].text})`);
-    parts.push(rank >= 2 ? 'ist jetzt Altmeister: 5 % schneller und seltener beim Zoll erwischt' : 'ist jetzt erfahren');
+    parts.push(rank >= 2 ? 'ist jetzt Altmeister: 5 % schneller' : 'ist jetzt erfahren');
     news.push(addNews(state, 'haus', `${c.name} hat ${c.km} km auf dem Fluss, ${parts.reverse().join(' und ')}. Gute Leute wollen ${fair} Taler am Tag.`));
   }
 
@@ -224,4 +190,3 @@ export function captainArrived(state: GameState, map: MapDef, ship: Ship, v: Voy
   return news;
 }
 
-const fmtT = (x: number) => (Math.round(x * 10) / 10).toString().replace('.', ',');

@@ -182,7 +182,7 @@ export const CHAPTERS: Chapter[] = [
     title: 'Hundert Jahre am Fluss',
     intro: [
       'Motoren tuckern, wo einst Pferde zogen. Kühlschiffe bringen frischen Fisch bis in die Berge. Dein Haus ist alt geworden, der Fluss nicht.',
-      'Die alten Handelshäuser tun sich schwer mit der neuen Zeit, ihre Anteile werden im Register gehandelt. Wer mehr als die Hälfte eines Hauses hält, bekommt Schiffe, Kontore und Kasse, muss aber die übrigen Teilhaber auszahlen. Ein letztes Mal: Mach dein Haus zum ersten am Fluss.',
+      'Die alten Handelshäuser tun sich schwer mit der neuen Zeit, im Register stehen sie zum Verkauf. Wer ein Haus übernimmt, bekommt Schiffe, Kontore und Kasse, zahlt aber gut dafür. Ein letztes Mal: Mach dein Haus zum ersten am Fluss.',
     ],
     outro: 'Hundert Jahre am Fluss. Die Treidelpfade sind Spazierwege geworden, aber die Kontore stehen noch, und über den Türen steht dein Name.',
     startTown: 'altenfurt',

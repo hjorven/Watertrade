@@ -19,7 +19,8 @@ import {
   PACT_TOLERANCE,
   pactPenalty,
   placeBid,
-  sellShares,
+  buyHouse,
+  takeoverCost,
   sharePrice,
   sharesWorth,
   tickRivalry,
@@ -251,6 +252,20 @@ describe('Konkurs und Versteigerung', () => {
 });
 
 describe('Anteile und Übernahme', () => {
+  it('ein Haus lässt sich in einem Zug zum Gesamtpreis übernehmen', () => {
+    const s = game();
+    const r = findRival(s, 'ahlers')!;
+    r.money = 1000;
+    const cost = takeoverCost(r);
+    s.money = cost - 1;
+    expect(buyHouse(s, VALLEY, 'ahlers').ok).toBe(false);
+    expect(findRival(s, 'ahlers')).toBeDefined();
+    s.money = cost;
+    expect(buyHouse(s, VALLEY, 'ahlers').ok).toBe(true);
+    expect(findRival(s, 'ahlers')).toBeUndefined();
+    expect(s.money).toBe(1000);
+  });
+
   it('Anteile werden mit jedem Block teurer und zählen zum Vermögen', () => {
     const s = game();
     const r = findRival(s, 'nordstrom')!;
@@ -262,8 +277,6 @@ describe('Anteile und Übernahme', () => {
     expect(sharesWorth(s)).toBe(Math.round(rivalWorth(r) * 0.1));
     // gekauft mit Aufschlag: ein kleiner Verlust, aber nicht der ganze Preis
     expect(playerWorth(s)).toBeGreaterThan(worth - first);
-    expect(sellShares(s, 'nordstrom').ok).toBe(true);
-    expect(r.shares).toBe(0);
   });
 
   it('verärgerte Häuser verkaufen keine Anteile, außer sie brauchen Geld', () => {
