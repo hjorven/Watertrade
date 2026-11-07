@@ -1,3 +1,4 @@
+import '@fontsource-variable/source-serif-4/wght.css';
 import './style.css';
 import * as THREE from 'three';
 import { CHAPTERS, chapterForSave, type Chapter } from './data/campaign.ts';
