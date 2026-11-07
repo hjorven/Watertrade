@@ -103,7 +103,7 @@ export const CHALLENGES: Challenge[] = [
     deadlineDays: 120,
     goals: [
       { type: 'ships', count: 3, text: 'Besitze drei Schiffe' },
-      { type: 'worth', amount: 8000, text: 'Komme auf ein Vermögen von 8000 Talern' },
+      { type: 'worth', amount: 20000, text: 'Komme auf ein Vermögen von 20 000 Talern' },
     ],
   },
   {
@@ -156,7 +156,7 @@ export const CHALLENGES: Challenge[] = [
     title: 'Holzmonopol',
     intro: [
       'Haus Steinbrück hält seit Generationen die Holzroute vom Oberlauf zur Mündung. Noch.',
-      'Verkaufe mehr Holz als alle anderen Häuser zusammen, bis dir die Hälfte des Holzhandels am Fluss gehört. Gezählt wird jede verkaufte Tonne, deine und die der Konkurrenz.',
+      'Verkaufe Holz, bis dir ein Drittel des Holzhandels am Fluss gehört. Gezählt wird jede verkaufte Tonne, deine und die der Konkurrenz.',
     ],
     outro: 'Wer im Tal ein Brett braucht, fragt jetzt zuerst bei dir.',
     startTown: 'oberau',
@@ -167,7 +167,7 @@ export const CHALLENGES: Challenge[] = [
     epoch: 1,
     startYear: 2,
     deadlineDays: 120,
-    goals: [{ type: 'share', good: 'holz', percent: 50, min: 800, text: 'Verkaufe mindestens die Hälfte des Holzes, das am Fluss gehandelt wird, und wenigstens 800 t' }],
+    goals: [{ type: 'share', good: 'holz', percent: 34, min: 600, text: 'Verkaufe mindestens ein Drittel des Holzes, das am Fluss gehandelt wird, und wenigstens 600 t' }],
   },
   {
     id: 'h-einschiff',
@@ -207,12 +207,12 @@ export const CHALLENGES: Challenge[] = [
     startYear: 2,
     startDayOfYear: 70,
     kontore: ['niedermuend'],
-    deadlineDays: 30,
+    deadlineDays: 40,
     // die Apotheken im ganzen Tal sind leergekauft
     stock: [{ town: 'alle', good: 'arznei', amount: 0 }],
-    events: [{ kind: 'seuche', days: 30, towns: ['kesselbrueck', 'muehlheim', 'altenfurt'] }],
+    events: [{ kind: 'seuche', days: 40, towns: ['kesselbrueck', 'muehlheim', 'altenfurt'] }],
     goals: [
-      { type: 'deliver', town: 'kesselbrueck', good: 'arznei', amount: 30, text: 'Bring 30 t Arznei nach Kesselbrück' },
+      { type: 'deliver', town: 'kesselbrueck', good: 'arznei', amount: 20, text: 'Bring 20 t Arznei nach Kesselbrück' },
       { type: 'deliver', town: 'muehlheim', good: 'arznei', amount: 30, text: 'Bring 30 t Arznei nach Mühlheim' },
       { type: 'deliver', town: 'altenfurt', good: 'arznei', amount: 30, text: 'Bring 30 t Arznei nach Altenfurt' },
     ],
@@ -282,7 +282,7 @@ export const CHALLENGES: Challenge[] = [
     deadlineDays: 28,
     events: [{ kind: 'hochwasser', days: 28, value: 0.6 }],
     goals: [
-      { type: 'deliver', town: 'oberau', good: 'getreide', amount: 250, text: 'Bring 250 t Getreide nach Oberau' },
+      { type: 'deliver', town: 'oberau', good: 'getreide', amount: 180, text: 'Bring 180 t Getreide nach Oberau' },
       { type: 'deliver', town: 'kesselbrueck', good: 'brot', amount: 120, text: 'Bring 120 t Brot nach Kesselbrück' },
     ],
   },
@@ -341,10 +341,10 @@ export const CHALLENGES: Challenge[] = [
     rivals: true,
     epoch: 3,
     startYear: 10,
-    deadlineDays: 200,
+    deadlineDays: 120,
     goals: [
       { type: 'ships', count: 2, shipType: 'motorschiff', text: 'Besitze zwei Motorschiffe' },
-      { type: 'worth', amount: 12000, text: 'Komme auf ein Vermögen von 12 000 Talern' },
+      { type: 'worth', amount: 30000, text: 'Komme auf ein Vermögen von 30 000 Talern' },
     ],
   },
   {
@@ -357,16 +357,16 @@ export const CHALLENGES: Challenge[] = [
     ],
     outro: 'Der Fisch in Mühlheim schmeckt, als käme er direkt aus dem Netz.',
     startTown: 'niedermuend',
-    money: 2000,
+    money: 4500,
     startShip: 'kuehlschiff',
     allowedShips: [],
     rivals: true,
     epoch: 3,
     startYear: 10,
-    deadlineDays: 40,
+    deadlineDays: 20,
     goals: [
-      { type: 'deliver', town: 'muehlheim', good: 'fisch', amount: 150, text: 'Bring 150 t Fisch nach Mühlheim' },
-      { type: 'deliver', town: 'altenfurt', good: 'fisch', amount: 150, text: 'Bring 150 t Fisch nach Altenfurt' },
+      { type: 'deliver', town: 'muehlheim', good: 'fisch', amount: 160, text: 'Bring 160 t Fisch nach Mühlheim' },
+      { type: 'deliver', town: 'altenfurt', good: 'fisch', amount: 110, text: 'Bring 110 t Fisch nach Altenfurt' },
       { type: 'deliver', town: 'altenfurt', good: 'brot', amount: 80, text: 'Bring 80 t Brot nach Altenfurt' },
     ],
   },
@@ -424,6 +424,8 @@ export const CHALLENGES: Challenge[] = [
     rivals: true,
     epoch: 1,
     startYear: 3,
+    // im Frühjahr: Routen brauchen eine Saison, in der sie etwas abwerfen
+    startDayOfYear: 90,
     deadlineDays: 120,
     goals: [
       { type: 'routes', count: 3, text: 'Lass drei Schiffe Routen allein fahren' },

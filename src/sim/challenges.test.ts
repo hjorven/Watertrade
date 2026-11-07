@@ -82,12 +82,17 @@ describe('Herausforderungen: Aufbau', () => {
 
   it('Marktanteil zählt eigene gegen fremde Tonnen', () => {
     const c = CHALLENGES.find((x) => x.id === 'h-monopol')!;
-    const goal = c.goals[0];
+    const goal = { type: 'share', good: 'holz', percent: 70, min: 800, text: '' } as const;
     const s = challengeGame(VALLEY, c, 1);
     s.stats.delivered = { niedermuend: { holz: 1600 } };
     s.stats.rivalSold = { holz: 900 };
     // 70 % brauchen bei 900 fremden Tonnen 2100 eigene
     expect(goalProgress(s, goal)).toEqual({ value: 1600, target: 2100 });
+    // wenig fremder Handel: dann gilt die Mindestmenge
+    s.stats.rivalSold = { holz: 100 };
+    expect(goalProgress(s, goal).target).toBe(800);
+    // die Herausforderung selbst nutzt dieselbe Formel
+    expect(c.goals[0].type).toBe('share');
   });
 
   it('Konkurrenz wirkt nach einem Einkauf nicht ärmer', () => {
