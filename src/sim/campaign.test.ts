@@ -55,7 +55,7 @@ describe('Kapitel 1: Floßbau', () => {
     expect(loadHint).toContain('Markt');
     expect(loadHint).toContain(name(plan.to));
     if (plan.good) buy(s, raft.id, plan.good, plan.amount);
-    expect(chapterOneHint(s, VALLEY, raft, name)).toContain('Leg ab');
+    expect(chapterOneHint(s, VALLEY, raft, name)).toContain('<b>Ablegen</b> ab');
     expect(depart(s, VALLEY, raft.id, plan.to)).not.toBeNull();
     expect(chapterOneHint(s, VALLEY, kahn, name)).toContain('treibt');
     advance(s, VALLEY, hoursToArrival(s, raft));

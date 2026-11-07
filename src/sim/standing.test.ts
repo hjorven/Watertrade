@@ -6,10 +6,10 @@ import { advance, buy, kontorBuy, kontorSell, newGame, planVoyage, sell, upgrade
 import { betriebSlots, buildKontor, playerWorth } from './house.ts';
 import { deserialize, serialize, SAVE_VERSION } from './save.ts';
 import {
-  buildTownhouse,
   found,
   gainStanding,
-  joinCouncil,
+  takeSeat,
+  seatPrice,
   rankIndex,
   standing,
   standingOf,
@@ -58,7 +58,7 @@ describe('Ansehen pro Stadt', () => {
   it('Kaufen und sofort Zurückverkaufen bringt nie Gewinn, auch mit Kontor, Händler und hohem Ansehen', () => {
     const s = game('altenfurt', 200_000);
     buildKontor(s, 'altenfurt');
-    setRank(s, 'altenfurt', 4);
+    setRank(s, 'altenfurt', RANKS.length - 1);
     const ship = s.ships[0];
     ship.captain = { id: 1, name: 'Test', trait: 'haendler', wage: 0, hire: 0 };
     s.markets.altenfurt.arznei = { good: 'arznei', stock: 80, target: 80 };
@@ -165,7 +165,7 @@ describe('Freischaltungen', () => {
       for (const fav of [false, true]) {
         const s = newGame(VALLEY, { startTown: 'altenfurt', rivals: false, seed });
         if (fav) {
-          setRank(s, 'altenfurt', 4);
+          setRank(s, 'altenfurt', RANKS.length - 1);
           standingOf(s, 'altenfurt').council = true;
         }
         for (let i = 0; i < 30; i++) {
@@ -217,17 +217,7 @@ describe('Geld für Ansehen', () => {
     expect(b.towns.altenfurt.satisfaction).toBeGreaterThan(a.towns.altenfurt.satisfaction + 0.04);
   });
 
-  it('Stadthaus erst ab "Geschätzt", zählt zum Vermögen', () => {
-    const s = game();
-    expect(buildTownhouse(s, 'altenfurt').ok).toBe(false);
-    setRank(s, 'altenfurt', TOWNHOUSE.minRank);
-    const worth = playerWorth(s);
-    expect(buildTownhouse(s, 'altenfurt').ok).toBe(true);
-    expect(standingOf(s, 'altenfurt').townhouse).toBe(true);
-    expect(playerWorth(s)).toBe(worth - TOWNHOUSE.price + TOWNHOUSE.price * 0.5);
-  });
-
-  it('Ratssitz erst ab "Angesehen", halbiert den Zoll an der Stadt', () => {
+  it('Ratssitz erst ab "Angesehen": Stadthaus zählt zum Vermögen, der Rat halbiert den Zoll', () => {
     const s = game('muehlheim');
     s.events.push({ id: 900, kind: 'zoll', from: 1, until: 30, seg: 'muehl-alten', value: 60 });
     const toll = () => {
@@ -235,9 +225,14 @@ describe('Geld für Ansehen', () => {
       return p && p.ok ? p.voyage.toll : -1;
     };
     expect(toll()).toBe(60);
-    expect(joinCouncil(s, 'altenfurt').ok).toBe(false);
+    expect(takeSeat(s, 'altenfurt').ok).toBe(false);
     setRank(s, 'altenfurt', COUNCIL.minRank);
-    expect(joinCouncil(s, 'altenfurt').ok).toBe(true);
+    expect(seatPrice(s, 'altenfurt')).toBe(TOWNHOUSE.price + COUNCIL.price);
+    const worth = playerWorth(s);
+    expect(takeSeat(s, 'altenfurt').ok).toBe(true);
+    expect(standingOf(s, 'altenfurt').townhouse).toBe(true);
+    expect(standingOf(s, 'altenfurt').council).toBe(true);
+    expect(playerWorth(s)).toBe(worth - TOWNHOUSE.price - COUNCIL.price + TOWNHOUSE.price * 0.5);
     expect(toll()).toBe(60 * COUNCIL.tollShare);
     expect(rankIndex(standing(s, 'altenfurt'))).toBeGreaterThanOrEqual(COUNCIL.minRank);
   });

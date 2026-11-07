@@ -141,7 +141,8 @@ const PORT_GROUPS: TabGroup[] = [
   { id: 'route', label: 'Route', tabs: [['route', 'Route']] },
 ];
 const SEA_GROUPS: TabGroup[] = [
-  { id: 'markt', label: 'Fahrt', tabs: [['markt', 'Fahrt'], ['buch', 'Preisbuch']] },
+  { id: 'markt', label: 'Fahrt', tabs: [['markt', 'Fahrt']] },
+  { id: 'buch', label: 'Preisbuch', tabs: [['buch', 'Preisbuch']] },
   { id: 'route', label: 'Route', tabs: [['route', 'Route']] },
 ];
 /** Diese Reiter gibt es immer, die übrigen schaltet die Kampagne frei */
@@ -1273,10 +1274,11 @@ export class Hud {
           const half = Math.round(p.cost / 2);
           const town = partnerOffer(state, this.map, p.id, 'stadt');
           const house = partnerOffer(state, this.map, p.id, 'haus');
+          // geteilt wird bevorzugt mit der Stadt (die fährt nicht selbst), sonst mit einem Haus
+          const partner = town ? { kind: 'stadt', name: town.name, why: 'zahlt die Hälfte und bekommt die Hälfte der Gebühren' } : house ? { kind: 'haus', name: house.name, why: 'zahlt die Hälfte, bekommt die Hälfte der Gebühren und fährt selbst gebührenfrei' } : null;
           btn = `<div class="row-btns">
-            <button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" ${state.money >= p.cost ? '' : 'disabled'} title="allein bauen, alle Gebühren gehören dir">${fmt(p.cost)} Taler</button>
-            ${town ? `<button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" data-partner="stadt" ${state.money >= half ? '' : 'disabled'} title="${town.name} zahlt die Hälfte und bekommt die Hälfte der Gebühren">mit ${town.name}: ${fmt(half)}</button>` : ''}
-            ${house ? `<button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" data-partner="haus" ${state.money >= half ? '' : 'disabled'} title="${house.name} zahlt die Hälfte, bekommt die Hälfte der Gebühren und fährt selbst gebührenfrei">mit ${house.name}: ${fmt(half)}</button>` : ''}
+            <button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" ${state.money >= p.cost ? '' : 'disabled'} title="allein bauen, alle Gebühren gehören dir">Bauen<small>${fmt(p.cost)} Taler</small></button>
+            ${partner ? `<button class="btn" data-act="cmd" data-cmd="project" data-id="${p.id}" data-partner="${partner.kind}" ${state.money >= half ? '' : 'disabled'} title="${partner.name} ${partner.why}">Mit ${partner.name} teilen<small>${fmt(half)} Taler, halbe Gebühren</small></button>` : ''}
           </div>`;
         }
       } else {

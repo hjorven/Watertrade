@@ -62,7 +62,7 @@ import { resetBook } from './sim/routes.ts';
 import { deliverToCanal, startCanalStage } from './sim/canal.ts';
 import { EPOCHS } from './data/ships.ts';
 import { buildBetrieb, buildKontor, playerWorth, sellBetrieb, toggleBetrieb, upgradeKontor } from './sim/house.ts';
-import { buildTownhouse, found, joinCouncil, leaveCouncil } from './sim/standing.ts';
+import { found, leaveCouncil, takeSeat } from './sim/standing.ts';
 import { goalDone, goalProgress, restoreCompleted } from './sim/goals.ts';
 import { payOverdueNow, repayLoan, takeLoan } from './sim/finance.ts';
 import { deserialize, SAVE_VERSION, serialize, type GameMode, type SaveGame } from './sim/save.ts';
@@ -412,13 +412,9 @@ function runCommand(cmd: string, d: Record<string, string | number>): void {
       r = found(state, town, String(d.id));
       ok = 'glocke';
       break;
-    case 'townhouse':
-      r = buildTownhouse(state, town);
+    case 'seat':
+      r = takeSeat(state, town);
       ok = 'erfolg';
-      break;
-    case 'council':
-      r = joinCouncil(state, town);
-      ok = 'stempel';
       break;
     case 'leaveCouncil':
       r = leaveCouncil(state, town);

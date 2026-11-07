@@ -57,7 +57,7 @@ function tradeHint(state: GameState, map: MapDef, ship: Ship, townName: (id: str
       : 'Kauf eine Ware, die hier im <b>Überschuss</b> ist, denn dann ist sie billig, und bring sie in eine Stadt mit <b>Bedarf</b>.';
   }
   const dest = buyerFor(state, map, ship, aboard);
-  return `Liegt der Verkaufspreis über deinem Einkauf (ø), verkauf mit <b>Verkaufen</b>. Sonst leg ab${dest ? ` nach <b>${townName(dest)}</b>, dort wird ${goodName(aboard)} gebraucht` : ' zu einer Stadt mit <b>Bedarf</b> an der Ware'}.`;
+  return `Liegt der Verkaufspreis über deinem Einkauf (ø), verkauf mit <b>Verkaufen</b>. Sonst leg im Reiter <b>Ablegen</b> ab${dest ? ` nach <b>${townName(dest)}</b>, dort wird ${goodName(aboard)} gebraucht` : ' zu einer Stadt mit <b>Bedarf</b> an der Ware'}.`;
 }
 
 /** Erstes Floß: zimmern, beladen, treiben lassen, verkaufen, zerlegen */
@@ -93,7 +93,7 @@ function raftHint(state: GameState, map: MapDef, ship: Ship, townName: (id: stri
       return `Das Floß trägt noch ${capacityOf(raft)} t. Am meisten bringen gerade <b>${plan.amount} t ${goodName(plan.good)}</b> nach <b>${townName(plan.to)}</b>. Mit dem Floßholz bringt das etwa ${Math.round(plan.profit)} Taler ein. Kauf die Ladung im <b>Markt</b>.`;
     }
     const more = plan.good && load > 0 ? `Es passen noch ${plan.amount} t ${goodName(plan.good)} dazu. ` : '';
-    return `${more}Leg ab nach <b>${townName(plan.to)}</b>. Ein Floß treibt nur mit der Strömung und kommt nicht zurück.`;
+    return `${more}Leg im Reiter <b>Ablegen</b> ab nach <b>${townName(plan.to)}</b>. Ein Floß treibt nur mit der Strömung und kommt nicht zurück.`;
   }
   if (load > 0) return 'Angekommen. Verkauf die Ladung im <b>Markt</b> mit <b>Verkaufen</b>.';
   if (!state.markets[raft.port!]?.holz) {
@@ -113,7 +113,7 @@ function grainHint(state: GameState, map: MapDef, ship: Ship, townName: (id: str
   const aboard = ship.cargo.getreide?.amount ?? 0;
   if (ship.voyage) return null;
   if (aboard > 0 && ship.port === home.id) return `Verkauf das Getreide hier mit <b>Verkaufen</b>. Noch ${Math.ceil(K1_GRAIN - delivered)} t fehlen.`;
-  if (aboard > 0) return `Leg ab nach <b>${home.name}</b>. Bergwärts ziehen Pferde den Kahn, das dauert länger als talwärts.`;
+  if (aboard > 0) return `Leg im Reiter <b>Ablegen</b> ab nach <b>${home.name}</b>. Bergwärts ziehen Pferde den Kahn, das dauert länger als talwärts.`;
   const source = map.towns.find((t) => state.markets[t.id].getreide && netFlow(t, 'getreide', state.towns[t.id]) > 0);
   return `Der Treidelkahn fährt auch <b>bergwärts</b>. ${home.name} braucht <b>Getreide</b>${source ? `, in <b>${townName(source.id)}</b> gibt es viel davon` : ''}. Bring ${K1_GRAIN} t hinauf.`;
 }

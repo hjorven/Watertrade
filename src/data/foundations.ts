@@ -19,10 +19,9 @@ export interface StandingRank {
 
 export const RANKS: StandingRank[] = [
   { name: 'Fremder', from: 0, discount: 0, contractBonus: 0, extraSlots: 0, unlocks: 'Noch kennt dich hier niemand.' },
-  { name: 'Bekannt', from: 10, discount: 0.02, contractBonus: 0, extraSlots: 0, unlocks: '2 % Nachlass beim Einkauf' },
-  { name: 'Geschätzt', from: 25, discount: 0.03, contractBonus: 0.1, extraSlots: 0, unlocks: '3 % Nachlass, Aufträge zahlen 10 % mehr und kommen öfter, Stadthaus erlaubt' },
-  { name: 'Angesehen', from: 45, discount: 0.04, contractBonus: 0.15, extraSlots: 1, unlocks: '4 % Nachlass, Aufträge +15 %, ein zusätzlicher Bauplatz am Kontor, Sitz im Stadtrat möglich' },
-  { name: 'Ehrenbürger', from: 70, discount: 0.06, contractBonus: 0.2, extraSlots: 1, unlocks: '6 % Nachlass, Aufträge +20 %' },
+  { name: 'Bekannt', from: 15, discount: 0.03, contractBonus: 0.1, extraSlots: 0, unlocks: '3 % Nachlass beim Einkauf, Aufträge zahlen 10 % mehr' },
+  { name: 'Angesehen', from: 40, discount: 0.05, contractBonus: 0.15, extraSlots: 1, unlocks: '5 % Nachlass, Aufträge +15 % und öfter, ein Bauplatz mehr am Kontor, Ratssitz möglich' },
+  { name: 'Ehrenbürger', from: 70, discount: 0.07, contractBonus: 0.25, extraSlots: 1, unlocks: '7 % Nachlass, Aufträge +25 %' },
 ];
 
 export type FoundationId = 'armenhaus' | 'schule' | 'kirche';
@@ -82,11 +81,13 @@ export const SCHOOL_GROWTH = 1.15;
 /** Wie stark ein Armenhaus das Schrumpfen bremst */
 export const POORHOUSE_SHRINK = 0.5;
 
-/** Eigenes Stadthaus: Prestigebau im Diorama */
-export const TOWNHOUSE = { price: 6000, upkeep: 10, standing: 10, minRank: 2 };
-
-/** Sitz im Stadtrat: halber Zoll auf den Flussabschnitten an der Stadt, mehr und bessere Aufträge */
-export const COUNCIL = { price: 4000, upkeep: 12, standing: 10, minRank: 3, tollShare: 0.5, contractBonus: 0.1, offerWeight: 2 };
+/**
+ * Ratssitz: ein Stadthaus am Markt (Prestigebau im Diorama) und ein Sitz im Stadtrat, zusammen gekauft.
+ * Der Rat bringt halben Zoll auf den Flussabschnitten an der Stadt und mehr, besser bezahlte Aufträge.
+ * TOWNHOUSE und COUNCIL sind die beiden Teile; ältere Spielstände können nur einen davon haben.
+ */
+export const TOWNHOUSE = { price: 5000, upkeep: 8, standing: 10, minRank: 2 };
+export const COUNCIL = { price: 3000, upkeep: 10, standing: 10, minRank: 2, tollShare: 0.5, contractBonus: 0.1, offerWeight: 2 };
 
 /** Verdientes Ansehen verblasst langsam (Anteil je Tag), Stiftungen und Bauten bleiben */
 export const STANDING_DECAY = 0.005;
