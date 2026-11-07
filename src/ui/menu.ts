@@ -1,6 +1,7 @@
 import { CHAPTERS, type Chapter } from '../data/campaign.ts';
 import { CHALLENGES } from '../data/challenges.ts';
 import { MAX_SEED } from '../data/maps/random.ts';
+import { brandMark } from './icons.ts';
 
 export interface SlotInfo {
   slot: string; // 'auto' | '1' | '2' | '3'
@@ -237,7 +238,7 @@ export class Menu {
     const auto = info.slots.find((s) => s.slot === 'auto');
     this.show(`
       <div class="card-head">Handelshaus am Fluss · gegründet im Jahr 1</div>
-      <h1 class="title">Watertrade</h1>
+      <div class="masthead">${brandMark(64)}<div><h1 class="title">Watertrade</h1><small>Handel und Wasserbau am großen Fluss</small></div></div>
       <p class="lead">Führe ein Handelshaus an einem großen Flusssystem. Versorge die Städte, bau eine Flotte auf und lerne den Fluss lesen.</p>
       <div class="menu-buttons">
         ${auto ? `<button class="btn primary wide" data-menu="continue">Weiterspielen<small>${esc(auto.summary ?? '')}</small></button>` : ''}

@@ -8,6 +8,7 @@ import type { MapDef, TownDef } from '../data/maps/valley.ts';
 import { RIVAL_BY_ID } from '../data/rivals.ts';
 import { EPOCHS, fuelOf, SHIPS, UPGRADES } from '../data/ships.ts';
 import { goodIcon } from './goodicons.ts';
+import { brandMark, icon } from './icons.ts';
 import { dayInSeason, season, SEASON_NAME, SEASONS, year } from '../sim/calendar.ts';
 import { MAX_ACCEPTED, PENALTY } from '../sim/contracts.ts';
 import { buyPrice, sellPrice } from '../sim/economy.ts';
@@ -185,6 +186,14 @@ const ORDER_TEXT: Record<OrderKind, string> = {
   auslagern: 'Aus dem Kontor',
 };
 
+/** Merkt an einer seitlich rollbaren Leiste, auf welcher Seite noch etwas verborgen ist (CSS blendet dort aus) */
+function markOverflow(el: HTMLElement): void {
+  const start = el.scrollLeft > 1;
+  const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+  const more = start && end ? 'both' : end ? 'end' : start ? 'start' : '';
+  if (el.dataset.more !== more) el.dataset.more = more;
+}
+
 const lastHtml = new WeakMap<HTMLElement, string>();
 function setHtml(el: HTMLElement, html: string): void {
   if (lastHtml.get(el) === html) return;
@@ -266,28 +275,34 @@ export class Hud {
       'beforeend',
       `
       <header class="topbar">
-        <div class="brand">Watertrade</div>
+        <div class="brand" title="Watertrade">${brandMark(30)}<span class="brand-name">Watertrade</span></div>
         <div class="stats"></div>
-        <nav class="views" aria-label="Bücher">
-          <button class="btn" data-act="view" data-view="contracts">Aufträge<i class="badge" data-badge="contracts"></i></button>
-          <button class="btn" data-act="view" data-view="news">Flussbote<i class="badge" data-badge="news"></i></button>
-          <button class="btn" data-act="view" data-view="works">Wasserbau</button>
-          <button class="btn" data-act="view" data-view="register">Register</button>
-          <button class="btn" data-act="view" data-view="map">Karte</button>
-        </nav>
-        <button class="btn menu-btn" data-act="menu" aria-label="Menü">Menü</button>
-        <div class="speed" role="group" aria-label="Tempo">
-          <button class="btn" data-act="speed" data-factor="0" aria-label="Pause">II</button>
-          <button class="btn on" data-act="speed" data-factor="1">1×</button>
-          <button class="btn" data-act="speed" data-factor="4">4×</button>
+        <div class="toolbar">
+          <nav class="views" aria-label="Bücher">
+            <button class="btn" data-act="view" data-view="contracts">${icon('contracts')}<span>Aufträge</span><i class="badge" data-badge="contracts"></i></button>
+            <button class="btn" data-act="view" data-view="news">${icon('news')}<span>Flussbote</span><i class="badge" data-badge="news"></i></button>
+            <button class="btn" data-act="view" data-view="works">${icon('works')}<span>Wasserbau</span></button>
+            <button class="btn" data-act="view" data-view="register">${icon('register')}<span>Register</span></button>
+            <button class="btn" data-act="view" data-view="map">${icon('map')}<span>Karte</span></button>
+          </nav>
+          <div class="speed" role="group" aria-label="Tempo">
+            <button class="btn" data-act="speed" data-factor="0" aria-label="Pause" title="Pause">${icon('pause')}</button>
+            <button class="btn on" data-act="speed" data-factor="1" aria-label="Normales Tempo" title="Normales Tempo">${icon('play')}<span>1×</span></button>
+            <button class="btn" data-act="speed" data-factor="4" aria-label="Vierfaches Tempo" title="Vierfaches Tempo">${icon('fast')}<span>4×</span></button>
+          </div>
+          <button class="btn menu-btn" data-act="menu" aria-label="Menü" title="Menü (Esc)">${icon('menu')}<span>Menü</span></button>
         </div>
       </header>
       <aside class="ledger">
-        <button class="fold" data-act="fold" aria-label="Kontorbuch ein- oder ausklappen" title="Kontorbuch ein- oder ausklappen"></button>
-        <section class="goals"></section>
-        <div class="hint" hidden></div>
-        <nav class="fleet" aria-label="Flotte"></nav>
-        <div class="ledger-body" aria-live="polite"></div>
+        <div class="ledger-top">
+          <nav class="fleet" aria-label="Flotte"></nav>
+          <button class="fold" data-act="fold" aria-label="Kontorbuch ein- oder ausklappen" title="Kontorbuch ein- oder ausklappen" aria-expanded="true">${icon('fold')}</button>
+        </div>
+        <div class="ledger-scroll">
+          <section class="goals"></section>
+          <div class="hint" hidden></div>
+          <div class="ledger-body" aria-live="polite"></div>
+        </div>
       </aside>
       <div class="toasts"></div>
 `,
@@ -302,6 +317,25 @@ export class Hud {
       contracts: root.querySelector('[data-badge="contracts"]')!,
       news: root.querySelector('[data-badge="news"]')!,
     };
+    // Höhe der Kopfzeile als CSS-Variable, damit das breite Kontorbuch (Karte) und die Meldungen darunter beginnen
+    const topbar = root.querySelector<HTMLElement>('.topbar')!;
+    const views = root.querySelector<HTMLElement>('.views')!;
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => {
+        root.style.setProperty('--topbar-h', `${topbar.offsetHeight}px`);
+        markOverflow(views);
+      }).observe(topbar);
+      new ResizeObserver(() => this.revealTab(false)).observe(root.querySelector('.ledger')!);
+    }
+    // seitlich rollbare Leisten: beim Rollen den Verlauf am Rand nachführen (scroll steigt nicht auf, darum capture)
+    root.addEventListener(
+      'scroll',
+      (ev) => {
+        const t = ev.target;
+        if (t instanceof HTMLElement && (t.classList.contains('tabs') || t.classList.contains('views'))) markOverflow(t);
+      },
+      true,
+    );
 
     // angefangene Eingaben im Routen-Editor merken, damit sie das Neuzeichnen überstehen
     const markDirty = (ev: Event) => {
@@ -356,6 +390,7 @@ export class Hud {
         case 'fold':
           this.folded = !this.folded;
           this.root.querySelector('.ledger')!.classList.toggle('folded', this.folded);
+          btn.setAttribute('aria-expanded', String(!this.folded));
           break;
         case 'hintClose':
           this.hintDismissed = this.hintText;
@@ -443,7 +478,8 @@ export class Hud {
     const done = goals.filter((g) => g.done).length;
     setHtml(
       this.goals,
-      `<button class="goals-head" data-act="goals" title="Alle Ziele zeigen"><span>${title}</span><small>${done}/${goals.length} Ziele ${this.goalsOpen ? '▴' : '▾'}</small></button>
+      `<button class="goals-head" data-act="goals" title="Alle Ziele zeigen" aria-expanded="${this.goalsOpen}"><span>${title}</span><small>${done} von ${goals.length} Zielen ${this.goalsOpen ? '▴' : '▾'}</small></button>
+      <div class="goal-bar" role="progressbar" aria-valuenow="${done}" aria-valuemax="${goals.length}"><div style="width:${goals.length ? Math.round((done / goals.length) * 100) : 0}%"></div></div>
       <ul class="goal-list">${goals
         .map((g, i) => {
           // eingeklappt: nur die nächsten zwei offenen Ziele
@@ -471,11 +507,11 @@ export class Hud {
       `
       <span><small>Kasse</small><b>${fmt(state.money)} Taler</b></span>
       <span title="${epochProgressText(state)}"><small>${SEASON_NAME[season(day(state))]} · Jahr ${year(day(state))}</small><b>${dayInSeason(day(state))}. Tag, ${clock(state.hour)}</b></span>
-      <span class="river-stat" title="Pegel und Wind bestimmen, welche Schiffe wie schnell fahren"><small>Fluss</small><b>${state.waterLevel >= 0 ? '+' : '−'}${Math.abs(state.waterLevel).toFixed(1).replace('.', ',')} m${state.ice ? ', Eis' : ''} · Wind ${windText(w)}</b></span>${events}`,
+      <span class="river-stat" title="Pegel und Wind bestimmen, welche Schiffe wie schnell fahren"><small>Fluss</small><b>${state.waterLevel >= 0 ? '+' : '−'}${Math.abs(state.waterLevel).toFixed(1).replace('.', ',')} m${state.ice ? ', Eis' : ''}<span class="hide-narrow"> · Wind ${windText(w)}</span></b></span>${events}`,
     );
     this.newsKey = state.news[0] ? `${state.news[0].day}|${state.news[0].text}` : '';
     if (this.view === 'news') this.newsSeen = this.newsKey;
-    this.navBadges.news.textContent = this.newsKey && this.newsKey !== this.newsSeen ? '•' : '';
+    this.navBadges.news.classList.toggle('dot', !!this.newsKey && this.newsKey !== this.newsSeen);
     const offers = state.contracts.filter((c) => !c.accepted).length;
     this.navBadges.contracts.textContent = offers ? String(offers) : '';
     this.root.querySelectorAll<HTMLButtonElement>('.views .btn').forEach((b) => b.classList.toggle('on', b.dataset.view === this.view));
@@ -494,6 +530,21 @@ export class Hud {
     }
     // Nur neu aufbauen, was sich geändert hat, sonst gehen Klicks während einer Fahrt verloren
     keepForms(this.body, () => setHtml(this.body, this.renderShip(state, ship)));
+    this.revealTab();
+  }
+
+  /** Aktiven Reiter in die Sicht rollen (auf schmalen Bildschirmen läuft die Reiterleiste über den Rand) */
+  private revealTab(scroll = true): void {
+    const tabs = this.body.querySelector<HTMLElement>('.tabs');
+    if (!tabs) return;
+    const on = tabs.querySelector<HTMLElement>('.tab.on');
+    if (on && scroll) {
+      const left = on.offsetLeft - 16;
+      const right = on.offsetLeft + on.offsetWidth + 16;
+      if (left < tabs.scrollLeft) tabs.scrollLeft = Math.max(0, left);
+      else if (right > tabs.scrollLeft + tabs.clientWidth) tabs.scrollLeft = right - tabs.clientWidth;
+    }
+    markOverflow(tabs);
   }
 
   private townName(id: string): string {
@@ -505,8 +556,9 @@ export class Hud {
       .map((s) => {
         const where = s.port ? `in ${this.townName(s.port)}` : `nach ${this.townName(s.voyage!.to)}`;
         const auto = s.route?.active ? '<i class="auto" title="fährt eine Handelsroute">R</i>' : '';
-        return `<button class="chip ${s.id === current.id && this.view === 'ship' ? 'on' : ''}" data-act="select" data-ship="${s.id}">
-          <b>${s.name}${auto}</b><small>${shipClass(s).name}, ${where}</small></button>`;
+        const dot = s.port ? '' : (s.voyage?.aground ?? 0) > 0 ? 'bad' : 'sea';
+        return `<button class="chip ${s.id === current.id && this.view === 'ship' ? 'on' : ''}" data-act="select" data-ship="${s.id}" aria-pressed="${s.id === current.id && this.view === 'ship'}">
+          ${icon('ship')}<b>${s.name}${auto}</b><small><i class="dot ${dot}"></i>${shipClass(s).name}, ${where}</small></button>`;
       })
       .join('');
   }
@@ -595,8 +647,8 @@ export class Hud {
           <td class="num ${margin}">${sp}${avg !== null ? `<small>ø ${avg}</small>` : ''}</td>
           <td class="num">${aboard}${freshText(slot) ? `<small>${freshText(slot)}</small>` : ''}</td>
           <td class="acts trade">
-            <button class="btn" data-act="buy" data-good="${g.id}" data-n="1" ${canBuy ? '' : 'disabled'} title="1 t kaufen">+1</button>
-            <button class="btn" data-act="buy" data-good="${g.id}" data-n="10" ${canBuy ? '' : 'disabled'} title="10 t kaufen">+10</button>
+            <span class="pair"><button class="btn" data-act="buy" data-good="${g.id}" data-n="1" ${canBuy ? '' : 'disabled'} title="1 t kaufen">+1</button>
+            <button class="btn" data-act="buy" data-good="${g.id}" data-n="10" ${canBuy ? '' : 'disabled'} title="10 t kaufen">+10</button></span>
             ${aboard ? `<button class="btn sellall" data-act="sell" data-good="${g.id}" data-n="all" title="alles verkaufen">Verkaufen</button>` : ''}
           </td>
         </tr>`;
