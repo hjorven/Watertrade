@@ -369,6 +369,8 @@ export interface GameState {
   allowedShips: string[];
   stats: {
     delivered: Record<string, Record<string, number>>; // Stadt -> Ware -> verkaufte Tonnen
+    /** Stadt -> Ware -> verkaufte Tonnen, die kurz vorher in derselben Stadt gekauft waren (zählen nicht als Lieferung) */
+    resold?: Record<string, Record<string, number>>;
     rafts: number; // zerlegte Flöße
     trips: number;
     contracts: number; // erfüllte Aufträge

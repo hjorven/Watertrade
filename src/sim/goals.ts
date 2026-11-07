@@ -25,7 +25,7 @@ export function goalProgress(state: GameState, goal: Goal): { value: number; tar
     case 'steamDays':
       return { value: steamDays(state), target: goal.days };
     case 'deliver':
-      return { value: state.stats.delivered[goal.town]?.[goal.good] ?? 0, target: goal.amount };
+      return { value: netDelivered(state, goal.town, goal.good), target: goal.amount };
     case 'rafts':
       return { value: state.stats.rafts, target: goal.count };
     case 'kontore':
@@ -64,9 +64,18 @@ export function goalProgress(state: GameState, goal: Goal): { value: number; tar
   }
 }
 
-/** Vom Spieler insgesamt verkaufte Tonnen einer Ware, über alle Städte */
+/**
+ * In eine Stadt gebrachte Tonnen: dort verkauft, abzüglich dessen, was kurz vorher dort gekauft wurde.
+ * Sonst ließe sich ein Lieferziel im Hafen durch Kaufen und sofortiges Zurückverkaufen erfüllen.
+ */
+export function netDelivered(state: GameState, town: string, good: string): number {
+  const sold = state.stats.delivered[town]?.[good] ?? 0;
+  return Math.max(0, sold - (state.stats.resold?.[town]?.[good] ?? 0));
+}
+
+/** Vom Spieler insgesamt an andere Orte gebrachte und dort verkaufte Tonnen einer Ware */
 export function soldBy(state: GameState, good: string): number {
-  return Object.values(state.stats.delivered).reduce((sum, d) => sum + (d[good] ?? 0), 0);
+  return Object.keys(state.stats.delivered).reduce((sum, town) => sum + netDelivered(state, town, good), 0);
 }
 
 export function goalDone(state: GameState, goal: Goal): boolean {

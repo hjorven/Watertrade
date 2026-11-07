@@ -103,6 +103,12 @@ function sellFrom(
   if (slot.amount < 0.001) delete cargo[goodId];
   // Lieferung in die Knappheit bringt Ansehen
   noteSale(state, town, goodId, amount, m.stock, m.target);
+  // eben hier gekaufte Ware zurückverkaufen ist keine Lieferung (Lieferziele in Herausforderungen)
+  const resold = Math.min(amount, recentlyBought(state, town, goodId));
+  if (resold > 0) {
+    const r = ((state.stats.resold ??= {})[town] ??= {});
+    r[goodId] = (r[goodId] ?? 0) + resold;
+  }
   consumeBought(state, town, goodId, amount);
   m.stock += amount;
   state.money += revenue;

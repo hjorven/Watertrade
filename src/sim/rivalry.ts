@@ -173,6 +173,9 @@ function applyRetaliation(state: GameState, r: RivalState): boolean {
     if (amount <= 0) return false;
     m.stock += amount;
     r.money -= Math.round(amount * lossPerT);
+    // zählt wie ein Verkauf der Konkurrenz (Marktanteil in Herausforderungen)
+    const sold = (state.stats.rivalSold ??= {});
+    sold[v.good] = (sold[v.good] ?? 0) + amount;
   } else {
     let amount = Math.min(available(m) - 3, want);
     if (amount <= 0) return true;

@@ -17,7 +17,7 @@ import { fairWage, LOYALTY_WARN, setCaptainWage } from './captains.ts';
 import { challengeGame } from './challenge.ts';
 import { acceptContract, deliverContract, MAX_ACCEPTED } from './contracts.ts';
 import { buyCost, price, sellRevenue } from './economy.ts';
-import { buyShip, dismantleRaft, hasYard, hireCaptain, repair, setRoute, shipAllowed } from './fleet.ts';
+import { buyShip, dismissCaptain, dismantleRaft, hasYard, hireCaptain, repair, setRoute, shipAllowed } from './fleet.ts';
 import { advance, buy, capacityOf, cargoLoad, day, depart, effectiveType, kontorBuy, kontorSell, planRoute, sell, type GameState, type Ship } from './game.ts';
 import { goalDone, goalProgress } from './goals.ts';
 import { betriebeIn, buildBetrieb, buildingAllowed, buildKontor } from './house.ts';
@@ -66,7 +66,8 @@ function goalBonus(state: GameState, map: MapDef, goals: Goal[], open: boolean[]
     if (!open[i]) return;
     if (g.type === 'deliver' && g.town === to && g.good === good) {
       const p = goalProgress(state, g);
-      const left = p.target - p.value - inTransit(state, to, good);
+      // ein paar Tonnen Spielraum: Dampfer verheizen unterwegs Kohle aus dem Laderaum
+      const left = p.target - p.value - inTransit(state, to, good) + 3;
       bonus += Math.max(0, Math.min(amount, left)) * weight;
     } else if (g.type === 'share' && g.good === good) {
       const p = goalProgress(state, g);
@@ -150,7 +151,7 @@ function handleShip(state: GameState, map: MapDef, goals: Goal[], open: boolean[
   if (t && t.score > 0) {
     buy(state, ship.id, t.good, t.amount);
     // zu tief für die Fahrt oder zu wenig Geld für Zoll und Kohle: Ladung verringern
-    while (cargoLoad(ship) > 0 && !depart(state, map, ship.id, t.to)) sell(state, ship.id, t.good, 5);
+    while (cargoLoad(ship) > 0 && !depart(state, map, ship.id, t.to)) if (!sell(state, ship.id, t.good, 5).ok) break;
     if (!ship.port) return;
   }
   // nichts Lohnendes hier: leer dorthin fahren, wo das beste Geschäft wartet
@@ -180,7 +181,7 @@ function handleRaft(state: GameState, map: MapDef, goals: Goal[], open: boolean[
   if (t && t.score > 0) buy(state, ship.id, t.good, t.amount);
   const dest = t?.to ?? farthestDownstream(state, map, ship);
   if (dest) {
-    while (cargoLoad(ship) > 0 && !depart(state, map, ship.id, dest)) sell(state, ship.id, t!.good, 5);
+    while (cargoLoad(ship) > 0 && !depart(state, map, ship.id, dest)) if (!t || !sell(state, ship.id, t.good, 5).ok) break;
     if (!ship.port || depart(state, map, ship.id, dest)) rafts.add(ship.id);
   }
 }
@@ -283,11 +284,14 @@ function assignRoute(state: GameState, map: MapDef, goals: Goal[], open: boolean
     if (!cap) continue;
     const t = bestTrade(state, map, goals, open, { ...ship, cargo: {} }, ship.port);
     if (!t || t.score <= 0) continue;
+    // die Hinfahrt muss den Lohn für Hin- und Rückweg gut tragen, sonst frisst die Route die Kasse leer
+    if (t.score * t.hours < cap.wage * ((2 * t.hours) / 24 + 1) * 1.5) continue;
     if (!hireCaptain(state, ship.id, cap.id).ok) continue;
     sellAll(state, ship);
     setRoute(state, ship.id, {
       stops: [
-        { town: t.from, orders: [{ kind: 'kaufen', good: t.good, amount: 0, limit: Math.ceil(base(t.good) * 1.2) }] },
+        // Höchstpreis nach dem heutigen Markt: knapp über dem, was die Ladung heute kostet
+        { town: t.from, orders: [{ kind: 'kaufen', good: t.good, amount: 0, limit: Math.ceil(buyCost(base(t.good), state.markets[t.from][t.good], t.amount) / t.amount * 1.1) }] },
         { town: t.to, orders: [{ kind: 'verkaufen', good: t.good, amount: 0, limit: 0 }] },
       ],
       next: 0,
@@ -363,6 +367,9 @@ export function playChallenge(map: MapDef, c: Challenge, seed: number, opts: Bot
       if (state.money >= p.cost + 200) startProject(state, g.id);
     }
     if (goals.some((g, i) => od[i] && g.type === 'routes')) assignRoute(state, map, goals, od);
+    // Routenziel erreicht: Die Kapitäne gehen wieder von Bord, der Bot fährt selbst und spart den Lohn.
+    // Feste Routen laufen sonst auch dann weiter, wenn sie im Herbst nichts mehr abwerfen.
+    else if (goals.some((g) => g.type === 'routes')) for (const s of state.ships) if (s.port && !s.voyage && s.route?.active) dismissCaptain(state, s.id);
     // Schiffe zukaufen, solange genug Zeit bleibt, dass sie sich lohnen
     const shipGoal = goals.some((g, i) => od[i] && g.type === 'ships');
     const moneyOnly = goals.every((g, i) => !od[i] || g.type === 'money');
@@ -388,3 +395,27 @@ export function playChallenge(map: MapDef, c: Challenge, seed: number, opts: Bot
     money: Math.round(state.money),
   };
 }
+
+/** Spielweise, mit der der Bot die jeweilige Herausforderung schafft (für den Machbarkeitstest) */
+export const BOT_STRATEGY: Record<string, BotOptions> = {
+  'h-floss': { maxShips: 2 },
+  'h-auftrag': { maxShips: 2 },
+  'h-kontor': { maxShips: 2 },
+  'h-dampf': { build: true, maxShips: 3 },
+  'h-rang': { build: true, maxShips: 3 },
+  'h-duerre': { maxShips: 2 },
+  'h-monopol': { maxShips: 6 },
+  'h-einschiff': { build: true },
+  'h-pest': { maxShips: 2 },
+  'h-eisgang': { maxShips: 2 },
+  'h-zollkrieg': { maxShips: 2 },
+  'h-flut': { maxShips: 3 },
+  'h-bruecke': { maxShips: 2 },
+  'h-kohle': { maxShips: 2 },
+  'h-motor': { build: true, maxShips: 3 },
+  'h-frisch': { maxShips: 2 },
+  'h-aufschwung': { build: true, maxShips: 3 },
+  'h-pfennig': { maxShips: 2 },
+  'h-kapitaene': { build: true, maxShips: 3 },
+  'h-erzbach': { maxShips: 2 },
+};

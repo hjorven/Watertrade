@@ -351,7 +351,7 @@ export class Menu {
       ${c.intro.map((p) => `<p>${esc(p)}</p>`).join('')}
       <h3>Ziele</h3>
       <ul class="goal-list">${c.goals.map((g) => `<li>${esc(g.text)}</li>`).join('')}</ul>
-      ${c.deadlineDays ? `<p class="fine">Zeit: ${c.deadlineDays} Tage, also ${c.deadlineDays / 30} Jahreszeiten</p>` : ''}
+      ${c.deadlineDays ? `<p class="fine">Zeit: ${c.deadlineDays} Tage${seasonsText(c.deadlineDays)}</p>` : ''}
       <div class="menu-buttons"><button class="btn primary wide" data-menu="${challenge ? 'beginChallenge' : 'begin'}" data-id="${c.id}">Leinen los</button></div>
       <p class="fine"><button class="link" data-menu="${challenge ? 'challenges' : 'campaign'}">Zurück</button></p>`);
   }
@@ -413,4 +413,13 @@ export class Menu {
       <div class="menu-buttons">${list || '<p>Keine Spielstände.</p>'}</div>
       <p class="fine"><button class="link" data-menu="${info.inGame ? 'resume' : 'main'}">Zurück</button></p>`);
   }
+}
+
+/** Frist in Jahreszeiten zu je 30 Tagen, nur wenn es ungefähr aufgeht */
+export function seasonsText(days: number): string {
+  const n = days / 30;
+  if (n < 1) return '';
+  const whole = Math.round(n);
+  const prefix = Math.abs(n - whole) < 0.01 ? 'also' : 'rund';
+  return `, ${prefix} ${whole === 1 ? 'eine Jahreszeit' : `${whole} Jahreszeiten`}`;
 }

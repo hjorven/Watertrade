@@ -5,15 +5,23 @@ import { VALLEY } from '../data/maps/valley.ts';
 import { PROJECT_BY_ID } from '../data/projects.ts';
 import { SHIPS } from '../data/ships.ts';
 import { challengeGame } from './challenge.ts';
-import { playChallenge, type BotOptions } from './challenge-bot.ts';
-import { advance, buyShip, day } from './game.ts';
+import { BOT_STRATEGY as STRATEGY, playChallenge } from './challenge-bot.ts';
+import { advance, buy, buyShip, day, sell } from './game.ts';
 import { goalProgress } from './goals.ts';
 import { rivalWorth } from './rivals.ts';
+import { seasonsText } from '../ui/menu.ts';
 import { deserialize, serialize, SAVE_VERSION } from './save.ts';
 
 const town = (id: string) => VALLEY.towns.some((t) => t.id === id);
 
 describe('Herausforderungen: Aufbau', () => {
+  it('Frist in Jahreszeiten ohne krumme Zahlen', () => {
+    expect(seasonsText(25)).toBe('');
+    expect(seasonsText(30)).toBe(', also eine Jahreszeit');
+    expect(seasonsText(120)).toBe(', also 4 Jahreszeiten');
+    expect(seasonsText(70)).toBe(', rund 2 Jahreszeiten');
+  });
+
   it('es gibt 20, mit fortlaufenden Nummern', () => {
     expect(CHALLENGES.length).toBe(20);
     expect(CHALLENGES.map((c) => c.number)).toEqual(CHALLENGES.map((_, i) => i + 1));
@@ -74,19 +82,45 @@ describe('Herausforderungen: Aufbau', () => {
 
   it('Marktanteil zählt eigene gegen fremde Tonnen', () => {
     const c = CHALLENGES.find((x) => x.id === 'h-monopol')!;
-    const goal = c.goals[0];
+    const goal = { type: 'share', good: 'holz', percent: 70, min: 800, text: '' } as const;
     const s = challengeGame(VALLEY, c, 1);
     s.stats.delivered = { niedermuend: { holz: 1600 } };
     s.stats.rivalSold = { holz: 900 };
     // 70 % brauchen bei 900 fremden Tonnen 2100 eigene
     expect(goalProgress(s, goal)).toEqual({ value: 1600, target: 2100 });
+    // wenig fremder Handel: dann gilt die Mindestmenge
+    s.stats.rivalSold = { holz: 100 };
+    expect(goalProgress(s, goal).target).toBe(800);
+    // die Herausforderung selbst nutzt dieselbe Formel
+    expect(c.goals[0].type).toBe('share');
   });
 
   it('Konkurrenz wirkt nach einem Einkauf nicht ärmer', () => {
     const s = challengeGame(VALLEY, CHALLENGES.find((x) => x.id === 'h-rang')!, 1);
     const before = s.rivals.map(rivalWorth);
-    advance(s, VALLEY, 2);
+    advance(s, VALLEY, 24);
+    // nach einem Tag haben Schiffe der Konkurrenz Ladung an Bord
+    expect(s.rivals.some((r) => r.ships.some((x) => x.cargo))).toBe(true);
     s.rivals.forEach((r, i) => expect(rivalWorth(r)).toBeGreaterThan(before[i] * 0.9));
+  });
+
+  it('Kaufen und sofort Zurückverkaufen erfüllt keine Liefer- oder Marktanteilsziele', () => {
+    for (const id of ['h-monopol', 'h-duerre']) {
+      const c = CHALLENGES.find((x) => x.id === id)!;
+      const s = challengeGame(VALLEY, c, 1);
+      s.money = 100000;
+      const ship = s.ships[0];
+      const g0 = c.goals[0];
+      if (g0.type === 'deliver') ship.port = g0.town;
+      const good = c.goals[0].type === 'share' || c.goals[0].type === 'deliver' ? c.goals[0].good : 'holz';
+      // im eigenen Hafen kaufen und gleich wieder verkaufen
+      s.markets[ship.port!][good] ??= { good, stock: 200, target: 80 };
+      for (let i = 0; i < 20; i++) {
+        buy(s, ship.id, good, 40);
+        sell(s, ship.id, good, 40);
+      }
+      expect(goalProgress(s, c.goals[0]).value, id).toBe(0);
+    }
   });
 });
 
@@ -95,28 +129,6 @@ describe('Herausforderungen: Aufbau', () => {
  * Je Herausforderung die Spielweise, mit der er es schafft (Betriebe bauen, Flottengröße).
  * Ermittelt mit allen vier Spielweisen, Ergebnisse im PR beschrieben.
  */
-const STRATEGY: Record<string, BotOptions> = {
-  'h-floss': { maxShips: 2 },
-  'h-auftrag': { maxShips: 2 },
-  'h-kontor': { maxShips: 2 },
-  'h-dampf': { build: true, maxShips: 3 },
-  'h-rang': { build: true, maxShips: 3 },
-  'h-duerre': { maxShips: 2 },
-  'h-monopol': { maxShips: 6 },
-  'h-einschiff': { build: true },
-  'h-pest': { maxShips: 2 },
-  'h-eisgang': { maxShips: 2 },
-  'h-zollkrieg': { maxShips: 2 },
-  'h-flut': { maxShips: 3 },
-  'h-bruecke': { maxShips: 2 },
-  'h-kohle': { maxShips: 2 },
-  'h-motor': { build: true, maxShips: 3 },
-  'h-frisch': { maxShips: 2 },
-  'h-aufschwung': { build: true, maxShips: 3 },
-  'h-pfennig': { maxShips: 2 },
-  'h-kapitaene': { build: true, maxShips: 3 },
-  'h-erzbach': { maxShips: 2 },
-};
 
 describe('Herausforderungen: Machbarkeit mit dem Prüf-Bot', () => {
   for (const c of CHALLENGES) {
