@@ -410,6 +410,18 @@ body {
   }
 }
 
+/* Mittlere Breiten (Tablet quer, kleine Laptops): neben dem Kontorbuch bliebe der Kopfzeile zu wenig Platz,
+   darum darf sie die ganze Breite nutzen und das Kontorbuch beginnt darunter. */
+@media (min-width: 721px) and (max-width: 1279px) {
+  .topbar {
+    max-width: calc(100% - 24px);
+  }
+
+  .ledger {
+    top: calc(var(--topbar-h, 96px) + 24px);
+  }
+}
+
 /* Flotte: ein Chip je Schiff, in einer Zeile, bei vielen Schiffen seitlich rollbar */
 .fleet {
   display: flex;
