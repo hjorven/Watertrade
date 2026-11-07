@@ -124,15 +124,6 @@ describe('Treidelgeld ab der Motorzeit (freies Spiel)', () => {
     expect(up?.ok && up.voyage.towFee).toBeFalsy();
   });
 
-  it('auch der Schmuggler zahlt Treidelgeld, aber keinen Zoll', () => {
-    const s = towGame(3);
-    s.ships[0].captain = { id: 1, name: 'Test', trait: 'schmuggler', wage: 0, hire: 0 };
-    const p = planVoyage(s, VALLEY, s.ships[0].id, 'oberau');
-    if (!p?.ok) throw new Error('Fahrt nicht möglich');
-    expect(p.voyage.towFee).toBeGreaterThan(0);
-    expect(p.voyage.toll).toBe(p.voyage.towFee);
-  });
-
   it('ohne Geld nennt die Abfahrt das Treidelgeld', () => {
     const s = towGame(3);
     s.money = 0;

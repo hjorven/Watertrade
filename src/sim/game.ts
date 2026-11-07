@@ -18,7 +18,7 @@ import { tickStanding, townNews, townOptions } from './standing.ts';
 import { observe, tickMarketInfo, tripArrive, tripSail } from './market-info.ts';
 import { closeSteamDay, logSteam } from './steam.ts';
 import { tickCanal } from './canal.ts';
-import { closeFinanceDay, sailFinance, tickFinance } from './finance.ts';
+import { closeFinanceDay, sailPerils, tickFinance } from './finance.ts';
 import { initialMarket, initialTown, marketDepth, tickTown } from './towns.ts';
 import { movingHours, wearFactor, wearRate } from './voyage.ts';
 import { voyageProgress } from './navigation.ts';
@@ -179,11 +179,31 @@ export function upgradeState(state: GameState, map: MapDef): GameState {
     if (!s.dieselTanks && SHIPS[ship.type]?.diesel && !ship.bunker) ship.bunker = SHIPS[ship.type].bunker ?? 0;
   }
   s.dieselTanks = true;
+  dropRemovedMechanics(s);
   addMissingMarkets(s, map);
   if (!Object.keys(s.tavern).length) refreshTavern(s, map);
   // nicht neu anlegen, wenn alle Häuser pleite oder übernommen sind
   if (s.rivalsActive && !s.rivals.length && !s.housesGone?.length) s.rivals = initialRivals(s);
   return s;
+}
+
+/**
+ * Gestrichene Mechaniken (Nov 2026) aus alten Spielständen entfernen: Versicherung, Schmuggler,
+ * Winterplan der Handelsrouten, Anteile an fremden Häusern.
+ */
+function dropRemovedMechanics(s: GameState): void {
+  const fixCaptain = (c: { trait: string; trait2?: string } | null | undefined) => {
+    if (!c) return;
+    if (c.trait === 'schmuggler') c.trait = 'schnell';
+    if (c.trait2 === 'schmuggler') c.trait2 = c.trait === 'haendler' ? 'vorsichtig' : 'haendler';
+  };
+  for (const ship of s.ships) {
+    delete (ship as { insured?: boolean }).insured;
+    fixCaptain(ship.captain);
+    if (ship.voyage) delete (ship.voyage as { evaded?: number }).evaded;
+    if (ship.route) for (const k of ['winterStops', 'winterSeasons', 'plan']) delete (ship.route as unknown as Record<string, unknown>)[k];
+  }
+  for (const list of Object.values(s.tavern)) list.forEach(fixCaptain);
 }
 
 /** Konkurrenz zuschalten, etwa ab Kapitel 2 */
@@ -309,8 +329,8 @@ function step(state: GameState, map: MapDef, hours: number, events: GameEvent[])
       }
       // Fahrtenbuch: Diesel zum Grundpreis anrechnen (Kohle rechnet tripSail selbst)
       tripSail(ship, dt, (cls.diesel ?? 0) * dt * (GOOD_BY_ID.get('diesel')?.base ?? 0), moved.real);
-      // Versicherungsprämie und Gefahren unterwegs (Eisgang, Ladung über Bord)
-      sailFinance(state, map, ship, state.hour - hours, dt);
+      // Gefahren unterwegs (Eisgang, Ladung über Bord)
+      sailPerils(state, ship, state.hour - hours, dt);
       // ohne Kühlraum verdirbt Fisch, Brot und Bier unterwegs
       if (!cls.fresh) {
         for (const [g, slot] of Object.entries(ship.cargo)) {

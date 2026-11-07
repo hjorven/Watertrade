@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_WAGE, TRAITS, type Trait } from '../data/captains.ts';
 import { VALLEY } from '../data/maps/valley.ts';
-import { captainArrived, fairWage, LOYALTY_POACH, LOYALTY_START, PROMISE_DAYS, setCaptainWage, SMUGGLE_FINE, tickCaptains } from './captains.ts';
+import { captainArrived, fairWage, LOYALTY_POACH, LOYALTY_START, PROMISE_DAYS, setCaptainWage, tickCaptains } from './captains.ts';
 import { dismissCaptain, hireCaptain, newCaptain } from './fleet.ts';
-import { advance, buy, depart, newGame, type GameState } from './game.ts';
+import { advance, depart, newGame, type GameState } from './game.ts';
 import type { Captain, Voyage } from './state.ts';
 import { planVoyage } from './voyage.ts';
 
@@ -18,7 +18,7 @@ function withCaptain(s: GameState, trait: Trait, extra: Partial<Captain> = {}): 
 }
 
 /** Eine Fahrt von Oberau nach Niedermünd über den ganzen Strom (190 km) */
-function longVoyage(evaded = 0): Voyage {
+function longVoyage(): Voyage {
   const segs = ['oberau-kessel', 'kessel-muehl', 'muehl-alten', 'alten-weiden', 'weiden-nieder'];
   return {
     from: 'oberau',
@@ -26,7 +26,6 @@ function longVoyage(evaded = 0): Voyage {
     legs: segs.map((seg) => ({ seg, from: '', to: '', hours: 5, downstream: true })),
     hours: 25,
     elapsed: 25,
-    evaded,
   };
 }
 
@@ -50,13 +49,12 @@ describe('Kapitäne: Lohn und Seltenheit', () => {
       count[t] = (count[t] ?? 0) + 1;
     }
     expect(count.vorsichtig).toBeGreaterThan(count.haendler * 2);
-    expect(count.vorsichtig).toBeGreaterThan(count.schmuggler * 2);
   });
 
   it('Teurere Eigenschaften verlangen mehr Lohn', () => {
     expect(fairWage({ trait: 'haendler' })).toBeGreaterThan(fairWage({ trait: 'vorsichtig' }));
     expect(fairWage({ trait: 'vorsichtig', trait2: 'haendler', km: 500 })).toBeGreaterThan(fairWage({ trait: 'vorsichtig' }));
-    expect(fairWage({ trait: 'haendler', trait2: 'schmuggler', km: 5000 })).toBeLessThanOrEqual(MAX_WAGE);
+    expect(fairWage({ trait: 'haendler', trait2: 'schnell', km: 5000 })).toBeLessThanOrEqual(MAX_WAGE);
   });
 
   it('Wer in die Kneipe zurückgeht, verlangt wieder seinen Wert', () => {
@@ -96,14 +94,14 @@ describe('Kapitäne: Erfahrung', () => {
     expect(s.ships[0].captain?.km).toBe(40);
   });
 
-  it('Schmuggeln wird nie als zweite Eigenschaft gelernt', () => {
+  it('Die zweite Eigenschaft ist nie dieselbe wie die erste', () => {
     const s = fresh();
     for (let i = 0; i < 200; i++) {
       const c = withCaptain(s, 'vorsichtig');
       s.ships[0].port = 'niedermuend';
       for (let k = 0; k < 3; k++) captainArrived(s, VALLEY, s.ships[0], longVoyage());
       expect(c.trait2).toBeDefined();
-      expect(c.trait2).not.toBe('schmuggler');
+      expect(c.trait2).not.toBe('vorsichtig');
     }
   });
 
@@ -226,42 +224,5 @@ describe('Kapitäne: Treue und Abwerbung', () => {
     expect(c.loyalty).toBeGreaterThan(70);
     expect(s.ships[0].captain).toBe(c);
     expect(s.news.some((n) => n.text.includes('Lohnordnung'))).toBe(true);
-  });
-});
-
-describe('Kapitäne: Schmuggel', () => {
-  it('Der Schmuggler zahlt keinen Zoll, merkt sich aber, was er umgeht', () => {
-    const s = fresh();
-    s.events.push({ id: 99, kind: 'zoll', from: 1, until: 99, seg: 'oberau-kessel', value: 30 });
-    withCaptain(s, 'schmuggler');
-    const plan = planVoyage(s, VALLEY, 1, 'kesselbrueck');
-    expect(plan?.ok).toBe(true);
-    if (plan?.ok) {
-      expect(plan.voyage.toll).toBe(0);
-      expect(plan.voyage.evaded).toBe(30);
-    }
-  });
-
-  it('Bei einer Kontrolle gibt es Strafe und Beschlagnahme, meistens aber nicht', () => {
-    let caught = 0;
-    for (let seed = 1; seed <= 400; seed++) {
-      const s = fresh();
-      s.rng = seed * 7919;
-      withCaptain(s, 'schmuggler');
-      buy(s, 1, 'holz', 20);
-      const money = s.money;
-      s.ships[0].port = 'niedermuend';
-      const news = captainArrived(s, VALLEY, s.ships[0], longVoyage(30));
-      if (news.some((n) => n.text.includes('Zollkontrolle'))) {
-        caught++;
-        expect(s.money).toBe(money - 30 * SMUGGLE_FINE);
-        expect(s.ships[0].cargo.holz.amount).toBe(10);
-      } else {
-        expect(s.money).toBe(money);
-        expect(s.ships[0].cargo.holz.amount).toBe(20);
-      }
-    }
-    expect(caught).toBeGreaterThan(15);
-    expect(caught).toBeLessThan(80);
   });
 });

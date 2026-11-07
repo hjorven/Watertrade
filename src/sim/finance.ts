@@ -4,10 +4,7 @@ import { hasTrait } from '../data/captains.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import { SHIPS } from '../data/ships.ts';
 import { playerWorth } from './house.ts';
-import { segmentDepth } from './river.ts';
-import { TIGHT_DEPTH, voyagePosition } from './voyage.ts';
-import { effectiveSegments } from './works.ts';
-import { addNews, day, effectiveDraft, fail, hasUpgrade, shipClass, type GameState, type NewsItem, type Ship, type TradeResult } from './state.ts';
+import { addNews, day, fail, hasUpgrade, type GameState, type NewsItem, type Ship, type TradeResult } from './state.ts';
 
 /*
  * Stadtbank und Flussversicherung (Ausbauplan 6.1 und 6.3).
@@ -47,10 +44,6 @@ export interface FinanceLedger {
   day: number;
   /** gestern an die Bank gezahlt */
   repaid: number;
-  /** gestern gezahlte Versicherungsprämien */
-  premiums: number;
-  /** gestern ausgezahlte Schäden */
-  payouts: number;
 }
 
 export interface Finance {
@@ -59,12 +52,7 @@ export interface Finance {
   banUntil: number;
   /** laufende Summen seit Mitternacht */
   repaidToday: number;
-  premiumsToday: number;
-  payoutsToday: number;
   ledger: FinanceLedger;
-  /** Summen seit Spielbeginn */
-  premiumsTotal: number;
-  payoutsTotal: number;
 }
 
 /* ---------- Werte ---------- */
@@ -103,11 +91,6 @@ export const LOAN_TERMS: LoanTerm[] = [
 
 export const LOAN_AMOUNTS = [1000, 2500, 5000, 10000, 25000, 50000];
 
-/** Gefahren, gegen die die Versicherung zahlt */
-export type Peril = 'ladung' | 'grund' | 'eis';
-
-export const PERIL_NAME: Record<Peril, string> = { ladung: 'Ladungsverlust', grund: 'Grundberührung', eis: 'Eisgang' };
-
 /** Chance je Fahrstunde auf Eisgang, solange Treibeis auf dem Fluss ist */
 export const ICE_CHANCE = 0.012;
 /** Zustand, den ein Eisstoß kostet: zwischen ICE_DAMAGE und dem Doppelten */
@@ -116,15 +99,6 @@ export const ICE_DAMAGE = 0.04;
 export const ICE_CARGO_CHANCE = 0.4;
 /** Chance je Fahrstunde im Hochwasser, dass Ladung über Bord geht */
 export const FLOOD_CHANCE = 0.005;
-/** Geschätzte Chance je Stunde auf Grundberührung in knappem Wasser (für die Prämie) */
-export const GROUND_RISK = 0.05;
-/** Geschätzter Zustandsverlust einer Grundberührung (für die Prämie) */
-export const GROUND_DAMAGE = 0.03;
-/** Aufschlag der Versicherung auf den erwarteten Schaden */
-export const PREMIUM_LOADING = 1.3;
-/** Grundprämie je Fahrstunde: Anteil am Schiffspreis und am Ladungswert */
-export const PREMIUM_HULL_BASE = 0.00003;
-export const PREMIUM_CARGO_BASE = 0.0001;
 
 /* ---------- Zustand ---------- */
 
@@ -133,11 +107,7 @@ export function newFinance(): Finance {
     loans: [],
     banUntil: 0,
     repaidToday: 0,
-    premiumsToday: 0,
-    payoutsToday: 0,
-    ledger: { day: 0, repaid: 0, premiums: 0, payouts: 0 },
-    premiumsTotal: 0,
-    payoutsTotal: 0,
+    ledger: { day: 0, repaid: 0 },
   };
 }
 
@@ -375,28 +345,17 @@ export function tickFinance(state: GameState, map: MapDef): NewsItem[] {
   return news;
 }
 
-/** Tageszahlen der Bank und Versicherung festhalten (einmal um Mitternacht) */
+/** Tageszahlen der Bank festhalten (einmal um Mitternacht) */
 export function closeFinanceDay(state: GameState): void {
   const f = state.finance;
   if (!f) return;
-  f.ledger = { day: day(state), repaid: Math.round(f.repaidToday), premiums: Math.round(f.premiumsToday), payouts: Math.round(f.payoutsToday) };
+  f.ledger = { day: day(state), repaid: Math.round(f.repaidToday) };
   f.repaidToday = 0;
-  f.premiumsToday = 0;
-  f.payoutsToday = 0;
 }
 
-/* ---------- Versicherung ---------- */
+/* ---------- Gefahren unterwegs ---------- */
 
 const goodName = (g: string) => GOOD_BY_ID.get(g)?.name ?? g;
-
-export function cargoCost(ship: Ship): number {
-  return Object.values(ship.cargo).reduce((s, c) => s + c.cost, 0);
-}
-
-/** Schaden am Rumpf in Talern, gerechnet wie die Reparatur in der Werft */
-export function hullDamageValue(ship: Ship, condition: number): number {
-  return condition * shipClass(ship).price * 0.5;
-}
 
 /** Wie stark Schäden am Rumpf ausfallen: Kupferbeschlag und vorsichtiger Kapitän mildern */
 function hullFactor(ship: Ship): number {
@@ -410,57 +369,6 @@ function hullFactor(ship: Ship): number {
 function floodActive(state: GameState): boolean {
   const d = day(state);
   return state.events.some((e) => e.kind === 'hochwasser' && e.from <= d && e.until >= d);
-}
-
-/** Liegt das Schiff gerade knapp über Grund (weniger als 20 cm Wasser unter dem Kiel)? */
-function tightWater(state: GameState, map: MapDef, ship: Ship): boolean {
-  if (!ship.voyage) return false;
-  const { leg } = voyagePosition(ship.voyage);
-  const seg = effectiveSegments(state, map).find((s) => s.id === leg.seg);
-  return !!seg && segmentDepth(seg, state.waterLevel) - effectiveDraft(ship) < TIGHT_DEPTH;
-}
-
-/** Prämie je Fahrstunde bei der aktuellen Lage (im Hafen ohne die Gefahr knapper Tiefe) */
-export function premiumPerHour(state: GameState, map: MapDef, ship: Ship): number {
-  const price = shipClass(ship).price;
-  const cargo = cargoCost(ship);
-  const hull = price * 0.5 * hullFactor(ship);
-  let expected = 0;
-  if (state.ice) expected += ICE_CHANCE * (hull * ICE_DAMAGE * 1.5 + cargo * ICE_CARGO_CHANCE * 0.175);
-  if (floodActive(state)) expected += FLOOD_CHANCE * cargo * 0.2;
-  if (tightWater(state, map, ship)) expected += GROUND_RISK * hull * GROUND_DAMAGE;
-  return PREMIUM_LOADING * expected + PREMIUM_HULL_BASE * price + PREMIUM_CARGO_BASE * cargo;
-}
-
-export function setInsured(state: GameState, shipId: number, on: boolean): TradeResult {
-  const ship = state.ships.find((s) => s.id === shipId);
-  if (!ship) return fail('Unbekanntes Schiff.');
-  if (on && !ship.port) return fail('Versichern geht nur im Hafen.');
-  ship.insured = on;
-  finance(state);
-  return {
-    ok: true,
-    message: on ? `${ship.name} ist versichert. Die Prämie wird während der Fahrt fällig.` : `Die Versicherung für ${ship.name} ist gekündigt.`,
-    amount: 0,
-    taler: 0,
-  };
-}
-
-/**
- * Einen Schaden melden, direkt nachdem er eingetreten ist. Ist das Schiff versichert, wird erstattet:
- * `condition` ist der verlorene Zustand (0.03 = 3 %), `cargoValue` der Einkaufswert verlorener Ladung.
- * Gibt die Auszahlung zurück, 0 ohne Versicherung.
- */
-export function reportDamage(state: GameState, ship: Ship, peril: Peril, damage: { condition?: number; cargoValue?: number }): number {
-  if (!ship.insured) return 0;
-  const pay = Math.round(hullDamageValue(ship, Math.max(0, damage.condition ?? 0)) + Math.max(0, damage.cargoValue ?? 0));
-  if (pay <= 0) return 0;
-  const f = finance(state);
-  state.money += pay;
-  f.payoutsToday += pay;
-  f.payoutsTotal += pay;
-  addNews(state, 'haus', `Die Flussversicherung ersetzt ${pay} Taler für ${PERIL_NAME[peril]} der ${ship.name}.`);
-  return pay;
 }
 
 /** Zufall je Schiff und Spielstunde, unabhängig vom gemeinsamen Zufallsstrom */
@@ -500,30 +408,21 @@ function perilsAt(state: GameState, ship: Ship, hour: number): void {
     if (lost) parts.push(`${lost.amount} t ${goodName(lost.good)} verloren`);
     if (parts.length) {
       addNews(state, 'haus', `Eisgang! Treibeis rammt die ${ship.name}: ${parts.join(', ')}.`);
-      reportDamage(state, ship, 'eis', { condition: before - ship.condition, cargoValue: lost?.value ?? 0 });
     }
   }
   if (floodActive(state) && hourRoll(ship, hour, 5) < FLOOD_CHANCE) {
     const lost = loseCargo(ship, 0.1 + 0.2 * hourRoll(ship, hour, 6));
     if (lost) {
       addNews(state, 'haus', `Im Hochwasser geht auf der ${ship.name} Ladung über Bord: ${lost.amount} t ${goodName(lost.good)}.`);
-      reportDamage(state, ship, 'ladung', { cargoValue: lost.value });
     }
   }
 }
 
 /**
- * Eine Fahrstrecke von `dt` Stunden ab Spielstunde `from`: Prämie zahlen und je angefangener
+ * Eine Fahrstrecke von `dt` Stunden ab Spielstunde `from`: je angefangener
  * voller Stunde die Gefahren würfeln. Wird für jedes fahrende Schiff aufgerufen.
  */
-export function sailFinance(state: GameState, map: MapDef, ship: Ship, from: number, dt: number): void {
+export function sailPerils(state: GameState, ship: Ship, from: number, dt: number): void {
   if (dt <= 0) return;
-  if (ship.insured) {
-    const premium = premiumPerHour(state, map, ship) * dt;
-    const f = finance(state);
-    state.money -= premium;
-    f.premiumsToday += premium;
-    f.premiumsTotal += premium;
-  }
   for (let h = Math.floor(from) + 1; h <= from + dt; h++) perilsAt(state, ship, h);
 }

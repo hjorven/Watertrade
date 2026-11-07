@@ -1,6 +1,5 @@
 import { GOOD_BY_ID } from '../data/goods.ts';
-import { season, type Season } from './calendar.ts';
-import { day, type GameState, type RoutePlan, type RouteStop, type Ship, type TradeRoute } from './state.ts';
+import { day, type GameState, type RouteStop, type Ship, type TradeRoute } from './state.ts';
 
 /** Zeitraum der Routenauswertung in Tagen */
 export const ROUTE_BOOK_DAYS = 30;
@@ -8,50 +7,6 @@ export const ROUTE_BOOK_DAYS = 30;
 export const LOAD_RETRY_HOURS = 6;
 /** Länger wartet kein Kapitän auf Ladung, dann legt er trotzdem ab (Stunden) */
 export const MAX_LOAD_WAIT_HOURS = 5 * 24;
-/** Der Winterplan gilt anfangs in Herbst und Winter */
-export const DEFAULT_WINTER_SEASONS: Season[] = ['herbst', 'winter'];
-
-export const PLAN_NAME: Record<RoutePlan, string> = { sommer: 'Sommerplan', winter: 'Winterplan' };
-
-/** Halte-Liste eines Plans (nur lesen) */
-export function stopsOf(r: TradeRoute, plan: RoutePlan): RouteStop[] {
-  return plan === 'winter' ? (r.winterStops ?? []) : r.stops;
-}
-
-/** Hat die Route einen Winterplan, der wirklich gefahren werden kann? */
-export function hasWinterPlan(r: TradeRoute): boolean {
-  return (r.winterStops?.length ?? 0) >= 2;
-}
-
-export function winterSeasonsOf(r: TradeRoute): Season[] {
-  return r.winterSeasons ?? DEFAULT_WINTER_SEASONS;
-}
-
-/** Plan, der heute gilt: der Winterplan in seinen Jahreszeiten, sonst der Sommerplan */
-export function activePlan(state: GameState, r: TradeRoute): RoutePlan {
-  return hasWinterPlan(r) && winterSeasonsOf(r).includes(season(day(state))) ? 'winter' : 'sommer';
-}
-
-export function activeStops(state: GameState, r: TradeRoute): RouteStop[] {
-  return stopsOf(r, activePlan(state, r));
-}
-
-/**
- * Beim Jahreszeitenwechsel auf den anderen Plan umschalten. Das Schiff macht am Halt in seinem Hafen
- * weiter, falls der neue Plan dort hält, sonst beim ersten Halt.
- */
-export function syncPlan(state: GameState, r: TradeRoute, port: string): boolean {
-  const want = activePlan(state, r);
-  if ((r.plan ?? 'sommer') === want) return false;
-  r.plan = want;
-  const i = stopsOf(r, want).findIndex((s) => s.town === port);
-  r.next = i >= 0 ? i : 0;
-  r.retryAt = undefined;
-  r.loadingSince = undefined;
-  r.note = `${PLAN_NAME[want]} gilt jetzt`;
-  return true;
-}
-
 /** Wird dieser Halt beim aktuellen Pegel übersprungen? */
 export function stopSkipped(state: GameState, s: RouteStop): boolean {
   if (s.levelMin !== undefined && state.waterLevel < s.levelMin) return true;

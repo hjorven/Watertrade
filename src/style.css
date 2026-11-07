@@ -296,7 +296,11 @@ body {
   align-items: center;
   gap: 6px;
   flex: none;
-  padding: 5px 10px 5px 8px;
+  padding: 5px 9px;
+}
+
+.menu-btn span {
+  display: none;
 }
 
 /* ---------- 4. Kontorbuch ---------- */
@@ -558,6 +562,104 @@ body {
   color: var(--ink);
   font-weight: 700;
   border-bottom-color: var(--stamp);
+}
+
+/* Ort über den Reitern: einmal statt in jedem Reiter */
+.place-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 6px;
+}
+
+.place-head h2 {
+  margin: 0;
+  font-size: 23px;
+  line-height: 1.1;
+  font-weight: 700;
+  font-variant-caps: small-caps;
+  letter-spacing: 0.02em;
+}
+
+.place-head .stamp-small {
+  transform: translateY(-3px);
+}
+
+/* Unterreiter einer Gruppe (Hafen: Kontor, Werft, Kneipe) als kleine Schalterleiste */
+.subtabs {
+  display: flex;
+  gap: 4px;
+  margin: -4px 0 12px;
+}
+
+.subtab {
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 2px 11px 3px;
+  cursor: pointer;
+}
+
+.subtab:hover {
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.subtab.on {
+  color: var(--paper);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+/* Eingeklappte Erklärungen */
+details.explain {
+  margin: 8px 0 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+details.explain summary {
+  display: inline-block;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  font-size: 12.5px;
+  color: var(--water);
+  border-bottom: 1px dotted currentColor;
+}
+
+details.explain summary::-webkit-details-marker {
+  display: none;
+}
+
+details.explain summary::before {
+  content: '? ';
+  font-weight: 700;
+}
+
+details.explain > div {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--line);
+  background: var(--water-soft);
+  line-height: 1.45;
+}
+
+details.explain > div p {
+  margin: 0 0 6px;
+}
+
+details.explain > div p:last-child {
+  margin-bottom: 0;
+}
+
+.town-desc {
+  margin: 4px 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
 }
 
 /* Seitlich rollbare Leisten (Reiter, Bücher in der Kopfzeile) blenden an der Seite aus, auf der noch etwas verborgen ist.
@@ -981,6 +1083,16 @@ input::placeholder {
   background: linear-gradient(to bottom, #3b2d21, var(--ink));
   color: var(--paper);
   border-color: var(--ink);
+}
+
+.market .acts.trade .sellall:disabled {
+  background: transparent;
+  color: var(--ink-3);
+  border-color: var(--line-soft);
+}
+
+.market th.acts-head {
+  text-align: right;
 }
 
 .market.kontor .acts .btn {

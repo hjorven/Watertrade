@@ -1,26 +1,24 @@
-import { GOOD_BY_ID, GOODS } from '../data/goods.ts';
+import { GOOD_BY_ID } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { RIVAL_BY_ID } from '../data/rivals.ts';
 import {
   canBid,
-  buyoutCost,
-  canBuyShares,
   canOfferPact,
+  canTakeOver,
+  suggestedPact,
+  takeoverCost,
   moodOf,
   nextBid,
-  nextShareCost,
   pactUsed,
   PACT_DAYS,
   PACT_TOLERANCE,
   pactPenalty,
   pactWith,
-  SHARE_BLOCK,
-  shareSaleValue,
-  TAKEOVER_SHARE,
 } from '../sim/rivalry.ts';
 import { day, type GameState, type RivalState } from '../sim/state.ts';
+import { explain } from './explain.ts';
 
-/** Abschnitt im Handelsregister: Verhältnis zu den Häusern, Abkommen, Anteile, Versteigerung */
+/** Abschnitt im Handelsregister: Verhältnis zu den Häusern, Abkommen, Übernahme, Versteigerung */
 
 const fmt = (n: number) => Math.round(n).toLocaleString('de-DE');
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
@@ -56,29 +54,18 @@ function houseCard(state: GameState, map: MapDef, r: RivalState): string {
     pact = `<p class="note">Abkommen bis Tag ${p.until}: Du lässt <b>${goodName(p.playerGood)}</b> in Ruhe (verkauft seitdem ${Math.floor(pactUsed(state, p))} von ${PACT_TOLERANCE} t Restposten), sie lassen <b>${goodName(p.houseGood)}</b> in Ruhe.</p>
       <div class="row-btns"><button class="btn" data-act="cmd" data-cmd="pactEnd" data-house="${r.id}">Abkommen kündigen</button></div>`;
   } else {
-    const mine = def.turf.map((g) => `<option value="${g}">${goodName(g)}</option>`).join('');
-    const theirs = GOODS.filter((g) => !def.turf.includes(g.id))
-      .map((g) => `<option value="${g.id}">${g.name}</option>`)
-      .join('');
-    const why = canOfferPact(state, r.id, def.turf[0], GOODS.find((g) => !def.turf.includes(g.id))!.id);
-    const blocked = why && !why.includes('Revier von') && !why.includes('Kerngeschäft') ? why : null;
-    pact = `<div class="order-form" data-form>
-        <span>Ich lasse</span><select name="mine" aria-label="Ware, die du in Ruhe lässt">${mine}</select>
-        <span>in Ruhe, ihr</span><select name="theirs" aria-label="Ware, die das Haus in Ruhe lässt">${theirs}</select>
-        <button class="btn" data-act="cmd" data-cmd="pactOffer" data-house="${r.id}" ${blocked ? `disabled title="${esc(blocked)}"` : ''}>Abkommen anbieten</button>
-      </div>${blocked ? `<p class="fine">${blocked}</p>` : ''}`;
+    const offer = suggestedPact(state, r.id);
+    const why = offer ? canOfferPact(state, r.id, offer.playerGood, offer.houseGood) : 'Kein Abkommen möglich.';
+    pact = offer
+      ? `<div class="row-btns"><button class="btn" data-act="cmd" data-cmd="pactOffer" data-house="${r.id}" data-mine="${offer.playerGood}" data-theirs="${offer.houseGood}" ${why ? `disabled title="${esc(why)}"` : ''}>Abkommen anbieten<small>Du lässt ${goodName(offer.playerGood)} in Ruhe, sie ${goodName(offer.houseGood)}</small></button></div>${why ? `<p class="fine">${why}</p>` : ''}`
+      : '';
   }
 
-  // Anteile
-  const shares = r.shares ?? 0;
-  const price = nextShareCost(r);
-  const last = shares + SHARE_BLOCK > TAKEOVER_SHARE;
-  const why = canBuyShares(state, r.id);
-  const buyLabel = shares + SHARE_BLOCK > TAKEOVER_SHARE ? 'Übernehmen' : `${SHARE_BLOCK} % kaufen`;
-  const sharesHtml = `<p class="note">Deine Anteile: <b>${shares} %</b>${shares ? `, Wert ${fmt(shareSaleValue(r) * (shares / SHARE_BLOCK))} Taler` : ''}. Ab mehr als ${TAKEOVER_SHARE} % gehört dir das Haus mit Schiffen, Kontoren und Kasse (oder Schulden), die übrigen Teilhaber werden dann ausgezahlt.${last ? ` Im Preis stecken ${fmt(buyoutCost(r))} Taler Auszahlung.` : ''}</p>
-    <div class="row-btns">
-      <button class="btn ${shares + SHARE_BLOCK > TAKEOVER_SHARE ? 'primary' : ''}" data-act="cmd" data-cmd="buyShares" data-house="${r.id}" ${why ? `disabled title="${esc(why)}"` : ''}>${buyLabel}<small>${fmt(price)} Taler</small></button>
-      ${shares ? `<button class="btn" data-act="cmd" data-cmd="sellShares" data-house="${r.id}">${SHARE_BLOCK} % verkaufen<small>${fmt(shareSaleValue(r))} Taler</small></button>` : ''}
+  // Übernahme in einem Zug
+  const price = takeoverCost(r);
+  const why = canTakeOver(state, r.id);
+  const sharesHtml = `<div class="row-btns">
+      <button class="btn" data-act="cmd" data-cmd="buyHouse" data-house="${r.id}" ${why ? `disabled title="${esc(why)}"` : ''}>Haus übernehmen<small>${fmt(price)} Taler, Kasse und Schulden gehen mit</small></button>
     </div>${why && !why.startsWith('Das kostet') ? `<p class="fine">${why}</p>` : ''}`;
 
   return `<div class="contract-box house-box">
@@ -114,7 +101,7 @@ export function renderRivalry(state: GameState, map: MapDef): string {
     .join('');
   const ban = (state.pactBanUntil ?? 0) >= day(state) ? `<p class="note">Nach deinem Vertragsbruch schließt bis Tag ${state.pactBanUntil} niemand ein Abkommen mit dir.</p>` : '';
   return `<h3>Die anderen Häuser</h3>
-    <p class="fine">Wer einem Haus in seinem Revier Konkurrenz macht, bekommt Ärger: Erst drückt es die Preise, dann kauft es die Märkte leer. Ein Abkommen gilt ${PACT_DAYS} Tage. Wer es bricht, zahlt ${fmt(pactPenalty(state))} Taler Strafe und verliert das Vertrauen am Fluss.</p>
+    ${explain('haeuser', `<p>Wer einem Haus in seinem Revier Konkurrenz macht, bekommt Ärger: Erst drückt es die Preise, dann kauft es die Märkte leer. Ein Abkommen gilt ${PACT_DAYS} Tage. Wer es bricht, zahlt ${fmt(pactPenalty(state))} Taler Strafe und verliert das Vertrauen am Fluss.</p>`, 'Revier und Abkommen')}
     ${ban}
     ${auctionBox(state, map)}
     ${state.rivals.map((r) => houseCard(state, map, r)).join('')}

@@ -1,4 +1,4 @@
-export type Trait = 'vorsichtig' | 'schnell' | 'haendler' | 'schmuggler' | 'treidelmeister';
+export type Trait = 'vorsichtig' | 'schnell' | 'haendler' | 'treidelmeister';
 
 /**
  * Eigenschaften der Kapitäne.
@@ -9,7 +9,6 @@ export const TRAITS: Record<Trait, { name: string; text: string; wage: number; w
   vorsichtig: { name: 'vorsichtig', text: 'Halber Verschleiß am Schiff', wage: 15, weight: 34 },
   treidelmeister: { name: 'Treidelmeister', text: 'Bergwärts 20 % schneller', wage: 18, weight: 24 },
   schnell: { name: 'schneidig', text: '12 % schneller', wage: 20, weight: 20 },
-  schmuggler: { name: 'Schmuggler', text: 'Fährt am Zoll vorbei, kann aber erwischt werden: Strafe und Beschlagnahme', wage: 22, weight: 12 },
   haendler: { name: 'Händlerblut', text: '4 % bessere Preise', wage: 26, weight: 10 },
 };
 
@@ -18,7 +17,7 @@ export const MAX_WAGE = 40;
 
 /**
  * Erfahrung: Ab diesen gefahrenen Kilometern steigt ein Kapitän auf.
- * Stufe 1 lernt eine zweite Eigenschaft, Stufe 2 ist Altmeister (5 % schneller, seltener erwischt).
+ * Stufe 1 lernt eine zweite Eigenschaft, Stufe 2 ist Altmeister (5 % schneller).
  */
 export const CAPTAIN_RANKS = [
   { name: 'Jungkapitän', km: 0, wage: 0 },

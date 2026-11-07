@@ -1,5 +1,5 @@
 import { KONTOR_PRICE } from '../data/buildings.ts';
-import { GOOD_BY_ID } from '../data/goods.ts';
+import { GOOD_BY_ID, GOODS } from '../data/goods.ts';
 import type { MapDef } from '../data/maps/valley.ts';
 import { RIVAL_BY_ID } from '../data/rivals.ts';
 import { SHIPS } from '../data/ships.ts';
@@ -248,6 +248,21 @@ export function canOfferPact(state: GameState, house: string, playerGood: string
   if (!GOOD_BY_ID.has(houseGood)) return 'Unbekannte Ware.';
   if (def.turf.includes(houseGood)) return `${goodName(houseGood)} gehört zum Kerngeschäft von ${def.name}, das geben sie nicht her.`;
   return null;
+}
+
+/**
+ * Das naheliegende Abkommen mit einem Haus: Du lässt die Revierware liegen, von der du am meisten verkaufst,
+ * das Haus im Gegenzug deine wichtigste Ware außerhalb seines Reviers.
+ */
+export function suggestedPact(state: GameState, house: string): { playerGood: string; houseGood: string } | null {
+  const def = RIVAL_BY_ID.get(house);
+  if (!def || !def.turf.length) return null;
+  const bySold = (a: string, b: string) => soldTotal(state, b) - soldTotal(state, a);
+  const playerGood = [...def.turf].sort(bySold)[0];
+  const others = GOODS.map((g) => g.id).filter((g) => !def.turf.includes(g));
+  if (!others.length) return null;
+  const houseGood = [...others].sort(bySold)[0];
+  return { playerGood, houseGood };
 }
 
 /** Abkommen anbieten: Der Spieler lässt `playerGood` liegen, das Haus `houseGood` */
@@ -512,13 +527,42 @@ export function buyShares(state: GameState, map: MapDef, house: string): TradeRe
   return { ok: true, message: `${SHARE_BLOCK} % von ${houseName(house)} gekauft, du hältst jetzt ${r.shares} %.`, amount: 0, taler: cost };
 }
 
-export function sellShares(state: GameState, house: string): TradeResult {
+/**
+ * Gesamtpreis einer Übernahme in einem Zug: alle Anteilsblöcke bis über die Hälfte samt Auszahlung
+ * der übrigen Teilhaber. Ohne Kasse und Schulden des Hauses, die mit übergehen.
+ */
+export function takeoverCost(r: RivalState): number {
+  const probe: RivalState = { ...r };
+  let cost = 0;
+  for (;;) {
+    cost += nextShareCost(probe);
+    const next = (probe.shares ?? 0) + SHARE_BLOCK;
+    if (next > TAKEOVER_SHARE) return cost;
+    probe.shares = next;
+  }
+}
+
+export function canTakeOver(state: GameState, house: string): string | null {
   const r = findRival(state, house);
-  if (!r || !r.shares) return fail('Du hältst keine Anteile an diesem Haus.');
-  const value = shareSaleValue(r);
-  state.money += value;
-  r.shares -= SHARE_BLOCK;
-  return { ok: true, message: `${SHARE_BLOCK} % von ${houseName(house)} verkauft für ${value} Taler.`, amount: 0, taler: value };
+  if (!r) return 'Dieses Haus gibt es nicht mehr.';
+  if ((r.anger ?? 0) >= ANGER_REFUSE && r.money >= 0) return `${houseName(house)} verhandelt nicht mit dir, solange sie so verärgert sind.`;
+  const cost = takeoverCost(r);
+  if (state.money < cost) return `Das kostet ${cost} Taler.`;
+  if (state.money - cost + r.money < 0) return `Du müsstest ${Math.round(-r.money)} Taler Schulden übernehmen, dafür reicht die Kasse nicht.`;
+  return null;
+}
+
+/** Ein Haus in einem Zug kaufen (die Anteilsblöcke bleiben nur die Rechengrundlage für den Preis) */
+export function buyHouse(state: GameState, map: MapDef, house: string): TradeResult {
+  const why = canTakeOver(state, house);
+  if (why) return fail(why);
+  let paid = 0;
+  for (;;) {
+    const res = buyShares(state, map, house);
+    if (!res.ok) return res;
+    paid += res.taler;
+    if (!findRival(state, house)) return { ok: true, message: `${houseName(house)} gehört jetzt dir. Schiffe, Kontore und Kasse sind deine.`, amount: 0, taler: paid };
+  }
 }
 
 /** Das Haus geht mit allem, was es hat, an den Spieler */

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { VALLEY } from '../data/maps/valley.ts';
-import { SHIPS } from '../data/ships.ts';
 import {
   BAN_DAYS,
   creditLeft,
@@ -16,12 +15,9 @@ import {
   MAX_MISSED,
   payOverdueNow,
   payoffAmount,
-  premiumPerHour,
   RATE_DAYS,
   repayLoan,
-  reportDamage,
-  sailFinance,
-  setInsured,
+  sailPerils,
   takeLoan,
   totalDebt,
 } from './finance.ts';
@@ -151,60 +147,26 @@ describe('Stadtbank', () => {
   it('übersteht Speichern und Laden', () => {
     const s = game();
     takeLoan(s, BANK, 2500, 30);
-    s.ships[0].insured = true;
     const save = deserialize(serialize({ version: SAVE_VERSION, savedAt: '', mode: 'frei', completedGoals: [], state: s }))!;
     const t = upgradeState(save.state, VALLEY);
     expect(t.finance!.loans.length).toBe(1);
-    expect(t.ships[0].insured).toBe(true);
   });
 });
 
-describe('Versicherung', () => {
-  it('ersetzt gemeldete Schäden nur versicherten Schiffen', () => {
-    const s = game();
-    const ship = s.ships[0];
-    expect(reportDamage(s, ship, 'grund', { condition: 0.04 })).toBe(0);
-    setInsured(s, ship.id, true);
-    const before = s.money;
-    const pay = reportDamage(s, ship, 'grund', { condition: 0.04, cargoValue: 100 });
-    expect(pay).toBe(Math.round(0.04 * SHIPS[ship.type].price * 0.5 + 100));
-    expect(s.money).toBe(before + pay);
-  });
-
-  it('verlangt im Eis und Hochwasser mehr Prämie', () => {
-    const s = game();
-    const ship = s.ships[0];
-    ship.cargo.holz = { amount: 40, cost: 800 };
-    const calm = premiumPerHour(s, VALLEY, ship);
-    s.ice = true;
-    const ice = premiumPerHour(s, VALLEY, ship);
-    s.ice = false;
-    s.events.push({ id: 99, kind: 'hochwasser', from: 1, until: 9, value: 1 });
-    const flood = premiumPerHour(s, VALLEY, ship);
-    expect(calm).toBeGreaterThan(0);
-    expect(ice).toBeGreaterThan(calm * 2);
-    expect(flood).toBeGreaterThan(calm * 2);
-  });
-
-  it('Prämien decken auf Dauer die Schäden aus Eisgang und Hochwasser', () => {
+describe('Gefahren unterwegs', () => {
+  it('Eisgang und Hochwasser kosten Rumpf und Ladung', () => {
     const s = game(100000);
     const ship = s.ships[0];
-    setInsured(s, ship.id, true);
     s.ice = true;
     s.events.push({ id: 99, kind: 'hochwasser', from: 1, until: 100000, value: 0 });
     ship.voyage = { from: BANK, to: 'weidenhof', legs: [{ seg: 'alten-weiden', from: BANK, to: 'weidenhof', hours: 1e6, downstream: true }], hours: 1e6, elapsed: 0 };
     ship.port = null;
-    const f = () => s.finance!;
-    for (let h = 0; h < 20000; h++) {
-      ship.condition = 1;
-      ship.cargo = { holz: { amount: 40, cost: 800 } };
-      sailFinance(s, VALLEY, ship, s.hour, 1);
-      s.hour += 1;
-    }
-    // Schäden kommen vor, die Versicherung macht im Schnitt keinen Verlust, ist aber auch nicht teurer als das Doppelte
-    expect(f().payoutsTotal).toBeGreaterThan(0);
-    expect(f().premiumsTotal).toBeGreaterThan(f().payoutsTotal);
-    expect(f().premiumsTotal).toBeLessThan(f().payoutsTotal * 2);
+    ship.cargo = { holz: { amount: 40, cost: 800 } };
+    const money = s.money;
+    sailPerils(s, ship, 0, 2000);
+    expect(ship.condition).toBeLessThan(1);
+    expect(ship.cargo.holz?.amount ?? 0).toBeLessThan(40);
+    expect(s.money).toBe(money);
   });
 
   it('würfelt unabhängig vom gemeinsamen Zufallsstrom und gleichmäßig', () => {
@@ -221,7 +183,7 @@ describe('Versicherung', () => {
     expect(flood / 50000).toBeGreaterThan(FLOOD_CHANCE * 0.7);
     expect(flood / 50000).toBeLessThan(FLOOD_CHANCE * 1.3);
     const rng = s.rng;
-    sailFinance(s, VALLEY, ship, 0, 5);
+    sailPerils(s, ship, 0, 5);
     expect(s.rng).toBe(rng);
   });
 });

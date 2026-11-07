@@ -108,15 +108,6 @@ describe('Wasserbau: Gebühren', () => {
     // das Haus selbst fährt frei
     expect(rivalPasses(s, 'kesselbrueck', 'muehlheim', 1)).toBe(0);
   });
-
-  it('der Schmuggler spart den Zoll, aber nicht die Gebühr', () => {
-    const s = newGame(VALLEY, { startTown: 'kesselbrueck', money: 5000, rivals: true, epoch: 2, seed: 3 });
-    s.works.push({ id: 'bruecke-kessel', started: 1, done: true, owner: s.rivals[0].id, fee: 'normal' });
-    s.ships[0].captain = { id: 1, name: 'Test', trait: 'schmuggler', wage: 5, hire: 0 };
-    s.events.push({ id: 99, kind: 'zoll', from: 1, until: 30, seg: 'kessel-muehl', value: 40 });
-    const plan = planVoyage(s, VALLEY, 1, 'muehlheim');
-    expect(plan?.ok && plan.voyage.toll).toBe(passageFee(s.works[0], SHIPS.treidelkahn.capacity));
-  });
 });
 
 describe('Wasserbau: Gemeinschaftsbau', () => {

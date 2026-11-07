@@ -9,6 +9,7 @@ import { season, SEASON_NAME } from '../sim/calendar.ts';
 import { day, type GameState } from '../sim/state.ts';
 import { councilAllowed, foundationAllowed, rankIndex, standing, townhouseAllowed } from '../sim/standing.ts';
 import { SEASON_NEEDS, needs } from '../sim/towns.ts';
+import { explain } from './explain.ts';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('de-DE');
 const goodName = (id: string) => GOOD_BY_ID.get(id)?.name ?? id;
@@ -99,9 +100,9 @@ export function renderRathaus(state: GameState, town: TownDef): string {
   return `<div class="town-info">
       <span>Ansehen <b>${RANKS[r].name}</b> · ${pct} von 100</span>
       <div class="meter" title="Ansehen ${pct}"><div style="width:${pct}%"></div>${next ? `<i style="left:${next.from}%"></i>` : ''}</div>
-      <small>${next ? `Noch ${Math.ceil(next.from - pts)} bis "${next.name}".` : 'Höchster Rang erreicht.'} Ansehen bringen Lieferungen in knappe Märkte, erfüllte Aufträge und Bier und Brot beim Stadtfest. Verdientes Ansehen verblasst langsam, gestiftetes bleibt.</small>
+      <small>${next ? `Noch ${Math.ceil(next.from - pts)} bis "${next.name}": ${next.unlocks}.` : 'Höchster Rang erreicht.'}</small>
     </div>
-    <ul class="plain ranks">${ranks}</ul>
+    ${explain('ansehen', `<p>Ansehen bringen Lieferungen in knappe Märkte, erfüllte Aufträge und Bier und Brot beim Stadtfest. Verdientes Ansehen verblasst langsam, gestiftetes bleibt.</p><ul class="plain ranks">${ranks}</ul>`, 'Was bringt Ansehen?')}
     <h3>Stiftungen</h3>
     ${foundations}
     <h3>Stadthaus und Stadtrat</h3>

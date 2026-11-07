@@ -3,7 +3,6 @@ import type { MapDef } from '../data/maps/valley.ts';
 import { GOOD_BY_ID } from '../data/goods.ts';
 import { SHIPS } from '../data/ships.ts';
 import { season, type Season } from './calendar.ts';
-import { reportDamage } from './finance.ts';
 import { segmentDepth } from './river.ts';
 import {
   addNews,
@@ -238,8 +237,6 @@ function applyGrounding(state: GameState, map: MapDef, ship: Ship, at: Voyage, v
   const loss = GROUNDING_WEAR * (WEAR_PER_HOUR > 0 ? wearRate(ship) / WEAR_PER_HOUR : 1);
   const before = ship.condition;
   ship.condition = Math.max(0, ship.condition - loss);
-  // Versicherung ersetzt den Schaden am Rumpf (finance.ts)
-  reportDamage(state, ship, 'grund', { condition: before - ship.condition });
   const { leg } = voyagePosition(at);
   const name = (id: string) => map.towns.find((t) => t.id === id)?.name ?? id;
   const lost = Math.round((before - ship.condition) * 100);
