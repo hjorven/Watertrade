@@ -10,7 +10,7 @@ import { buyCost, price, SELL_FACTOR, sellRevenue } from './economy.ts';
 import { fuelOf, MIN_FRESH, PERISH, SHIPS } from '../data/ships.ts';
 import { hasYard, repair, timberPlan } from './fleet.ts';
 import { bestRaftPlan } from './rafting.ts';
-import { goalDone } from './goals.ts';
+import { goalDone, netDelivered } from './goals.ts';
 import { PROJECT_BY_ID } from '../data/projects.ts';
 import { startProject } from './works.ts';
 import { FUEL_DEALER_FACTOR, sailingHours, wearRate } from './voyage.ts';
@@ -583,7 +583,8 @@ export function runCanalChapter(map: MapDef, chapter: Chapter, maxDays: number, 
         if (source && state.money > 1500 && depart(state, map, ship.id, source.id)) continue;
       }
       // Kanal offen: Getreide aus dem Tal nach Nordhafen
-      if (open && north?.type === 'deliver' && (state.stats.delivered[north.town]?.[north.good] ?? 0) < north.amount && coalOk(north.town)) {
+      // netto wie das Ziel: in Nordhafen gekauft und dort zurückverkauft zählt nicht
+      if (open && north?.type === 'deliver' && ship.port !== north.town && netDelivered(state, north.town, north.good) < north.amount && coalOk(north.town)) {
         const g = state.markets[ship.port][north.good];
         if (g && g.stock > 20) {
           buy(state, ship.id, north.good, Math.min(capacityOf(ship), Math.floor(g.stock) - 5, north.amount));
